@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:cognitive-identity:1.0.0",
+  "title": "CognitiveIdentity",
+  "description": "Kernel-issued process descriptor for every cognitive actor. Spec: spec/kernel/cognitive-identity.md",
+  "type": "object",
+  "required": ["cid", "unit_type", "version", "trust_level", "created_at"],
+  "properties": {
+    "cid": { "type": "string", "pattern": "^cog-[0-9a-f]{12}$" },
+    "unit_type": {
+      "type": "string",
+      "description": "agent | subagent | tool | model | memory-writer | workflow | human | external-runtime | evolution-experiment | synthetic"
+    },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "capabilities": { "type": "array", "items": { "type": "string" } },
+    "trust_level": { "type": "integer", "minimum": 0, "maximum": 10 },
+    "parent_cid": { "type": ["string", "null"] },
+    "lineage": { "type": "array", "items": { "type": "string" } },
+    "tenant_id": { "type": ["string", "null"] },
+    "created_at": { "type": "string", "format": "date-time" },
+    "capability_envelope_ref": { "type": ["string", "null"] },
+    "governance_policies": { "type": "array", "items": { "type": "string" } },
+    "public_key": { "type": ["string", "null"] },
+    "attestation_chain": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@inevitable/memory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Memory foundations: memory-mutation store contract and a validating in-memory reference store.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/shared": "workspace:*",
+    "@inevitable/protocols": "workspace:*"
+  }
+}

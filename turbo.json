@@ -1,0 +1,34 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "stream",
+  "tasks": {
+    "codegen": {
+      "inputs": ["schemas/**/*.json", "scripts/**/*.ts"],
+      "outputs": ["src/generated/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["codegen", "^typecheck"],
+      "inputs": ["src/**", "tests/**", "scripts/**", "tsconfig*.json", "schemas/**"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["codegen"],
+      "inputs": ["src/**", "tests/**", "fixtures/**", "schemas/**", "vitest.config.*"],
+      "outputs": ["coverage/**"]
+    },
+    "validate:schemas": {
+      "dependsOn": ["codegen"],
+      "inputs": ["schemas/**", "fixtures/**", "scripts/**"],
+      "outputs": []
+    },
+    "lint": {
+      "inputs": ["src/**", "tests/**", "scripts/**", "*.{js,mjs,cjs,ts}"],
+      "outputs": []
+    },
+    "build": {
+      "dependsOn": ["codegen", "^build"],
+      "inputs": ["src/**", "tsconfig*.json"],
+      "outputs": ["dist/**"]
+    }
+  }
+}

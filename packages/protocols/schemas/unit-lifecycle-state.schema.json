@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:unit-lifecycle-state:1.0.0",
+  "title": "UnitLifecycleState",
+  "description": "The 13-state cognitive unit lifecycle. Spec: spec/runtime/cognitive-unit-runtime.md",
+  "type": "string",
+  "enum": [
+    "Registered",
+    "Admitted",
+    "Scheduled",
+    "Hydrating",
+    "Ready",
+    "Executing",
+    "Checkpointing",
+    "Reflecting",
+    "Publishing",
+    "Suspended",
+    "Recovering",
+    "Retired",
+    "Quarantined"
+  ]
+}

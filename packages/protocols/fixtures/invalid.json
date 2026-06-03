@@ -1,0 +1,93 @@
+{
+  "cos:protocol:cognitive-identity:1.0.0": [
+    {
+      "reason": "cid does not match ^cog-[0-9a-f]{12}$",
+      "payload": {
+        "cid": "agent-1",
+        "unit_type": "agent",
+        "version": "1.0.0",
+        "trust_level": 8,
+        "created_at": "2026-06-02T10:00:00.000Z"
+      }
+    },
+    {
+      "reason": "trust_level above maximum 10",
+      "payload": {
+        "cid": "cog-0123456789ab",
+        "unit_type": "agent",
+        "version": "1.0.0",
+        "trust_level": 99,
+        "created_at": "2026-06-02T10:00:00.000Z"
+      }
+    }
+  ],
+  "cos:protocol:cognition-packet:1.0.0": [
+    {
+      "reason": "missing required source_cid",
+      "payload": {
+        "packet_id": "cp-00aa11bb22cc",
+        "schema_version": "1.0.0",
+        "packet_type": "response",
+        "timestamp": "2026-06-02T10:00:00.000Z",
+        "hlc": "0-0-node-a"
+      }
+    }
+  ],
+  "cos:protocol:cognitive-event:1.0.0": [
+    {
+      "reason": "classification not in enum",
+      "payload": {
+        "event_id": "evt-00aa11bb22cc",
+        "event_type": "agent.completed",
+        "schema_version": "1.0.0",
+        "timestamp": "2026-06-02T10:00:00.000Z",
+        "hlc": "0-0-node-a",
+        "producer_cid": "cog-0123456789ab",
+        "producer_type": "agent",
+        "classification": "ultrasecret",
+        "payload": {}
+      }
+    }
+  ],
+  "cos:protocol:capability-envelope:1.0.0": [
+    {
+      "reason": "missing required granted_by",
+      "payload": {
+        "envelope_id": "env-1",
+        "granted_to": "cog-0123456789ab",
+        "expires_at": "2026-06-02T11:00:00.000Z"
+      }
+    }
+  ],
+  "cos:protocol:governance-decision:1.0.0": [
+    {
+      "reason": "decision not in enum",
+      "payload": {
+        "decision_id": "dec-1",
+        "subject_cid": "cog-0123456789ab",
+        "resource": "tool:web_search",
+        "action": "invoke",
+        "decision": "maybe",
+        "policy_id": "GOV-010",
+        "policy_version": "1.0.0"
+      }
+    }
+  ],
+  "cos:protocol:memory-mutation:1.0.0": [
+    {
+      "reason": "mutation_type not in enum",
+      "payload": {
+        "mutation_id": "mut-1",
+        "proposer_cid": "cog-0123456789ab",
+        "memory_layer": "semantic",
+        "mutation_type": "frobnicate",
+        "target": {},
+        "evidence": [],
+        "confidence": 0.5
+      }
+    }
+  ],
+  "cos:protocol:unit-lifecycle-state:1.0.0": [
+    { "reason": "not a valid lifecycle state", "payload": "Sleeping" }
+  ]
+}

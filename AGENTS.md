@@ -1,4 +1,4 @@
-# The Inevitable - Claude Project Instructions
+# The Inevitable - Codex Project Instructions
 
 The Inevitable is not a normal AI app. It is a long-term, spec-driven cognitive operating system effort for education, distributed cognition, persistent memory, multi-agent orchestration, and continuously evolving intelligence infrastructure.
 
@@ -225,13 +225,4 @@ Never:
 
 ## Implementation Posture
 
-The repository is transitioning from completed Phase 1D substrate implementation into Phase 1E
-product-cognition implementation. The feature-spec suite F01-F16 is authored under
-`spec/product/features/` (F16 — The Cognitive Surface — adds the convergent multimodal-substrate
-spec, backed by the deep-research dossier in
-`spec/research/cognitive-surface-frontier-research.md`); `@inevitable/product-cognition` now wires
-the first product slice through onboarding, graph-backed learning paths, MVP agent manifests,
-scheduler-admitted runtime dispatch, deterministic MVP unit execution, a no-LLM explanation/practice
-loop, and mastery checkpoints. Next work should add packet-level trace capture and supervisor-routed
-MVP agent flow. Every implementation decision must be derivable from the spec system or must update
-the spec system with a clear rationale.
+The repository is entering Phase 1A implementation: spec infrastructure, meta-governance, indexes, reference-repo learning, ADRs, and implementation traceability. Do not jump into broad product code, UI, agents, or kernel runtime before the relevant Phase 1B/1C specs exist. Every implementation decision must be derivable from the spec system or must update the spec system with a clear rationale.

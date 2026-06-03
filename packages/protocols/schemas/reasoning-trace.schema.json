@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:reasoning-trace:1.0.0",
+  "title": "ReasoningTrace",
+  "description": "Structured execution record of how a unit reached an output. Spec: spec/protocols/reasoning-trace-protocol.md",
+  "type": "object",
+  "required": ["trace_id", "producer_cid", "task_interpretation", "strategy", "claims", "decision"],
+  "properties": {
+    "trace_id": { "type": "string" },
+    "producer_cid": { "type": "string" },
+    "session_id": { "type": ["string", "null"] },
+    "task_interpretation": { "type": "string" },
+    "strategy": {
+      "type": "string",
+      "description": "chain | tree | graph | debate | reflection | planner-executor | symbolic | retrieval-grounded | simulation | causal | socratic | consensus"
+    },
+    "retrieved_context": {
+      "type": "array",
+      "items": { "type": "object" },
+      "description": "summaries + provenance, not raw private memory"
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["claim_id", "statement", "confidence"],
+        "properties": {
+          "claim_id": { "type": "string" },
+          "statement": { "type": "string" },
+          "evidence": { "type": "array", "items": { "type": "object" } },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "support_status": {
+            "type": "string",
+            "enum": ["supported", "weakly_supported", "contested", "unsupported"]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "tool_calls": { "type": "array", "items": { "type": "object" } },
+    "uncertainty_estimate": { "type": "number", "minimum": 0, "maximum": 1 },
+    "alternatives_considered": { "type": "array", "items": { "type": "object" } },
+    "governance_checks": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "GovernanceDecision ids"
+    },
+    "decision": { "type": "string" },
+    "self_critique": { "type": ["string", "null"] },
+    "determinism_level": { "type": "string", "enum": ["D0", "D1", "D2", "D3", "D4"] }
+  },
+  "additionalProperties": false
+}

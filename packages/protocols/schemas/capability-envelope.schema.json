@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:capability-envelope:1.0.0",
+  "title": "CapabilityEnvelope",
+  "description": "Policy-granted bounds on what a cognitive unit may do. Spec: spec/kernel/capability-envelope.md",
+  "type": "object",
+  "required": ["envelope_id", "granted_to", "granted_by", "expires_at"],
+  "properties": {
+    "envelope_id": { "type": "string" },
+    "granted_to": { "type": "string", "description": "CID" },
+    "granted_by": { "type": "string", "description": "policy or authority CID" },
+    "tools_allowed": { "type": "array", "items": { "type": "string" } },
+    "memory_scopes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "readable/writable memory layers"
+    },
+    "models_allowed": { "type": "array", "items": { "type": "string" } },
+    "max_spawn_depth": { "type": "integer", "minimum": 0 },
+    "max_child_units": { "type": "integer", "minimum": 0 },
+    "network_access": { "type": "boolean" },
+    "cost_ceiling_usd": { "type": "number", "minimum": 0 },
+    "latency_ceiling_ms": { "type": ["integer", "null"] },
+    "data_classification_ceiling": {
+      "type": "string",
+      "enum": ["public", "internal", "sensitive", "restricted"]
+    },
+    "regions_allowed": { "type": "array", "items": { "type": "string" } },
+    "human_review_required_for": { "type": "array", "items": { "type": "string" } },
+    "expires_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

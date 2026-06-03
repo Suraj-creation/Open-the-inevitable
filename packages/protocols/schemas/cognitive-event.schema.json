@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:cognitive-event:1.0.0",
+  "title": "CognitiveEvent",
+  "description": "Immutable, causally-ordered record of something that happened. Spec: spec/protocols/cognitive-event-protocol.md",
+  "type": "object",
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "producer_cid",
+    "producer_type",
+    "timestamp",
+    "hlc",
+    "classification",
+    "payload"
+  ],
+  "properties": {
+    "event_id": { "type": "string", "pattern": "^evt-[0-9a-f]+$" },
+    "event_type": { "type": "string", "description": "hierarchical: family.subdomain.action" },
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "hlc": { "type": "string" },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "global monotonic from the stream"
+    },
+    "causation_id": { "type": ["string", "null"] },
+    "correlation_id": { "type": ["string", "null"] },
+    "tenant_id": { "type": ["string", "null"] },
+    "session_id": { "type": ["string", "null"] },
+    "workflow_id": { "type": ["string", "null"] },
+    "producer_cid": { "type": "string" },
+    "producer_type": { "type": "string" },
+    "topic": { "type": "string" },
+    "priority": { "type": "integer", "minimum": 1, "maximum": 10 },
+    "payload": { "type": "object" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "classification": {
+      "type": "string",
+      "enum": ["public", "internal", "sensitive", "restricted", "audit"]
+    },
+    "policy_tags": { "type": "array", "items": { "type": "string" } },
+    "retention": { "type": "string", "description": "e.g. 30d-hot, 1y-archive, permanent" },
+    "replay_behavior": {
+      "type": "string",
+      "enum": ["replayable", "recorded-observation", "non-replayable"]
+    },
+    "requires_ack": { "type": "boolean" },
+    "trace_id": { "type": "string" },
+    "span_id": { "type": "string" }
+  },
+  "additionalProperties": false
+}

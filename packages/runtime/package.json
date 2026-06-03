@@ -1,0 +1,27 @@
+{
+  "name": "@inevitable/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cognitive unit runtime: 13-state lifecycle FSM, cognitive-unit ABI, manifest loader, and a unit host that drives lifecycle + emits agent.* events.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/shared": "workspace:*",
+    "@inevitable/protocols": "workspace:*",
+    "@inevitable/events": "workspace:*",
+    "@inevitable/kernel": "workspace:*",
+    "@inevitable/observability": "workspace:*"
+  }
+}

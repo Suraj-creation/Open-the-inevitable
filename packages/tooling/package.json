@@ -1,0 +1,24 @@
+{
+  "name": "@inevitable/tooling",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Developer tooling: schema/protocol introspection helpers over the canonical registry.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/shared": "workspace:*",
+    "@inevitable/protocols": "workspace:*"
+  }
+}

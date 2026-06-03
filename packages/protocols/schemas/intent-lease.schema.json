@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:intent-lease:1.0.0",
+  "title": "IntentLease",
+  "description": "Time-bound, revocable interpretation of a user/system goal. Spec: spec/kernel/intent-lease.md",
+  "type": "object",
+  "required": ["intent_id", "owner_user_id", "interpreted_goal", "expires_at", "confidence"],
+  "properties": {
+    "intent_id": { "type": "string" },
+    "owner_user_id": { "type": "string" },
+    "interpreted_goal": { "type": "string" },
+    "scope": { "type": "array", "items": { "type": "string" } },
+    "constraints": { "type": "array", "items": { "type": "string" } },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "renewal_conditions": { "type": "array", "items": { "type": "string" } },
+    "revocation_reason": { "type": ["string", "null"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "held_by": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "workflow/unit CIDs"
+    }
+  },
+  "additionalProperties": false
+}
