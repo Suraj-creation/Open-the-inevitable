@@ -1,0 +1,30 @@
+{
+  "name": "@inevitable/data-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cognitive data-plane edge service: registers the OpenTelemetry SDK and bridges the cognitive event bus to OTel spans/metrics.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/shared": "workspace:*",
+    "@inevitable/protocols": "workspace:*",
+    "@inevitable/events": "workspace:*",
+    "@inevitable/contracts": "workspace:*",
+    "@inevitable/observability": "workspace:*",
+    "@inevitable/adapters": "workspace:*",
+    "@opentelemetry/api": "^1.9.0"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:memory-mutation:1.0.0",
+  "title": "MemoryMutation",
+  "description": "Typed, evidence-backed, reversible memory write. Spec: spec/protocols/memory-mutation-protocol.md",
+  "type": "object",
+  "required": [
+    "mutation_id",
+    "proposer_cid",
+    "memory_layer",
+    "mutation_type",
+    "target",
+    "evidence",
+    "confidence"
+  ],
+  "properties": {
+    "mutation_id": { "type": "string" },
+    "proposer_cid": { "type": "string" },
+    "tenant_id": { "type": ["string", "null"] },
+    "memory_layer": {
+      "type": "string",
+      "enum": [
+        "working",
+        "episodic",
+        "semantic",
+        "procedural",
+        "reflective",
+        "social",
+        "collective",
+        "governance",
+        "failure",
+        "evolution"
+      ]
+    },
+    "mutation_type": {
+      "type": "string",
+      "enum": [
+        "add_fact",
+        "revise_fact",
+        "decay_confidence",
+        "reinforce_concept",
+        "link_concepts",
+        "split_concept",
+        "merge_concepts",
+        "add_episode",
+        "add_procedural_pattern",
+        "redact_memory",
+        "quarantine_memory",
+        "consolidate_memory"
+      ]
+    },
+    "target": { "type": "object", "description": "addressed node/edge/record" },
+    "payload": { "type": "object" },
+    "evidence": { "type": "array", "items": { "type": "object" }, "minItems": 0 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "source_trace_id": { "type": ["string", "null"] },
+    "reversible": { "type": "boolean" },
+    "inverse_ref": { "type": ["string", "null"], "description": "mutation that undoes this one" },
+    "context_lease_ref": { "type": ["string", "null"] },
+    "classification": {
+      "type": "string",
+      "enum": ["public", "internal", "sensitive", "restricted"]
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:context-lease:1.0.0",
+  "title": "ContextLease",
+  "description": "Bounded, revocable, audited access to memory/world-state. Spec: spec/kernel/context-lease.md",
+  "type": "object",
+  "required": ["lease_id", "granted_to", "memory_layers", "expires_at"],
+  "properties": {
+    "lease_id": { "type": "string" },
+    "granted_to": { "type": "string", "description": "CID" },
+    "memory_layers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "working|episodic|semantic|procedural|reflective|collective ..."
+    },
+    "allowed_concepts": { "type": "array", "items": { "type": "string" } },
+    "allowed_time_range": {
+      "type": "object",
+      "properties": {
+        "from": { "type": ["string", "null"], "format": "date-time" },
+        "to": { "type": ["string", "null"], "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "allowed_users": { "type": "array", "items": { "type": "string" } },
+    "redaction_rules": { "type": "array", "items": { "type": "string" } },
+    "token_budget": { "type": "integer", "minimum": 0 },
+    "frozen": { "type": "boolean", "description": "true during deterministic replay" },
+    "granted_by": { "type": "string" },
+    "expires_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

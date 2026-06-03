@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:registry:event-family:1.0.0",
+  "title": "EventFamilyRegistration",
+  "description": "Registry entry describing one event family. Spec: spec/events/event-taxonomy.md",
+  "type": "object",
+  "required": [
+    "family",
+    "owner",
+    "schema_version",
+    "retention",
+    "replay_behavior",
+    "classification",
+    "producers",
+    "consumers"
+  ],
+  "properties": {
+    "family": { "type": "string" },
+    "owner": { "type": "string" },
+    "schema_version": { "type": "string" },
+    "retention": { "type": "string" },
+    "replay_behavior": {
+      "type": "string",
+      "enum": ["replayable", "recorded-observation", "non-replayable"]
+    },
+    "classification": {
+      "type": "string",
+      "enum": ["public", "internal", "sensitive", "restricted", "audit"]
+    },
+    "producers": { "type": "array", "items": { "type": "string" } },
+    "consumers": { "type": "array", "items": { "type": "string" } },
+    "failure_behavior": { "type": "string" }
+  },
+  "additionalProperties": false
+}

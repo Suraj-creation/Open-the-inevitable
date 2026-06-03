@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.turbo/
+coverage/
+pnpm-lock.yaml
+packages/*/src/generated/
+spec/
+reference-repos/
+MiroFish/
+OpenMAIC/
+hermes-agent/
+paperclip/
+pi/
+*.md

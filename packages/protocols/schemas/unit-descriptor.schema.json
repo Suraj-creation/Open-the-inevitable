@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:unit-descriptor:1.0.0",
+  "title": "UnitDescriptor",
+  "description": "Returned by a cognitive unit's ABI describe(). Spec: spec/protocols/cognitive-unit-abi.md",
+  "type": "object",
+  "required": [
+    "unit_id",
+    "unit_type",
+    "version",
+    "abi_version",
+    "capabilities",
+    "input_schemas",
+    "output_schemas"
+  ],
+  "properties": {
+    "unit_id": { "type": "string" },
+    "unit_type": { "type": "string" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "abi_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "capabilities": { "type": "array", "items": { "type": "string" } },
+    "input_schemas": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "registry schema ids"
+    },
+    "output_schemas": { "type": "array", "items": { "type": "string" } },
+    "policy_needs": { "type": "array", "items": { "type": "string" } },
+    "memory_scope_needs": { "type": "array", "items": { "type": "string" } },
+    "observability_contract": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "required events/metrics"
+    },
+    "resource_budget": { "type": "object" },
+    "evolution_policy": {
+      "type": "string",
+      "enum": ["frozen", "tunable", "replaceable", "self-mutable"]
+    }
+  },
+  "additionalProperties": false
+}

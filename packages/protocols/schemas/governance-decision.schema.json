@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:governance-decision:1.0.0",
+  "title": "GovernanceDecision",
+  "description": "Explainable, auditable record of a policy evaluation. Spec: spec/kernel/governance-kernel.md",
+  "type": "object",
+  "required": [
+    "decision_id",
+    "subject_cid",
+    "resource",
+    "action",
+    "decision",
+    "policy_id",
+    "policy_version"
+  ],
+  "properties": {
+    "decision_id": { "type": "string" },
+    "subject_cid": { "type": "string" },
+    "resource": { "type": "string" },
+    "action": { "type": "string" },
+    "context": { "type": "object" },
+    "decision": { "type": "string", "enum": ["allow", "block", "modify", "review"] },
+    "reason": { "type": "string" },
+    "policy_id": { "type": "string" },
+    "policy_version": { "type": "string" },
+    "evidence": { "type": "array", "items": { "type": "string" } },
+    "modified_payload": { "type": ["object", "null"] },
+    "review_path": { "type": ["string", "null"] },
+    "expires_at": { "type": ["string", "null"], "format": "date-time" }
+  },
+  "additionalProperties": false
+}

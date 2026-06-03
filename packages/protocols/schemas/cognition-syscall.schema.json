@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:cognition-syscall:1.0.0",
+  "title": "CognitionSyscall",
+  "description": "A privileged kernel operation requested by user-mode cognition. Spec: spec/kernel-internals/cognition-syscalls.md",
+  "type": "object",
+  "required": ["syscall_id", "name", "caller_cid", "args"],
+  "properties": {
+    "syscall_id": { "type": "string" },
+    "name": {
+      "type": "string",
+      "enum": [
+        "COG_SPAWN",
+        "COG_SCHEDULE",
+        "COG_CONTEXT_LEASE",
+        "COG_MEMORY_MUTATE",
+        "COG_EVENT_PUBLISH",
+        "COG_TOOL_INVOKE",
+        "COG_REASON",
+        "COG_CHECKPOINT",
+        "COG_REPLAY",
+        "COG_FORK",
+        "COG_GOVERN",
+        "COG_EVOLVE"
+      ]
+    },
+    "caller_cid": { "type": "string" },
+    "args": { "type": "object" },
+    "trace_id": { "type": "string" },
+    "deterministic": {
+      "type": "boolean",
+      "description": "false marks nondeterministic ops for replay"
+    }
+  },
+  "additionalProperties": false
+}

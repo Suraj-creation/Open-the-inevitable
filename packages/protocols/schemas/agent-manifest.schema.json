@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:agent-manifest:1.0.0",
+  "title": "AgentManifest",
+  "description": "Portable definition of a cognitive unit. Spec: spec/runtime/cognitive-unit-runtime.md",
+  "type": "object",
+  "required": [
+    "id",
+    "version",
+    "abi_version",
+    "capabilities",
+    "memory_access",
+    "policies",
+    "resources",
+    "observability"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "abi_version": { "type": "string" },
+    "role": { "type": "string" },
+    "capabilities": { "type": "array", "items": { "type": "string" } },
+    "reasoning_engines": { "type": "object" },
+    "memory_access": {
+      "type": "object",
+      "properties": {
+        "read": { "type": "array", "items": { "type": "string" } },
+        "write": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "policies": { "type": "array", "items": { "type": "string" } },
+    "resources": { "type": "object" },
+    "observability": {
+      "type": "object",
+      "properties": {
+        "required_events": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

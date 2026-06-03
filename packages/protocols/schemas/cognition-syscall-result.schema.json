@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:cognition-syscall-result:1.0.0",
+  "title": "CognitionSyscallResult",
+  "description": "Outcome of a cognition syscall. Spec: spec/kernel-internals/cognition-syscalls.md",
+  "type": "object",
+  "required": ["syscall_id", "status"],
+  "properties": {
+    "syscall_id": { "type": "string" },
+    "status": { "type": "string", "enum": ["ok", "denied", "trapped", "error"] },
+    "result": {},
+    "decision_ref": { "type": ["string", "null"], "description": "GovernanceDecision id" },
+    "error": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

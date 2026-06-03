@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:cognition-packet:1.0.0",
+  "title": "CognitionPacket",
+  "description": "Canonical typed unit of semantic exchange. Spec: spec/protocols/cognition-packet-protocol.md",
+  "type": "object",
+  "required": ["packet_id", "schema_version", "source_cid", "packet_type", "timestamp", "hlc"],
+  "properties": {
+    "packet_id": { "type": "string", "pattern": "^cp-[0-9a-f]+$" },
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "source_cid": { "type": "string" },
+    "target_cid": { "type": ["string", "null"], "description": "null = broadcast" },
+    "tenant_id": { "type": ["string", "null"] },
+    "session_id": { "type": ["string", "null"] },
+    "causation_id": { "type": ["string", "null"] },
+    "correlation_id": { "type": ["string", "null"] },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "hlc": { "type": "string", "description": "hybrid logical clock, sortable" },
+    "sequence_number": { "type": "integer", "minimum": 0 },
+    "packet_type": {
+      "type": "string",
+      "description": "intent | context | claim | tool-call | tool-result | response | handoff ..."
+    },
+    "intent": { "type": ["string", "null"] },
+    "concept_ids": { "type": "array", "items": { "type": "string" } },
+    "domain_ids": { "type": "array", "items": { "type": "string" } },
+    "content": { "type": "object" },
+    "semantic_embedding": { "type": ["array", "null"], "items": { "type": "number" } },
+    "evidence": { "type": "array", "items": { "type": "object" } },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "uncertainty_estimate": { "type": "number", "minimum": 0, "maximum": 1 },
+    "reasoning_depth": { "type": "integer", "minimum": 0 },
+    "classification": {
+      "type": "string",
+      "enum": ["public", "internal", "sensitive", "restricted"]
+    },
+    "policy_tags": { "type": "array", "items": { "type": "string" } },
+    "requires_human_review": { "type": "boolean" },
+    "priority": { "type": "integer", "minimum": 1, "maximum": 10 },
+    "expiry": { "type": ["string", "null"], "format": "date-time" },
+    "trace_id": { "type": "string" },
+    "span_id": { "type": "string" }
+  },
+  "additionalProperties": false
+}

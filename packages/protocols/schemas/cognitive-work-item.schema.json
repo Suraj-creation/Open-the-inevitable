@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cos:protocol:cognitive-work-item:1.0.0",
+  "title": "CognitiveWorkItem",
+  "description": "A unit of schedulable cognitive work. Spec: spec/kernel/cognitive-scheduler.md",
+  "type": "object",
+  "required": ["work_id", "work_type", "requester_cid", "priority"],
+  "properties": {
+    "work_id": { "type": "string" },
+    "work_type": {
+      "type": "string",
+      "enum": [
+        "student_interaction",
+        "assessment",
+        "curriculum_planning",
+        "memory_consolidation",
+        "evolution",
+        "safety_review",
+        "analytics"
+      ]
+    },
+    "requester_cid": { "type": "string" },
+    "target_unit_type": { "type": ["string", "null"] },
+    "packet_ref": { "type": ["string", "null"], "description": "Cognition Packet id" },
+    "priority": { "type": "integer", "minimum": 1, "maximum": 10, "description": "1 = highest" },
+    "deadline_ms": { "type": ["integer", "null"] },
+    "max_time_seconds": { "type": "number", "minimum": 0 },
+    "cost_budget_usd": { "type": ["number", "null"] },
+    "region_hint": { "type": ["string", "null"] },
+    "risk_class": { "type": "string", "enum": ["low", "medium", "high"] }
+  },
+  "additionalProperties": false
+}

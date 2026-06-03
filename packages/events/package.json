@@ -1,0 +1,24 @@
+{
+  "name": "@inevitable/events",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Event-sourced cognition: event factory, family registry, replay-safe bus with dead-letter and governance interception.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/shared": "workspace:*",
+    "@inevitable/protocols": "workspace:*"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@inevitable/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pluggable infrastructure adapter contracts (transport, workflow, graph, vector, relational, model, tool, observability) per ADR-0003.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/shared": "workspace:*",
+    "@inevitable/protocols": "workspace:*"
+  }
+}

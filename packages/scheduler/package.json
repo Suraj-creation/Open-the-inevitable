@@ -1,0 +1,24 @@
+{
+  "name": "@inevitable/scheduler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cognitive scheduling foundations: work-item priority queue and scheduler contract.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/shared": "workspace:*",
+    "@inevitable/protocols": "workspace:*"
+  }
+}

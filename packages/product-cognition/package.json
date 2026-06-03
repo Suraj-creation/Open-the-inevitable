@@ -1,0 +1,29 @@
+{
+  "name": "@inevitable/product-cognition",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 1E product-cognition runtime bridge.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/events": "workspace:*",
+    "@inevitable/kernel": "workspace:*",
+    "@inevitable/memory": "workspace:*",
+    "@inevitable/observability": "workspace:*",
+    "@inevitable/protocols": "workspace:*",
+    "@inevitable/runtime": "workspace:*",
+    "@inevitable/scheduler": "workspace:*",
+    "@inevitable/shared": "workspace:*",
+    "@inevitable/world-state": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

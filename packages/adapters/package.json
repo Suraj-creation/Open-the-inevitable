@@ -1,0 +1,26 @@
+{
+  "name": "@inevitable/adapters",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Concrete infrastructure adapters behind @inevitable/contracts + a backend-agnostic conformance harness. Reference in-memory adapters define canonical semantics; NATS/Qdrant/Neo4j/Postgres adapters are dependency-optional. ADR-0005.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/shared": "workspace:*",
+    "@inevitable/protocols": "workspace:*",
+    "@inevitable/events": "workspace:*",
+    "@inevitable/contracts": "workspace:*"
+  }
+}
