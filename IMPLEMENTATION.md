@@ -139,7 +139,41 @@ The canonical master-vision file is
 - `MasteryCheckpointRecorder` records F14 mastery checkpoints as world-state nodes/edges, semantic
   memory mutations, and `mastery.*` events.
 
-### Next (Phase 1E)
+### Phase 1E architectural review + strengthening (2026-06-03)
 
-Add packet-level trace capture, runtime-hosted supervisor routing across the MVP agent set, and
-governed model-output recording at the adapter edge for deterministic replay D3/D4.
+A research-grade audit of `@inevitable/product-cognition` surfaced and fixed:
+
+- **C1 (critical):** `LearningPathProjector.project()` mutated world-state before detecting cycles or
+  unknown prerequisites, leaving the graph dirty on failure. Fixed: Kahn's algorithm (topological
+  sort) validates the full concept seed graph *before* applying any delta — atomicity preserved.
+- **C2 (critical):** `DeterministicMvpUnit` generated response packet IDs by appending `"ff"` to the
+  input ID, bypassing the canonical `IdGenerator` and breaking the `cp-<24hex>` format. Fixed: inject
+  `IdGenerator` into the unit and use `newPacketId()`.
+- **S1 (significant):** `assertOk` was duplicated in `onboarding.ts` and `mastery.ts`. Extracted to
+  `types.ts` as `assertWorldStateOk` with a scoped name and doc comment.
+- **S2 (significant):** `ProductRuntimeDispatcher` had no recovery path from a unit Quarantine
+  transition — subsequent dispatches would call `host.handle()` on a non-Ready host and deadlock.
+  Fixed: reset `activated = false` on execution failure so the next dispatch re-activates.
+- **S3 (significant):** `DeterministicLearningLoop` emitted no orchestration events, making the loop
+  boundary invisible to replay and observability. Fixed: added `learning.loop.started` and
+  `learning.loop.completed` events with injected bus/clock/idGenerator.
+- **M1/M2 (tests):** Added test cases for scheduler-rejection (budget exceeded) and host-failure
+  (throwing unit). Verified dispatcher returns typed `E_PRODUCT_RUNTIME_DISPATCH` errors in both.
+- **M3 (tests):** Learning-loop test now asserts the prerequisite edge is in the world-state graph
+  and the new loop events appear in the bus log.
+- **cycle-guard (tests):** `learning-path.test.ts` now asserts world-state node/edge counts are
+  unchanged after a failed projection (proving C1 fix works).
+
+Post-strengthening: **18/18 typecheck, 9 product-cognition tests (up from 6), format clean.**
+Branch `codex/phase-1e-product-cognition` merged to master (commit `3e3206b`).
+
+### Next (Phase 1E continued)
+
+The highest-leverage next frontier is **supervisor-routed agent flow + reasoning trace capture**:
+1. A `SupervisorUnit` that routes incoming CognitionPackets to the right agent based on intent
+   classification and learner state from the world-state graph.
+2. Packet-level trace capture: connect `ProductRuntimeDispatcher` emissions to
+   `@inevitable/observability` (span-per-dispatch correlated by trace_id/span_id).
+3. Governed model-output recording at the adapter edge for deterministic replay D3/D4.
+4. Wire `@inevitable/execution` fibers into the dispatcher so longer multi-step cognitive workflows
+   are expressed as deterministic fiber routines, not nested async calls.
