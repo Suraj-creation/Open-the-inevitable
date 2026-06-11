@@ -99,7 +99,7 @@ Scheduler ──ready work──► Execution Engine ──drives──► Fiber
 |---|---|---|
 | `emit(event)` | publish a Cognitive Event to the bus | `void` |
 | `spawn(routine, opts)` | create a child fiber (lineage-stamped) | child `fiberId` |
-| `await(token)` | suspend until a deterministic resolver provides a value for `token` | resolved value |
+| `await(token)` | suspend until a deterministic resolver provides a value for `token`; if the token was already resolved (eager resolve), the fiber resumes immediately without parking | resolved value |
 | `sleepLogical(ticks)` | yield for N logical ticks (fairness / pacing) | `void` |
 | `reason(step)` | record a reasoning-trace step (observability) | `void` |
 | `complete(value)` | finish the fiber with a result | — (terminal) |
@@ -116,7 +116,7 @@ non-deterministic effects reproducible.
    interprets the effect, appends a journal entry (stamping the HLC via the injected clock), and
    re-files the fiber (`Ready`, `Waiting`, or terminal).
 3. `runToQuiescence()` ticks until no fiber is `Ready` (all `Waiting`, `Done`, or `Failed`).
-4. `resolve(token, value)` moves any fiber `Waiting` on `token` back to `Ready` with the value.
+4. `resolve(token, value)` moves any fiber `Waiting` on `token` back to `Ready` with the value. If no fiber is currently waiting (e.g. the resolver races ahead of the fiber's next `yield`), the value is buffered as an **eager resolve** and consumed the moment any fiber later yields `await(token)`. This supports the emit→await bridge pattern where resolution happens inside the `emit` sink before the fiber has processed its subsequent `await` yield.
 5. Determinism: ties broken by `(priority, spawnSeq)`; ids from injected `IdGenerator`; time from
    injected `Clock`/HLC. No `Date.now()` / `Math.random()` in the engine.
 

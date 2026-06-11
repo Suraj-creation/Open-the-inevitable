@@ -1,15 +1,17 @@
-# The Inevitable Implementation Skeleton
+# Implementation Status & Traceability
 
-This repository is transitioning from completed Phase 1D substrate deepening into Phase 1E product
-cognition implementation. Phases 1A–1D are complete: spec infrastructure, kernel/protocol/event/runtime
-specs, foundational packages, deterministic execution, world-state graph, memory tiers, scheduler
-depth, infrastructure adapters, and the OpenTelemetry edge. See
-`spec/implementation-roadmaps/phase-1c-package-contracts.md` and
-`spec/implementation-roadmaps/phase-1d-substrate.md`.
+This file answers exactly one question: **what exists in the codebase right now — where it
+traces, how it is verified, and what is next.** It is a current-state document, not a history.
 
-The canonical **product specification** now lives at `spec/product/Broader-feature-product.md` (with a
-complete feature catalog under `spec/product/features/`). Read it before any product/feature/agent/
-pedagogy/memory/orchestration work — it maps every product capability onto the COS primitives below.
+- Abstract milestone history → `CHANGELOG.md`
+- Detailed dated build narratives → `docs/history/implementation-log.md`
+- Phase plans → `spec/implementation-roadmaps/`
+- Why and how to build → `CLAUDE.md` (constitution) and the owning specs under `spec/`
+
+**Update doctrine:** when a phase lands, *replace* "Current State" and "Active Frontier" below,
+update the traceability table if a package was added, append one detailed dated section to
+`docs/history/implementation-log.md`, add one abstract entry to `CHANGELOG.md`, and rewrite
+`CLAUDE.md` §5 (≤8 lines). Never append dated narrative sections to this file.
 
 ## Developer Quickstart
 
@@ -20,30 +22,58 @@ pnpm codegen                   # generate TS types from canonical JSON Schemas
 pnpm verify                    # codegen + typecheck + test + lint + format:check
 ```
 
-Per-package: `pnpm --filter @inevitable/<name> run {typecheck,test,lint}`. Tooling decisions are
-recorded in `spec/architecture-decisions/ADR-0004-monorepo-and-tooling.md`.
+Per-package: `pnpm --filter @inevitable/<name> run {typecheck,test,lint}`. Tooling decisions:
+`spec/architecture-decisions/ADR-0004-monorepo-and-tooling.md`. JSON Schema is the canonical
+contract form (ADR-0003). Heavy infrastructure clients are never workspace dependencies —
+adapters use guarded dynamic imports (ADR-0005).
 
-The codebase must not treat the current architecture notes as competing foundations. `spec/advanced-agent-architecture.md`, `spec/next-generation-cognitive-operating-system-blueprint.md`, `spec/spec-folder-ecosystem.md`, and `spec/vision-application/*` are complementary references governed by the spec system.
+## Code Ownership Map
 
-Implementation begins as a cognitive operating system substrate, not as a conventional AI app.
+- `apps/` — user-facing and API surfaces.
+- `packages/` — reusable cognitive OS primitives (the substrate + product runtimes).
+- `services/` — deployable control-plane and data-plane services.
+- `infrastructure/` — environment, deployment, and operations assets.
+- `tests/` — cross-cutting verification suites (units, integration, replay, governance, failure).
+- `tools/` — developer and spec automation.
+- `spec/` — the governing spec system (architectural law; see `CLAUDE.md`).
 
-## Current Boundary
+## Current State
 
-The current structure establishes the code ownership map only:
+**Phases 1A–1E, 2A, and 2B are complete. `pnpm verify` is green across the whole monorepo**
+(19 packages/apps + 1 service: codegen, typecheck, test, lint, format).
 
-- `apps/` contains user-facing and API surfaces.
-- `packages/` contains reusable cognitive OS primitives.
-- `services/` contains deployable control-plane and data-plane services.
-- `infrastructure/` contains environment, deployment, and operations assets.
-- `tests/` contains verification suites across units, integration, replay, governance, and failure modes.
-- `tools/` contains developer and spec automation.
+- **1A** — spec ecosystem (`spec/meta/`, `spec/indexes/`), ADRs, domain map, ownership skeleton.
+- **1B** — kernel / protocol / event / runtime foundational specs; ADR-0003 (tech stack).
+- **1C** — foundational packages: shared, protocols, observability, events, kernel, governance,
+  runtime, scheduler, memory, orchestration, contracts, tooling.
+- **1D** — substrate deepening: deterministic execution + fibers, world-state graph, memory
+  tiers, scheduler depth, infrastructure adapters + conformance harness, OTel edge.
+- **Product topology** — feature-spec suite F01–F16 under `spec/product/features/`; master PRD
+  at `spec/product/Broader-feature-product.md`.
+- **1E** — `@inevitable/product-cognition`: onboarding (F01/F13), learning-path projection
+  (F02/F03), MVP agent manifests (F06), runtime dispatch + deterministic MVP unit (F06/F07),
+  mastery checkpoints (F14), supervisor routing with confidence weighting, fibered learning
+  loop (D2-replayable), OTel span capture, and a governance gate at the dispatch boundary.
+- **2A** — `@inevitable/surface`: the Cognitive Surface Runtime (specs SRF-001…004 under
+  `spec/surface/`) — cognition blocks with mandatory provenance, the `surface.*` event family,
+  living timeline as world-state projection, agent contribution runtime, deterministic
+  fold-based replay, full trace capture, multimodal provider seam, and an end-to-end
+  governance-gated `SurfaceSession` ("Teach me Neural Networks" acceptance flow).
+- **2B** — Real Cognition on the Surface: the Model Invocation Protocol
+  (`spec/protocols/model-invocation-protocol.md`, D3 realized), `model.*` event family,
+  Null/Gemini/Recording model runtimes in `@inevitable/adapters` (no vendor SDK in the
+  workspace), `ModelBackedUnit` in `@inevitable/product-cognition` (same governed dispatch
+  path, layered F04 output, visible deterministic fallback), `SurfaceSession.expand()`
+  progressive deepening, and `apps/cli` + `pnpm demo` — the first runnable surface. D3
+  acceptance: seeded record→replay reproduces a byte-identical frame, provider never
+  re-invoked.
 
-Phase 1C has implemented the foundational packages under `packages/` (see traceability map below).
-Each package derives from its governing spec; JSON Schema is the canonical contract form (ADR-0003).
+## Traceability Map
 
-## Implementation Traceability (Phase 1C)
+Every package derives from its governing spec; code that violates spec contracts is invalid
+implementation even if it works locally.
 
-| Package | Spec domain | Key contracts |
+| Package / Service | Spec domain | Key contracts |
 |---|---|---|
 | `@inevitable/shared` | kernel/cognitive-identity, replay | branded ids, Result, HLC, Clock, errors |
 | `@inevitable/protocols` | protocols/\*, events/event-taxonomy | 16 JSON Schemas, registry, ajv validator, codegen |
@@ -52,21 +82,32 @@ Each package derives from its governing spec; JSON Schema is the canonical contr
 | `@inevitable/governance` | kernel/governance-kernel | policy engine, decision records, enforcement middleware |
 | `@inevitable/kernel` | kernel/\* | identity, capability envelope, context/intent leases |
 | `@inevitable/runtime` | runtime/cognitive-unit-runtime, protocols/cognitive-unit-abi | lifecycle FSM, ABI, manifest loader, unit host |
-| `@inevitable/scheduler` | kernel/cognitive-scheduler, scheduler/cognitive-scheduling | priority queue + DepthScheduler (preemption/fairness/budgets/backpressure) |
-| `@inevitable/memory` | protocols/memory-mutation, memory/memory-tiers | validating store + TieredMemoryStore (tiers/projections/decay/distribution) |
+| `@inevitable/scheduler` | kernel/cognitive-scheduler, scheduler/ | DepthScheduler: preemption, fairness, budgets, backpressure |
+| `@inevitable/memory` | protocols/memory-mutation, memory/memory-tiers | TieredMemoryStore: tiers, projections, decay, distribution |
 | `@inevitable/orchestration` | orchestration/\* | versioned blackboard (foundation) |
-| `@inevitable/contracts` | infrastructure adapters (ADR-0003) | transport/graph/vector/model/tool adapter interfaces |
+| `@inevitable/contracts` | interop (ADR-0003) | transport/graph/vector/model/tool adapter interfaces |
 | `@inevitable/tooling` | tooling/, developer-experience/ | schema/protocol introspection |
-| `@inevitable/product-cognition` | product/product-cognition-runtime, product/features/F01/F02/F03/F04/F05/F06/F07/F13/F14 | onboarding/session initialization, learning-path projection, MVP agent manifests, runtime dispatch, deterministic learning loop, mastery checkpoints |
+| `@inevitable/execution` | execution/, replay/ | deterministic engine, cognitive fibers, execution journal |
+| `@inevitable/world-state` | world-state/world-state-graph | delta protocol, materialized graph, acyclicity, snapshots |
+| `@inevitable/adapters` | interop/infrastructure-adapters (ADR-0005), protocols/model-invocation | in-memory reference adapters + conformance harness; NATS/Qdrant/Neo4j/Postgres (edge-provisioned); Null/Gemini/Recording model runtimes (D3 seam) |
+| `@inevitable/product-cognition` | product/product-cognition-runtime, agents/supervisor-agent, protocols/model-invocation, features F01–F07/F13/F14 | onboarding, path projection, manifests, governed dispatch, supervisor routing, fibered learning loop, mastery checkpoints, ModelBackedUnit (F04 layers) |
+| `@inevitable/surface` | surface/ (SRF-001…004), features F09/F16 | cognition blocks, surface.\* events, timeline projection, contribution runtime, fold/replay, trace capture, provider registry, SurfaceSession (+ expand) |
+| `@inevitable/cli` (app) | surface/, product/product-cognition-runtime, protocols/model-invocation | demo composition root: full governed substrate wired into one terminal surface (`pnpm demo`) |
+| `@inevitable/data-plane` (service) | telemetry/otel-edge, data-plane/ | OTel SDK bootstrap (edge) + bus→OTel observability sink |
 
-### Phase 1D additions
+## Active Frontier — Phase 2C: The Visible Surface
 
-| Package / Service | Spec domain | Key contracts |
-|---|---|---|
-| `@inevitable/execution` | execution/cognitive-execution-engine, replay/deterministic-replay | deterministic execution engine + cooperative cognitive fibers + execution journal |
-| `@inevitable/world-state` | world-state/world-state-graph | world-state delta protocol, materialized graph, acyclic prerequisite enforcement, snapshots |
-| `@inevitable/adapters` | interop/infrastructure-adapters (ADR-0005) | in-memory reference adapters + conformance harness; NATS/Qdrant/Neo4j/Postgres (edge-provisioned) |
-| `@inevitable/data-plane` (service) | telemetry/otel-edge, data-plane/ | OTel SDK bootstrap (edge) + bus→OTel observability-sink bridge |
+1. **Web surface projection** — a real UI renderer over `SurfaceState` (the runtime is the
+   product; the UI renders the fold and writes back only through typed dispatches). Streaming
+   from the bus to the client; `SurfaceState` never becomes client-owned truth.
+2. **Multimodal media providers** — Gemini image/voice/live behind the SRF-004 interfaces,
+   through the same D3 recording seam proven in Phase 2B.
+3. **Blackboard + `surface.agent.disagreed`** — F07 proposal arbitration before block generation.
+4. **Deeper F04 layers** — extend `expand()` beyond layers 0–1 (conceptual framework,
+   mathematical, applied).
+5. **`reasoning.step.recorded`** emission from fiber loop phases (observability completeness).
+6. **Persistence edge** — durable event log / world-state snapshots behind the existing adapter
+   contracts, so sessions survive the process.
 
 ## Implementation Doctrine
 
@@ -78,102 +119,5 @@ Every implementation unit must be traceable to:
 4. A failure-mode contract.
 5. A verification strategy.
 
-If a stronger design is discovered through research or local reference repositories, update the spec first, document the decision, then implement.
-
-## Phase 1D (delivered, `pnpm verify` green)
-
-Whole-monorepo verify passes: **17/17 typecheck, 17/17 test, 16/16 lint, format clean** across 16
-packages + 1 service. Spec-first throughout (owning specs written/updated before code). Delivered:
-
-1. **Deterministic execution engine + cognitive fibers** (`@inevitable/execution`) — cooperative
-   coroutines, closed effect set, append-only execution journal, byte-identical replay (D2),
-   loop-limit + fail-fast lineage safety. Spec: `spec/execution/`, `spec/replay/`.
-2. **World-state graph** (`@inevitable/world-state`) — typed delta protocol, materialized view,
-   neighbor/type/path queries, acyclic prerequisite enforcement, snapshot/restore. Spec: `spec/world-state/`.
-3. **Memory tiers** (`@inevitable/memory`) — `TieredMemoryStore` with per-tier logs, projections,
-   reinforcement/decay as mutations, redaction, and subscription-based real-time distribution.
-   Spec: `spec/memory/memory-tiers.md`.
-4. **Scheduler depth** (`@inevitable/scheduler`) — `DepthScheduler` with preemption, weighted
-   fairness, per-requester budgets, and backpressure/load-shedding. Spec: `spec/scheduler/`.
-5. **Infrastructure adapters** (`@inevitable/adapters`) — in-memory reference adapters + a
-   backend-agnostic conformance harness (the in-memory bus is the reference semantics), plus
-   dependency-optional NATS/Qdrant/Neo4j/Postgres adapters (edge-provisioned). ADR-0005; `spec/interop/`.
-6. **OTel edge** (`services/data-plane`) — dependency-optional OTel SDK bootstrap + a bus→OTel
-   observability-sink bridge. Spec: `spec/telemetry/otel-edge.md`.
-
-### Product topology setup (delivered, 2026-06-03)
-
-The complete product feature-spec suite now exists under `spec/product/features/`:
-
-- F01-F05: onboarding, navigation, prerequisites, adaptive explanation, persistent memory.
-- F06-F12: agent ecosystem, real-time orchestration, interdisciplinary graph, living-universe
-  experience, research/innovation acceleration, institutional intelligence, governed evolution.
-- F13-F15: identity/personas/modes, assessment/mastery/depth verification, content ingestion and
-  universal knowledge substrate.
-- F16: **The Cognitive Surface — Universal Multimodal Substrate** — the convergent surface from which
-  all manifestations (whiteboard, living document, presentation, authoring canvas, notebook,
-  knowledge-graph explorer, simulation, and long-horizon IDE co-editor) are projected. Backed by the
-  deep-research dossier `spec/research/cognitive-surface-frontier-research.md`. Spec-only; intentionally
-  not yet implemented (no UI package exists — `@inevitable/product-cognition` remains no-UI/no-LLM).
-
-The canonical master-vision file is
-`spec/vision-application/The_Inevitable_Master_Vision.md`; the old
-`Ambition-deep-committments.md` path remains only as a compatibility pointer.
-
-### Phase 1E initial runtime bridge (started, 2026-06-03)
-
-`@inevitable/product-cognition` now provides the first product-cognition runtime package:
-
-- `ProductOnboardingService` initializes F01/F13 learner sessions through Cognitive Identity,
-  Capability Envelope, Context Lease, Intent Lease, world-state learner/intent nodes, semantic seed
-  memory, and onboarding events.
-- `LearningPathProjector` projects F02/F03 concept/prerequisite DAGs into `@inevitable/world-state`
-  and relies on graph acyclicity enforcement for prerequisite safety.
-- `MVP_AGENT_MANIFESTS` exposes schema-valid F06 manifests for Supervisor, Curriculum, Explanation,
-  Practice, Assessment, Revision, and Memory agents.
-- `ProductRuntimeDispatcher` and `DeterministicMvpUnit` convert product intents into
-  `CognitionPacket` + `CognitiveWorkItem` pairs, admit them through `DepthScheduler`, and execute
-  one runtime-hosted MVP agent through `CognitiveUnitHost`.
-- `DeterministicLearningLoop` composes learning-path projection, explanation dispatch, practice
-  dispatch, and mastery recording into the first no-LLM explanation/practice loop.
-- `MasteryCheckpointRecorder` records F14 mastery checkpoints as world-state nodes/edges, semantic
-  memory mutations, and `mastery.*` events.
-
-### Phase 1E architectural review + strengthening (2026-06-03)
-
-A research-grade audit of `@inevitable/product-cognition` surfaced and fixed:
-
-- **C1 (critical):** `LearningPathProjector.project()` mutated world-state before detecting cycles or
-  unknown prerequisites, leaving the graph dirty on failure. Fixed: Kahn's algorithm (topological
-  sort) validates the full concept seed graph *before* applying any delta — atomicity preserved.
-- **C2 (critical):** `DeterministicMvpUnit` generated response packet IDs by appending `"ff"` to the
-  input ID, bypassing the canonical `IdGenerator` and breaking the `cp-<24hex>` format. Fixed: inject
-  `IdGenerator` into the unit and use `newPacketId()`.
-- **S1 (significant):** `assertOk` was duplicated in `onboarding.ts` and `mastery.ts`. Extracted to
-  `types.ts` as `assertWorldStateOk` with a scoped name and doc comment.
-- **S2 (significant):** `ProductRuntimeDispatcher` had no recovery path from a unit Quarantine
-  transition — subsequent dispatches would call `host.handle()` on a non-Ready host and deadlock.
-  Fixed: reset `activated = false` on execution failure so the next dispatch re-activates.
-- **S3 (significant):** `DeterministicLearningLoop` emitted no orchestration events, making the loop
-  boundary invisible to replay and observability. Fixed: added `learning.loop.started` and
-  `learning.loop.completed` events with injected bus/clock/idGenerator.
-- **M1/M2 (tests):** Added test cases for scheduler-rejection (budget exceeded) and host-failure
-  (throwing unit). Verified dispatcher returns typed `E_PRODUCT_RUNTIME_DISPATCH` errors in both.
-- **M3 (tests):** Learning-loop test now asserts the prerequisite edge is in the world-state graph
-  and the new loop events appear in the bus log.
-- **cycle-guard (tests):** `learning-path.test.ts` now asserts world-state node/edge counts are
-  unchanged after a failed projection (proving C1 fix works).
-
-Post-strengthening: **18/18 typecheck, 9 product-cognition tests (up from 6), format clean.**
-Branch `codex/phase-1e-product-cognition` merged to master (commit `3e3206b`).
-
-### Next (Phase 1E continued)
-
-The highest-leverage next frontier is **supervisor-routed agent flow + reasoning trace capture**:
-1. A `SupervisorUnit` that routes incoming CognitionPackets to the right agent based on intent
-   classification and learner state from the world-state graph.
-2. Packet-level trace capture: connect `ProductRuntimeDispatcher` emissions to
-   `@inevitable/observability` (span-per-dispatch correlated by trace_id/span_id).
-3. Governed model-output recording at the adapter edge for deterministic replay D3/D4.
-4. Wire `@inevitable/execution` fibers into the dispatcher so longer multi-step cognitive workflows
-   are expressed as deterministic fiber routines, not nested async calls.
+If a stronger design is discovered through research or the local reference repositories, update
+the spec first, document the decision (ADR when major), then implement.

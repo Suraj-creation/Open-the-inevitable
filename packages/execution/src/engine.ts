@@ -82,6 +82,8 @@ export class ExecutionEngine {
   private readonly fibers = new Map<string, FiberRec>();
   private readonly ready: string[] = [];
   private readonly waiting = new Map<string, Set<string>>();
+  // Tokens resolved before any fiber has awaited them — consumed immediately when a fiber awaits.
+  private readonly eagerResolves = new Map<string, unknown>();
   private readonly sleepers: Array<{ fiberId: string; wakeAt: number }> = [];
   private readonly journalEntries: ExecutionJournalEntry[] = [];
 
@@ -106,10 +108,18 @@ export class ExecutionEngine {
     return id;
   }
 
-  /** Provide a value for a pending `await(token)`, moving every waiting fiber back to ready. */
+  /**
+   * Provide a value for a pending `await(token)`, moving every waiting fiber back to ready.
+   * If no fiber is currently waiting on the token (e.g. the resolve races ahead of the fiber's
+   * next `awaitValue` yield), the value is buffered as an eager resolve and consumed the moment
+   * any fiber yields `await(token)`.
+   */
   resolve(token: string, value: unknown): void {
     const waiters = this.waiting.get(token);
-    if (!waiters) return;
+    if (!waiters || waiters.size === 0) {
+      this.eagerResolves.set(token, value);
+      return;
+    }
     for (const fiberId of waiters) {
       const rec = this.fibers.get(fiberId);
       if (!rec || rec.status !== "waiting") continue;
@@ -278,6 +288,15 @@ export class ExecutionEngine {
         return;
       }
       case "await": {
+        // Check for an eager resolve buffered before this fiber reached the await.
+        if (this.eagerResolves.has(effect.token)) {
+          const value = this.eagerResolves.get(effect.token);
+          this.eagerResolves.delete(effect.token);
+          this.appendJournal(rec.id, rec.step, "await", { token: effect.token, eager: true });
+          rec.resume = value;
+          this.refileReady(rec);
+          return;
+        }
         this.appendJournal(rec.id, rec.step, "await", { token: effect.token });
         rec.status = "waiting";
         let set = this.waiting.get(effect.token);

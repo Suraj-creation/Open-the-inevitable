@@ -1,4 +1,6 @@
 import type { EventBus } from "@inevitable/events";
+import { type GovernanceEngine, guard } from "@inevitable/governance";
+import { withSpan } from "@inevitable/observability";
 import type {
   AgentManifest,
   CognitiveIdentity,
@@ -60,6 +62,13 @@ export interface ProductRuntimeDispatcherDeps {
   readonly clock?: Clock;
   readonly idGenerator?: IdGenerator;
   readonly nodeId?: string;
+  /**
+   * Optional governance engine. When provided, every dispatch is evaluated against the
+   * registered policies before work is admitted. Blocked requests return an error without
+   * touching the scheduler or host.
+   * Spec: spec/product/product-cognition-runtime.md §10, spec/kernel/governance-kernel.md.
+   */
+  readonly governance?: GovernanceEngine;
 }
 
 export interface ProductDispatchInput {
@@ -221,13 +230,15 @@ export class ProductRuntimeDispatcher {
   private readonly clock: Clock;
   private readonly idGenerator: IdGenerator;
   private readonly agent: RuntimeAgentBinding;
+  private readonly governance: GovernanceEngine | undefined;
   private hlc: Hlc;
   private activated = false;
 
-  constructor(deps: ProductRuntimeDispatcherDeps) {
+  constructor(private readonly deps: ProductRuntimeDispatcherDeps) {
     this.clock = deps.clock ?? new SystemClock();
     this.idGenerator = deps.idGenerator ?? new CryptoIdGenerator();
     this.agent = deps.agent;
+    this.governance = deps.governance;
     this.scheduler = deps.scheduler ?? new DepthScheduler(deps.schedulerOptions);
     this.hlc = hlcInit(deps.nodeId ?? "product-runtime-dispatch");
     this.host = new CognitiveUnitHost(deps.agent.unit, deps.agent.identity, {
@@ -239,6 +250,31 @@ export class ProductRuntimeDispatcher {
   }
 
   async dispatch(input: ProductDispatchInput): Promise<Result<ProductDispatchResult, CosError>> {
+    // Governance gate (kernel primitive). Must be the first check — before any state changes.
+    // Spec: spec/product/product-cognition-runtime.md §10, spec/kernel/governance-kernel.md.
+    if (this.governance) {
+      const govResult = guard(this.governance, {
+        subjectCid: input.session.learnerIdentity.cid,
+        resource: "product.cognition.dispatch",
+        action: `dispatch.${input.targetAgentId}`,
+        context: {
+          trustLevel: input.session.learnerIdentity.trust_level,
+          targetAgentId: input.targetAgentId,
+        },
+        classification: input.session.capabilityEnvelope.data_classification_ceiling,
+      });
+      if (!govResult.allowed) {
+        return err(
+          productDispatchError("governance policy blocked product dispatch", {
+            decisionId: govResult.decision.decision_id,
+            policyId: govResult.decision.policy_id,
+            reason: govResult.decision.reason,
+            outcome: govResult.decision.decision,
+          }),
+        );
+      }
+    }
+
     const packet = this.createPacket(input);
     const workItem = this.createWorkItem(input, packet);
     const admission = this.scheduler.submit(workItem);
@@ -266,7 +302,18 @@ export class ProductRuntimeDispatcher {
         await this.host.activate(input.session.contextLease);
         this.activated = true;
       }
-      const emissions = await this.host.handle(packet);
+      // Wrap host.handle() in an OTel span for end-to-end trace capture.
+      // Spec: spec/product/product-cognition-runtime.md §8, spec/telemetry/otel-edge.md.
+      // Without a registered SDK the span is a no-op — safe in offline tests.
+      const emissions = await withSpan("cos.agent.dispatch", () => this.host.handle(packet), {
+        "cos.packet_id": packet.packet_id,
+        "cos.agent_id": this.agent.identity.cid,
+        "cos.agent_unit_type": this.agent.identity.unit_type,
+        "cos.intent": input.intent ?? "",
+        "cos.concept_ids": (input.conceptIds ?? []).join(","),
+        "cos.trace_id": packet.trace_id,
+        "cos.span_id": packet.span_id,
+      });
       this.scheduler.complete(workItem.work_id);
       return ok({
         workItem: dispatched,

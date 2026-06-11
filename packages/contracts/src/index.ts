@@ -57,13 +57,32 @@ export interface RelationalStore {
   transaction<T>(fn: (tx: RelationalStore) => Promise<T>): Promise<T>;
 }
 
+/**
+ * Model generation request. `invocation_key` is the deterministic identity of the call
+ * (`<unit_cid>:<packet_id>:<purpose>:<ordinal>`) used by the D3 recording seam — see
+ * spec/protocols/model-invocation-protocol.md.
+ */
+export interface ModelGenerationRequest {
+  prompt: string;
+  system?: string;
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+  seed?: number;
+  responseSchema?: Record<string, unknown>;
+  invocation_key?: string;
+}
+
+export interface ModelGenerationResult {
+  text: string;
+  model: string;
+  finishReason?: "stop" | "max_tokens" | "refusal" | "safety" | "other";
+  usage?: { inputTokens?: number; outputTokens?: number };
+}
+
 /** Model runtime adapter (hosted LLMs, local vLLM, future models). Capability-, not vendor-bound. */
 export interface ModelRuntime {
-  generate(input: {
-    prompt: string;
-    model?: string;
-    maxTokens?: number;
-  }): Promise<{ text: string; model: string }>;
+  generate(input: ModelGenerationRequest): Promise<ModelGenerationResult>;
   embed(text: string): Promise<number[]>;
 }
 

@@ -14,6 +14,8 @@ Initial event families:
 - `security.*`
 - `observability.*`
 - `evolution.*`
+- `surface.*`
+- `model.*`
 
 Every event family must define schema, producer, consumer, retention, replay, governance classification, and failure behavior.
 
@@ -22,4 +24,6 @@ Every event family must define schema, producer, consumer, retention, replay, go
 - Event envelope and semantics → [protocols/cognitive-event-protocol.md](../protocols/cognitive-event-protocol.md)
 - Full family catalog (owners, retention, replay, classification) → [events/event-taxonomy.md](../events/event-taxonomy.md)
 - Governance rules for events → [meta/event-governance.md](../meta/event-governance.md)
+- Surface family (Phase 2A) → [surface/surface-event-architecture.md](../surface/surface-event-architecture.md)
+- Model family (Phase 2B, D3 recording) → [protocols/model-invocation-protocol.md](../protocols/model-invocation-protocol.md)
 

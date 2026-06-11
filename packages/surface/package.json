@@ -1,0 +1,27 @@
+{
+  "name": "@inevitable/surface",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 2A Cognitive Surface Runtime — where cognition becomes visible.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/events": "workspace:*",
+    "@inevitable/governance": "workspace:*",
+    "@inevitable/memory": "workspace:*",
+    "@inevitable/product-cognition": "workspace:*",
+    "@inevitable/protocols": "workspace:*",
+    "@inevitable/shared": "workspace:*",
+    "@inevitable/world-state": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

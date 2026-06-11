@@ -79,6 +79,8 @@ Naming grammar: `family.subdomain.action` (e.g. `memory.mutation.committed`). Al
 | `evolution.*` | proposal.created, experiment.started, shadow_result.recorded, rollout.completed | evolution | permanent | replayable |
 | `kernel.*` | syscall.invoked, trap.raised, panic | kernel | 1y-archive (audit) | recorded-observation |
 | `system.*` | resource.threshold, deadlock.detected, topology.changed | kernel | 90d | non-replayable |
+| `surface.*` | created, block.generated, block.modified, timeline.updated, agent.contributed, memory.attached, reasoning.recorded, session.closed | surface | permanent | replayable |
+| `model.*` | output.recorded, invocation.failed | runtime | permanent | replayable |
 
 Per-family schema registration — canonical JSON Schema for a family entry:
 

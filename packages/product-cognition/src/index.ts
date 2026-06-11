@@ -25,3 +25,18 @@ export type {
 export { MasteryCheckpointRecorder } from "./mastery";
 export type { ProductOnboardingDeps } from "./onboarding";
 export { ProductOnboardingService } from "./onboarding";
+export type { SupervisorRoutingDecision, SupervisorTargetAgent } from "./supervisor";
+export { MASTERY_CONFIDENCE_THRESHOLD, SupervisorUnit } from "./supervisor";
+export {
+  PRODUCT_DISPATCH_POLICIES,
+  productDispatchClassificationGate,
+  productDispatchTrustGate,
+} from "./product-dispatch-policies";
+export type {
+  FiberedLearningLoopDeps,
+  FiberedLearningLoopInput,
+  FiberedLearningLoopResult,
+} from "./fiber-learning-loop";
+export { FiberedLearningLoop } from "./fiber-learning-loop";
+export type { ModelBackedRole, ModelBackedUnitDeps, ModelLayeredOutput } from "./model-backed-unit";
+export { ModelBackedUnit, parseModelLayeredOutput } from "./model-backed-unit";

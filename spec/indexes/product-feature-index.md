@@ -66,7 +66,7 @@ The product surface decomposes into twelve capability pillars; sixteen feature s
    - The catalog table in `spec/product/Broader-feature-product.md` §15.
    - The index in `spec/product/README.md`.
    - The pillar table above.
-   - The Feature Spec Catalog in `CLAUDE.md` and `CODEX.md`.
+   - The Feature Spec Catalog in `CODEX.md` (`CLAUDE.md` carries no copy — it points to this index).
 4. Link the feature's upstream/downstream dependencies in its frontmatter and the cross-cut table
    above if it introduces new architecture-domain touchpoints.
 

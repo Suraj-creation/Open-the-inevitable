@@ -46,6 +46,12 @@ cannot be trusted.
 The Phase 1D substrate guarantees **D0–D2 deterministically in-process** and provides the recording
 seam (the resolver) for **D3**; D4 depends on model-output recording at the adapter edge.
 
+**D3 realization (Phase 2B):** model I/O is recorded by the `RecordingModelRuntime` at the adapter
+edge as `model.output.recorded` events (format_version `1.0.0`) per the
+[Model Invocation Protocol](../protocols/model-invocation-protocol.md): record-before-use in live
+runs; replay resolves from the record by `(invocation_key, ordinal)` and never re-invokes the
+provider; a missing record fails closed (`E_MODEL_REPLAY_MISS`).
+
 ## Architecture
 
 Two append-only artifacts are the source of truth: the **event log** (`@inevitable/events` bus) and the

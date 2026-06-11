@@ -97,6 +97,30 @@ describe("ExecutionEngine — await / resolve", () => {
     expect(captured).toBe(42);
     expect(e.pendingTokens()).toEqual([]);
   });
+
+  it("eager-resolves a token buffered before the fiber yields await", async () => {
+    // Simulates the emit+await bridge pattern: resolve() is called during the emit sink
+    // (before the fiber has processed its awaitValue yield). The engine must buffer the
+    // eager resolve and deliver it when the fiber later yields await(token).
+    const e = freshEngine({
+      sink: async () => {
+        // Resolve the token immediately inside the sink — before the fiber reaches awaitValue.
+        e.resolve("bridge-token", 99);
+      },
+    });
+
+    const event = { event_type: "bridge.request", payload: {} } as unknown as CognitiveEvent;
+    let captured: unknown;
+    e.submit(function* (ctx) {
+      yield* ctx.emit(event);
+      // At this point resolve() was already called by the sink; the engine must still deliver the value.
+      captured = yield* ctx.awaitValue<number>("bridge-token");
+    });
+
+    await e.runToQuiescence();
+    expect(captured).toBe(99);
+    expect(e.pendingTokens()).toEqual([]);
+  });
 });
 
 describe("ExecutionEngine — emit", () => {

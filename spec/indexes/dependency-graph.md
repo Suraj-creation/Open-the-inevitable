@@ -63,3 +63,37 @@ events/event-taxonomy          -> protocols/cognitive-event-protocol, meta/event
 runtime/cognitive-unit-runtime -> all kernel/* + kernel-internals/cognition-syscalls + protocols/cognitive-unit-abi
 ```
 
+## Phase 2A Surface Spec Dependencies
+
+Authored in Phase 2A (Cognitive Surface Runtime). Acyclic; arrows point from dependent to dependency.
+
+```text
+surface/cognitive-surface-runtime      -> product/features/F16, product/features/F09, product/features/F02,
+                                          product/product-cognition-runtime, agents/supervisor-agent,
+                                          world-state/world-state-graph, events/event-taxonomy,
+                                          execution/cognitive-execution-engine, memory/memory-tiers,
+                                          kernel/governance-kernel
+surface/surface-event-architecture     -> surface/cognitive-surface-runtime, events/event-taxonomy,
+                                          protocols/cognitive-event-protocol
+surface/surface-timeline-engine        -> surface/cognitive-surface-runtime, product/features/F02,
+                                          product/features/F03, product/product-cognition-runtime,
+                                          world-state/world-state-graph
+surface/multimodal-provider-abstraction -> surface/cognitive-surface-runtime, product/features/F04,
+                                          product/features/F16
+```
+
+## Phase 2B Model Invocation Dependencies
+
+Authored in Phase 2B (Real Cognition on the Surface). Acyclic; arrows point from dependent to dependency.
+
+```text
+protocols/model-invocation-protocol    -> replay/deterministic-replay, protocols/cognitive-event-protocol,
+                                          kernel/capability-envelope, kernel/governance-kernel,
+                                          events/event-taxonomy
+product/product-cognition-runtime §11  -> protocols/model-invocation-protocol, protocols/cognitive-unit-abi
+surface/cognitive-surface-runtime §6.1 (expand) -> protocols/model-invocation-protocol,
+                                          surface/surface-event-architecture, product/features/F04
+surface/multimodal-provider-abstraction §6 (D3) -> protocols/model-invocation-protocol
+```
+
+

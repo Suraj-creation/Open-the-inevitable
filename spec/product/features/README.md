@@ -188,5 +188,5 @@ Specific section pointers into the master PRD, vision sources, and architecture 
    - [`../Broader-feature-product.md`](../Broader-feature-product.md) §15.
    - [`../README.md`](../README.md).
    - [`spec/indexes/product-feature-index.md`](../../indexes/product-feature-index.md).
-   - The Feature Spec Catalog tables in `CLAUDE.md` and `CODEX.md`.
+   - The Feature Spec Catalog table in `CODEX.md` (`CLAUDE.md` carries no copy — it points to the retrieval index).
 4. Validate architecture conformance and move the status forward.

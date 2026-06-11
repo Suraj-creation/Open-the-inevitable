@@ -17,6 +17,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "verify": "pnpm run codegen && pnpm run typecheck && pnpm run test && pnpm run lint && pnpm run format:check",
+    "demo": "tsx apps/cli/src/main.ts",
     "prepare": "husky || exit 0"
   },
   "devDependencies": {

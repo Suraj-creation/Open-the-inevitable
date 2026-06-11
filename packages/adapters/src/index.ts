@@ -15,4 +15,16 @@ export {
   PostgresRelationalStore,
 } from "./external";
 
+export {
+  NullModelRuntime,
+  GeminiModelRuntime,
+  RecordingModelRuntime,
+  MODEL_OUTPUT_RECORDED,
+  MODEL_INVOCATION_FAILED,
+  MODEL_RECORDING_FORMAT_VERSION,
+  type GenAiClientLike,
+  type RecordingMode,
+  type RecordingModelRuntimeDeps,
+} from "./model";
+
 export { runEventTransportConformance, runVectorStoreConformance } from "./conformance";

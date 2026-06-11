@@ -58,7 +58,7 @@ Product law is **subordinate to architecture law**. Where a product requirement 
 | F15 | Content Ingestion & Universal Knowledge Substrate | cross-cutting |
 | F16 | The Cognitive Surface — Universal Multimodal Substrate | cross-cutting |
 
-**When a new feature spec is added** (or an existing one renamed/split/retired), update this table, the table in `CLAUDE.md`, the catalog in `spec/product/Broader-feature-product.md` §15, the index in `spec/product/README.md`, and the retrieval index `spec/indexes/product-feature-index.md`. Do not let the product spec system drift.
+**When a new feature spec is added** (or an existing one renamed/split/retired), update this table, the catalog in `spec/product/Broader-feature-product.md` §15, the index in `spec/product/README.md`, and the retrieval index `spec/indexes/product-feature-index.md` (the canonical catalog — `CLAUDE.md` points there and carries no copy). Do not let the product spec system drift.
 
 ## Reference Repository Learning Doctrine
 

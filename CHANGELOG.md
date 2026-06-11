@@ -3,7 +3,62 @@
 All notable changes to The Inevitable are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); the project uses Conventional Commits.
 
+Entries are **milestone-level abstractions** — what shipped and why it matters, a short
+paragraph or a few bullets per milestone. Implementation detail lives in the owning specs and
+`docs/history/implementation-log.md`; current codebase state lives in `IMPLEMENTATION.md`.
+
 ## [Unreleased]
+
+### Added — Phase 2B: Real Cognition on the Surface
+
+- Authored the **Model Invocation Protocol** (`spec/protocols/model-invocation-protocol.md`):
+  the only sanctioned way a cognitive unit invokes a generative model — record-before-use,
+  replay-never-invokes, fail-closed on a replay miss. Registered the `model.*` event family
+  (permanent, replayable) and realized determinism level **D3** from the replay spec.
+- Added model runtime adapters in `@inevitable/adapters`: deterministic `NullModelRuntime`,
+  `GeminiModelRuntime` (first real provider, guarded dynamic import of the Gemini SDK — never a
+  workspace dependency), and `RecordingModelRuntime` (the D3 recording seam with record/replay
+  modes).
+- Added `ModelBackedUnit` to `@inevitable/product-cognition`: real model-generated
+  explanation/practice/assessment cognition through the **same** governed dispatch path
+  (governance gate, scheduler admission, OTel span), with layered output (F04 layers 0–1),
+  populated reasoning traces, and visible deterministic fallback on model failure.
+- Added progressive deepening to `@inevitable/surface`: `SurfaceSession.expand(blockId, layer)`
+  re-dispatches through the governed explanation dispatcher and emits
+  `surface.explanation.expanded` — the typed modification the fold merges into the block.
+- Added `apps/cli` + `pnpm demo` — the first runnable manifestation: a living Cognitive Surface
+  in the terminal (timeline, blocks, supervisor decisions, expansion, trace) over Gemini when
+  `GEMINI_API_KEY` is set, or the deterministic null model otherwise.
+- D3 acceptance proven in tests: a seeded record run replayed from its `model.output.recorded`
+  events reproduces a byte-identical surface frame without ever re-invoking the provider.
+
+### Added — Phase 2A: Cognitive Surface Runtime
+
+- Authored the Phase 2A surface spec suite under `spec/surface/`:
+  `cognitive-surface-runtime.md` (SRF-001 — cognition blocks, surface state as a deterministic
+  fold over the `surface.*` event log, session/projection/renderer separation),
+  `surface-event-architecture.md` (SRF-002 — the 16-subtype `surface.*` event family, permanent
+  retention, replayable), `surface-timeline-engine.md` (SRF-003 — timeline as a pure projection of
+  world-state concept DAG + mastery checkpoints), and `multimodal-provider-abstraction.md`
+  (SRF-004 — image/video/voice/live/multimodal provider adapters with a deterministic
+  NullProvider; no vendor SDKs).
+- Added `@inevitable/surface`, the first product manifestation package: typed `CognitionBlock`
+  creation with mandatory provenance, `SurfaceTimelineBuilder` (wraps `LearningPathProjector`;
+  Kahn-ordered, mastery-aware status derivation), `foldSurfaceEvents` pure event-fold projection,
+  `AgentContributionRuntime` (agent.joined / block.generated / agent.contributed),
+  `traceBlock` provenance resolver (block → events → packet → agent → world-state → memory),
+  `TextSurfaceRenderer`, `ProviderRegistry` + `NullMultimodalProvider`, and `SurfaceSession`
+  composing `FiberedLearningLoop` end-to-end ("Teach me Neural Networks" acceptance flow).
+- Registered the `surface.*` family in `spec/events/event-taxonomy.md` and the retrieval indexes
+  (`spec/indexes/event-index.md`, `spec/indexes/dependency-graph.md`).
+
+### Added — Phase 1E: Governance Dispatch Gate & Confidence Routing
+
+- Wired `@inevitable/governance` into `ProductRuntimeDispatcher`: GOV-P01 trust gate and GOV-P02
+  classification gate evaluate every product dispatch before scheduler admission; denials emit
+  governed decision records instead of executing.
+- Added confidence-weighted supervisor routing: a passing mastery checkpoint below the
+  `MASTERY_CONFIDENCE_THRESHOLD` (0.6) routes to revision instead of complete.
 
 ### Added — Cognitive Surface: Deep Research & F16 Feature Spec
 

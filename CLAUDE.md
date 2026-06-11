@@ -1,237 +1,195 @@
-# The Inevitable - Claude Project Instructions
+# The Inevitable — Repository Constitution
 
-The Inevitable is not a normal AI app. It is a long-term, spec-driven cognitive operating system effort for education, distributed cognition, persistent memory, multi-agent orchestration, and continuously evolving intelligence infrastructure.
+This file is the **constitution** of this repository: identity, mission, architectural law,
+working doctrine, and retrieval entry points. It is auto-loaded into every agent session, so
+every line here costs context in every conversation. It is governed by §7 — read §7 before
+editing this file. It is **not** a status document, changelog, or implementation inventory.
 
-## Primary Architectural References
+## 1. Identity and Mission
 
-Before architecture work, implementation work, refactoring, agent design, memory design, orchestration design, runtime design, protocol design, or infrastructure work, read and synthesize these files:
+The Inevitable is not a normal AI app. It is a long-term, spec-driven effort to build a
+**Cognitive Operating System (COS)** for education and human understanding — distributed
+cognition, persistent memory, multi-agent orchestration, governed self-evolution, and
+continuously improving intelligence infrastructure.
 
-1. `spec/advanced-agent-architecture.md`
-2. `spec/next-generation-cognitive-operating-system-blueprint.md`
-3. `spec/vision-application/Vision.md`
-4. `spec/vision-application/The_Inevitable_Master_Vision.md`
-5. `spec/vision-application/The_Inevitable_Vision_Comprehensive.md`
-6. `spec/vision-application/Universal-Learning-Intelligence-Agent.md`
-7. `spec/agents-orchestration-deep-dive.md`
-8. `spec/vision-application/PLAN.md`
-9. `spec/vision-application/referenceRepos.md`
-10. `spec/spec-folder-ecosystem.md`
+What it is ultimately becoming:
 
-`spec/advanced-agent-architecture.md` and `spec/next-generation-cognitive-operating-system-blueprint.md` are complementary foundational architecture references. Do not treat them as conflicting foundations. If one contains a concept missing from the other, treat it as additive context. If implementation or research discovers a stronger abstraction, update the relevant specs so the architecture remains coherent.
+- A **Universal Learning Intelligence**: an intelligence that can take any human, from any
+  starting point, to genuine verified mastery of anything — by recursively resolving
+  prerequisites, adapting explanation to the learner's cognitive state, and verifying depth.
+  Not a chatbot that answers questions; an intelligence that grows minds.
+- A **Cognitive Surface**: the central product manifestation — a living, adaptive, multimodal
+  medium (the cognitive whiteboard first; living document, simulation stage, knowledge-graph
+  explorer, authoring canvas as projections of the same substrate) where cognition itself
+  becomes visible: agents work, knowledge appears, explanations evolve, memory forms, and
+  understanding grows in real time. **The UI is a projection; the runtime is the product.**
+- An **education and intelligence-transformation mission**: persistent cognitive memory of each
+  learner, a living universe of interconnected knowledge, collective and institutional
+  intelligence, and a system that improves its own pedagogy through governed evolution.
 
-These documents are living research-grade references, not frozen implementation law. They express the intended cognitive operating system direction derived from the core outcome vision.
+Evaluate every decision against one question: does it move the system toward a governed,
+replayable, evolving cognitive operating system that transforms how humans learn — or does it
+merely ship a feature?
 
-## Primary Product & Feature References
+## 2. Architectural Laws
 
-For any **product**, **feature**, **learning-experience**, **pedagogy**, **agent-behaviour**, **memory-policy**, **orchestration-flow**, **UX**, or **mode/persona** work — i.e. anything that touches *what the platform does for humans interacting with knowledge* — read these BEFORE writing or modifying code, in this exact order:
-
-1. `spec/product/Broader-feature-product.md` — **the canonical product specification (master PRD)**. Defines the product thesis, the twelve capability pillars, the agent ecosystem, the memory architecture, the real-time orchestration model, modes/personas, the success North Star, and the authoritative **Product → Architecture mapping** onto the Cognitive Operating System primitives.
-2. `spec/product/README.md` — the product domain entry point, read-first guidance, and feature index.
-3. The relevant **feature spec(s)** under `spec/product/features/F01`…`F16` (see [Feature Spec Catalog](#feature-spec-catalog) below). Read at minimum the feature(s) directly affected by the change and any feature(s) listed as upstream/downstream in its frontmatter.
-4. `spec/product/features/README.md` — shared feature-spec template, status lifecycle, and authoring conventions, when adding or modifying a feature spec.
-5. The owning **architecture specs** for the COS primitives the feature touches (`spec/kernel/`, `spec/protocols/`, `spec/events/`, `spec/runtime/`, `spec/memory/`, `spec/world-state/`, `spec/orchestration/`, `spec/curriculum/`, `spec/pedagogy/`).
-6. `spec/vision-application/` files when intent or philosophy is ambiguous — these are the upstream source of truth for product purpose.
-
-The product specification is **product law subordinate to architecture law**. Where a product requirement and an architecture invariant (the ten non-negotiable laws, blueprint §25.4) appear to conflict, the architecture invariant wins and the requirement must be expressed *through* the invariant (events, leases, memory mutations, governed capabilities), never around it. See `spec/product/Broader-feature-product.md` §14 — *How the Product Maps onto the Cognitive Operating System*.
-
-### Feature Spec Catalog
-
-| ID | Title | Capability Pillar |
-|---|---|---|
-| F01 | Cognitive Onboarding & Context Initialization | P1 |
-| F02 | Dynamic Cognitive Navigation & Learning Timeline | P2 |
-| F03 | Recursive Prerequisite Intelligence (ULI Core) | P3 |
-| F04 | Adaptive Multimodal Explanation & Dynamic System Prompting | P4 |
-| F05 | Persistent Cognitive Memory System | P5 |
-| F06 | Specialized Agent Ecosystem | P6 |
-| F07 | Real-Time Cognitive Orchestration | P7 |
-| F08 | Interdisciplinary Intelligence & Knowledge Graph | P8 |
-| F09 | Living-Universe Experience & Immersive Roadmap | P9 |
-| F10 | Research & Innovation Acceleration (UALRCI) | P10 |
-| F11 | Institutional & Collective Intelligence + Educator Mode | P11 |
-| F12 | Collective Cognitive Evolution (Governed Self-Improvement) | P12 |
-| F13 | Identity, Personas & Dual Modes | cross-cutting |
-| F14 | Assessment, Mastery & Depth Verification | cross-cutting |
-| F15 | Content Ingestion & Universal Knowledge Substrate | cross-cutting |
-| F16 | The Cognitive Surface — Universal Multimodal Substrate | cross-cutting |
-
-**When a new feature spec is added** (or an existing one renamed/split/retired), update this table, the table in `CODEX.md`, the catalog in `spec/product/Broader-feature-product.md` §15, the index in `spec/product/README.md`, and the retrieval index `spec/indexes/product-feature-index.md`. The product spec system must not drift.
-
-## Reference Repository Learning Doctrine
-
-This workspace contains local reference repositories that future agents must mine for implementation patterns before inventing new ones:
-
-- `MiroFish/` for simulation-first, staged graph/profile/simulation/report pipelines.
-- `hermes-agent/` for persistent agent loop, memory, tools, skills, gateway, scheduling, and multi-surface runtime practices.
-- `OpenMAIC/` for classroom generation, scene runtime, LangGraph-like orchestration, streaming, and multimodal education flows.
-- `paperclip/` for AI-native company control plane, governance, issues, heartbeats, budgets, and execution semantics.
-- `pi/` for modular coding-agent harness, events, extensions, skills, provider abstraction, and session persistence.
-- This repository's own `spec/vision-application/` corpus as the sixth internal reference source for outcome vision and implementation constraints.
-
-If a sixth external reference repository is restored or added later, update `spec/vision-application/referenceRepos.md`, `spec/reference-repos/README.md`, and this instruction file. Do not guess missing reference-repo details.
-
-## Architectural Philosophy
-
-Preserve these principles:
+These principles are sacred. The ten non-negotiable invariants live in
+`spec/next-generation-cognitive-operating-system-blueprint.md` §25.4; this is their working form:
 
 - Intelligence is modular, composable, observable, governable, persistent, replayable, and evolvable.
 - Agents are cognitive runtime containers, not prompts.
 - Every major interaction flows through protocol-governed events or contracts.
-- Memory, orchestration, workflows, agents, and runtime state are projections of a unified world-state architecture.
-- Cognition unfolds across time, so event sourcing, replay, causal tracing, and temporal state are core primitives.
+- Memory, orchestration, workflows, agents, and runtime state are projections of a unified
+  world-state architecture.
+- Cognition unfolds across time: event sourcing, replay, causal tracing, and temporal state are
+  core primitives.
 - Governance is a kernel primitive, not an external moderation layer.
-- Observability must track reasoning quality, memory influence, drift, disagreement, confidence, and learning outcomes.
-- Self-evolution must happen through governed proposals, evaluation, replay, shadow tests, and rollback.
+- Observability tracks reasoning quality, memory influence, drift, disagreement, confidence,
+  and learning outcomes.
+- Self-evolution happens only through governed proposals, evaluation, replay, shadow tests,
+  and rollback.
 
-## Mandatory Workflow Rules
+**Never:** bypass protocols, event sourcing, governance, or observability for convenience;
+mutate memory without a typed memory mutation; create undocumented state transitions; hardcode
+fragile orchestration; treat prompts as the agent architecture; treat a planning document as
+final code law; let the two foundational architecture documents drift into contradiction.
 
-Before implementation:
+Code that violates these laws is invalid implementation even if it works locally.
 
-1. Read the relevant architecture specs.
-2. Read the related protocol, runtime, memory, governance, observability, and orchestration docs.
-3. Identify which cognitive primitives are involved.
-4. Check whether the change affects events, memory mutations, world-state graph, policies, workflows, agent manifests, or protocols.
-5. Preserve modularity, observability, governance, replayability, and protocol boundaries.
-6. Avoid tightly coupled direct calls where event or protocol mediation is required.
-7. Update specs before or alongside implementation when architecture changes.
-8. Verify the change with focused tests or documentation checks.
+## 3. Canonical Reference Map
 
-## Spec-First Execution Doctrine
+CLAUDE.md holds pointers, never copies. When a domain below changes, update the owning files —
+not this map (unless a path moves).
 
-Implementation is subordinate to the spec system. Specs are not passive documentation; they are executable architectural law.
+**Vision and purpose** — upstream source of truth whenever intent or philosophy is ambiguous:
 
-When implementation changes architecture, runtime semantics, memory behavior, protocol behavior, orchestration flow, governance semantics, observability semantics, event contracts, or execution semantics:
+- `spec/vision-application/` — the core vision corpus: `Vision.md`,
+  `The_Inevitable_Master_Vision.md`, `The_Inevitable_Vision_Comprehensive.md`,
+  `Universal-Learning-Intelligence-Agent.md`, `PLAN.md`, `referenceRepos.md`.
 
-1. Update or create the relevant spec first.
-2. Validate coherence with upstream and downstream specs.
-3. Update indexes and dependency maps.
-4. Implement only after the spec relationship is clear.
-5. Validate implementation against the spec.
-6. Feed implementation lessons back into the spec.
+**Architecture law** — read before architecture, runtime, protocol, memory, orchestration,
+agent, or infrastructure work:
 
-## Retrieval-Oriented Spec Doctrine
+- `spec/advanced-agent-architecture.md` and
+  `spec/next-generation-cognitive-operating-system-blueprint.md` — complementary foundations,
+  never conflicting; treat differences as additive context.
+- `spec/agents-orchestration-deep-dive.md` — orchestration depth.
+- `spec/spec-folder-ecosystem.md` — the spec domain map.
+- Owning domain specs: `spec/kernel/`, `spec/protocols/`, `spec/events/`, `spec/runtime/`,
+  `spec/memory/`, `spec/world-state/`, `spec/execution/`, `spec/orchestration/`, `spec/scheduler/`.
 
-Every spec should be written for humans and AI retrieval systems. A valid spec should declare:
+**Product law** (subordinate to architecture law) — read before any product, feature, pedagogy,
+agent-behaviour, memory-policy, UX, or mode/persona work, in this order:
 
-- Domain ownership.
-- Upstream and downstream dependencies.
-- Related protocols.
-- Related events.
-- Related runtime systems.
-- Related governance systems.
-- Related observability systems.
-- Semantic tags.
-- Canonical references.
-- Boundary and non-goal notes.
+1. `spec/product/Broader-feature-product.md` — the master PRD: product thesis, twelve capability
+   pillars, agent ecosystem, modes/personas, North Star, and the authoritative Product →
+   Architecture mapping (§14).
+2. `spec/product/README.md` — product domain entry point and feature index.
+3. The affected feature spec(s) under `spec/product/features/F01`–`F16`, plus their declared
+   upstream/downstream features. Catalog: `spec/indexes/product-feature-index.md`.
+4. `spec/product/features/README.md` — feature-spec template and lifecycle, when authoring specs.
 
-Use `spec/indexes/` to keep retrieval efficient as the number of specs grows.
+Where a product requirement and an architecture invariant conflict, the invariant wins; express
+the requirement *through* the invariant (events, leases, memory mutations, governed
+capabilities), never around it.
 
-## Spec Governance Rules
+**The Cognitive Surface** — the central product idea; read before any surface, whiteboard,
+timeline, multimodal, or rendering work:
 
-When a new system, agent, runtime, workflow, protocol, memory layer, event type, orchestration pattern, governance rule, or infrastructure abstraction is added or changed:
+- `spec/cognitive_surface/` — the research corpus behind the cognitive whiteboard: what the
+  surface *is*, why it is the product's heart, and the decision-grade research it rests on.
+  Start with `cognitive-whiteboard-system.md` and `cognitive_surface_dossier.md`.
+- `spec/surface/` — the implemented runtime specs (SRF-001…SRF-004: surface runtime, event
+  architecture, timeline engine, multimodal provider abstraction).
+- `spec/product/features/F16-cognitive-surface.md` (substrate) and `F09` (experience);
+  `spec/research/cognitive-surface-frontier-research.md` (frontier dossier).
 
-- Update the relevant spec document.
-- Update any affected protocol contracts.
-- Update event and state transition descriptions.
-- Update dependency and lifecycle notes.
-- Update observability and failure semantics.
-- Update governance and security implications.
-- Update `spec/spec-folder-ecosystem.md` if the folder/domain map changes.
+**Implementation status** — never duplicated in this file:
 
-The spec system must not become stale.
+- `IMPLEMENTATION.md` — current state, traceability map, active frontier, verification.
+- `CHANGELOG.md` — abstract milestone history.
+- `docs/history/implementation-log.md` — detailed dated build narratives.
+- `spec/implementation-roadmaps/` — phase plans.
 
-## Architecture Review Protocol
+**Retrieval** — `spec/indexes/` is the entry point for finding specs, events, protocols,
+capabilities, dependencies, and features as the spec system grows.
 
-Before introducing new primitives, modifying runtime semantics, changing protocols, altering orchestration, or altering memory systems, check:
+**Reference repositories** — mine before inventing: `MiroFish/`, `hermes-agent/`, `OpenMAIC/`,
+`paperclip/`, `pi/`, plus this repo's own `spec/vision-application/` corpus. Per-repo guidance
+lives in `spec/vision-application/referenceRepos.md` and `spec/reference-repos/`.
 
-- Architectural conflict risk.
-- Protocol implications.
-- Event and replay implications.
-- Governance implications.
-- Observability implications.
-- Security implications.
-- Scalability implications.
-- Reference-repo lessons.
-- Research implications.
+## 4. Working Doctrine
 
-Major decisions require an ADR under `spec/architecture-decisions/`.
+**Spec-first.** Implementation is subordinate to the spec system; specs are executable
+architectural law, not passive documentation. When a change touches architecture, runtime
+semantics, memory behavior, protocols, orchestration, governance, observability, events, or
+execution semantics: update or create the owning spec first, validate coherence
+upstream/downstream, update `spec/indexes/` and dependency maps, then implement, then validate
+the implementation against the spec and feed lessons back into it. Specs declare ownership,
+dependencies, related protocols/events/runtime/governance/observability systems, semantic tags,
+and non-goals.
 
-## Implementation Traceability
+**Before implementing,** read the owning specs, identify the cognitive primitives involved,
+check whether the change affects events, memory mutations, world-state, policies, workflows,
+manifests, or protocols, and preserve modularity, observability, governance, replayability, and
+protocol boundaries. Major decisions require an ADR under `spec/architecture-decisions/`.
 
-Every implementation artifact should trace back to:
+**Traceability.** Every implementation artifact traces to a spec domain, a protocol or contract
+where applicable, runtime semantics, governance requirements, observability requirements, and
+tests or validation evidence.
 
-- A spec domain.
-- A protocol or contract when applicable.
-- Runtime semantics.
-- Governance requirements.
-- Observability requirements.
-- Tests or validation evidence.
+**Testing and failure.** Foundational work ships with unit, integration, governance, replay,
+and failure tests. Nothing cognitive exists without observability hooks. Every implementation
+defines failure modes, retries, degradation, recovery, rollback, and observability under failure.
 
-Code that violates architecture contracts or spec governance is invalid implementation, even if it works locally.
+**Research evolution.** The project may evolve beyond current documents. When research or
+implementation evidence reveals a stronger primitive: propose it, check coherence with the
+outcome vision, update the specs, then implement. Preserve important research and rejected
+designs in `spec/research/`.
 
-## Research Rules
+## 5. Current Posture
 
-This project is allowed to evolve beyond the current documents. If state-of-the-art research or implementation evidence suggests a better architecture:
+> Replace-only. Maximum 8 lines. Details live in `IMPLEMENTATION.md`.
 
-- Propose the improvement clearly.
-- Explain why it is stronger.
-- Check coherence with the outcome vision.
-- Update the relevant architecture docs.
-- Avoid blindly following an older sample plan when a better research-backed primitive is available.
+Phases 1A–2B are complete: the full COS substrate, the product-cognition runtime bridge, the
+Cognitive Surface Runtime, and now **real model-backed cognition** — the Model Invocation
+Protocol (D3 recorded replay), Gemini/Null/Recording model runtimes, `ModelBackedUnit` through
+the governed dispatch path, surface `expand()`, and the first runnable demo (`pnpm demo`,
+`apps/cli`). Active frontier: **Phase 2C — The Visible Surface** (see `IMPLEMENTATION.md`).
 
-Research integration workflow:
+## 6. Build and Verify
 
-1. Research discovery.
-2. Research evaluation.
-3. Architecture impact analysis.
-4. Spec proposal.
-5. Spec review.
-6. Spec integration.
-7. Implementation.
-8. Benchmarking.
-9. Observability validation.
-10. Governance validation.
+```bash
+pnpm install && pnpm verify   # codegen + typecheck + test + lint + format:check — must stay green
+```
 
-Preserve important research and rejected designs in `spec/research/`.
+Monorepo: pnpm + Turborepo, strict TypeScript ESM, Vitest. Details: `IMPLEMENTATION.md`
+(Developer Quickstart) and ADR-0004. If turbo cannot find pnpm on Windows: `npm i -g pnpm@9.15.0`.
 
-## Test, Observability, and Failure Doctrine
+## 7. Constitution Governance
 
-Every foundational implementation should include:
+This section exists to make drift difficult. Future agents must obey it when editing this file.
 
-- Unit tests for schemas, protocols, lifecycle, and validation.
-- Integration tests for orchestration, events, replay, memory, and workflows.
-- Governance tests for policy, capability, lease, and access enforcement.
-- Replay tests for deterministic reconstruction.
-- Failure tests for retries, dead letters, degradation, rollback, and corruption handling.
+**May be added to CLAUDE.md:** changes to identity/mission framing, architectural laws, working
+doctrine, governance rules, and retrieval *pointers* (a new spec domain's entry point, a moved
+path). That is the complete list.
 
-No orchestration, memory mutation, reasoning flow, workflow transition, governance decision, or runtime decision should exist without observability hooks.
+**Must never be added:** changelog entries, milestone summaries, phase completion details,
+implementation inventories, package catalogs, component or class descriptions, code
+identifiers, test counts, feature completion lists, roadmap history, dated narratives. If it
+describes *what was built* rather than *how to think and where to look*, it does not belong here.
 
-Every implementation must define failure modes, retry semantics, degradation behavior, recovery paths, rollback semantics, and observability behavior during failure.
+**Where updates go instead:**
 
-## Architectural Integrity Rules
+| Information | Home |
+|---|---|
+| What shipped (abstract, milestone-level) | `CHANGELOG.md` |
+| Current codebase state, traceability, active frontier | `IMPLEMENTATION.md` (replace, don't append) |
+| Detailed dated build narratives | `docs/history/implementation-log.md` (append) |
+| Phase plans and roadmaps | `spec/implementation-roadmaps/` |
+| Architecture/runtime/product semantics | The owning spec under `spec/` |
+| Feature catalog | `spec/indexes/product-feature-index.md` |
 
-Never:
-
-- Hardcode fragile orchestration.
-- Bypass protocols for convenience.
-- Bypass event sourcing for important state changes.
-- Bypass governance for side-effecting actions.
-- Bypass observability for cognitive decisions.
-- Mutate memory without a typed memory mutation concept.
-- Create undocumented state transitions.
-- Treat prompts as the whole agent architecture.
-- Treat a planning document as final code law.
-- Let `advanced-agent-architecture.md` and `next-generation-cognitive-operating-system-blueprint.md` drift into contradictory foundations.
-
-## Implementation Posture
-
-The repository is transitioning from completed Phase 1D substrate implementation into Phase 1E
-product-cognition implementation. The feature-spec suite F01-F16 is authored under
-`spec/product/features/` (F16 — The Cognitive Surface — adds the convergent multimodal-substrate
-spec, backed by the deep-research dossier in
-`spec/research/cognitive-surface-frontier-research.md`); `@inevitable/product-cognition` now wires
-the first product slice through onboarding, graph-backed learning paths, MVP agent manifests,
-scheduler-admitted runtime dispatch, deterministic MVP unit execution, a no-LLM explanation/practice
-loop, and mastery checkpoints. Next work should add packet-level trace capture and supervisor-routed
-MVP agent flow. Every implementation decision must be derivable from the spec system or must update
-the spec system with a clear rationale.
+**Size law:** this file stays under ~200 lines. §5 is replace-only and capped at 8 lines. If an
+edit would push past the cap, compress or relocate — never append. When a milestone lands, the
+entire CLAUDE.md update is: rewrite §5 (≤8 lines) and nothing else.

@@ -33,7 +33,7 @@ Phase 1B authored the core protocol specs (canonical form = JSON Schema, per
 - Context Lease → [kernel/context-lease.md](../kernel/context-lease.md)
 - Intent Lease → [kernel/intent-lease.md](../kernel/intent-lease.md)
 - Governance Decision → [kernel/governance-kernel.md](../kernel/governance-kernel.md)
+- Model Invocation Protocol (Phase 2B — D3 recording) → [protocols/model-invocation-protocol.md](../protocols/model-invocation-protocol.md)
 
-Pending (Phase 1C–1E): World-State Delta, Tool Invocation, Model Invocation, Evolution Proposal,
-Workflow State.
+Pending: World-State Delta, Tool Invocation, Evolution Proposal, Workflow State.
 
