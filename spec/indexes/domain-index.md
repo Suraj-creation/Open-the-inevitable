@@ -24,7 +24,7 @@ This is the high-level map of spec domains.
 - `observability` — cognitive analysis engine (drift detection, confidence calibration, learning-outcome signals; DPS-007 / ADR-0017)
 - `replay`
 - `persistence` — durable event-sourced persistence + cross-process recovery + per-learner continuity + bounded retrieval + digital twin lifecycle (`spec/persistence/`: DPS-001 durable log/media (ADR-0008), DPS-002 continuity & rehydration (ADR-0009), DPS-003 durable learner identity (ADR-0010), DPS-004 shared per-learner cognition (ADR-0011), DPS-005 context-lease-bounded retrieval & working-memory assembly (ADR-0012), DPS-009 digital twin lifecycle — consent-scoped `TwinRegistry` with create/branch/export/terminate + `twin.*` events (ADR-0020))
-- `evolution`
+- `evolution` — governed self-evolution lifecycle (`spec/evolution/DPS-010-governed-self-evolution.md`, ADR-0021): `EvolutionEngine` in `@inevitable/orchestration` — proposal FSM (proposed → evaluated → approved → rolled_out | rolled_back), deterministic shadow testing against synthetic learners, governance gate at approve, `evolution.*` event family
 
 ## Advanced COS Domains
 

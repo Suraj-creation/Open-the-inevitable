@@ -58,7 +58,16 @@ import {
   type Result,
 } from "@inevitable/shared";
 import { CognitiveAnalysisEngine, InMemoryMeter } from "@inevitable/observability";
-import { ProposalBlackboard } from "@inevitable/orchestration";
+import {
+  EvolutionEngine,
+  ProposalBlackboard,
+  type EvaluationResult,
+  type EvolutionProposal,
+  type ProposalConfiguration,
+  type ProposalKind,
+  type SyntheticLearnerSeed,
+} from "@inevitable/orchestration";
+import { guard as governanceGuard } from "@inevitable/governance";
 import { SurfaceSession, type SurfaceAskInput, type VoiceSynthesizer } from "@inevitable/surface";
 import {
   KnowledgeGraphEngine,
@@ -270,6 +279,27 @@ export interface DemoFixture {
   readonly exportTwin: (twinId: string) => TwinState;
   /** Terminate a twin (consent revoked; data preserved for audit). Emits `twin.terminated`. */
   readonly terminateTwin: (twinId: string) => TwinState;
+  /**
+   * The governed self-evolution engine (P6.1 — ADR-0021): manages pedagogical evolution proposals
+   * through the shadow-test → governance-approve → rollout/rollback lifecycle. Inspect via
+   * `evolution.list()` and `evolution.get(proposalId)`.
+   * Spec: spec/evolution/DPS-010-governed-self-evolution.md.
+   */
+  readonly evolution: EvolutionEngine;
+  /** Propose a pedagogical change for shadow-test evaluation. Emits `evolution.proposal.created`. */
+  readonly proposeEvolution: (
+    kind: ProposalKind,
+    description: string,
+    config: ProposalConfiguration,
+  ) => EvolutionProposal;
+  /** Run shadow tests against default synthetic learners. Emits experiment + shadow_result events. */
+  readonly evaluateEvolution: (proposalId: string) => EvaluationResult;
+  /** Approve a proposal that passed shadow tests (governance gate). */
+  readonly approveEvolution: (proposalId: string) => EvolutionProposal;
+  /** Mark an approved proposal as rolled out. Emits `evolution.rollout.completed`. */
+  readonly rolloutEvolution: (proposalId: string) => EvolutionProposal;
+  /** Roll back an approved or rolled-out proposal. Emits `evolution.rollback.completed`. */
+  readonly rollbackEvolution: (proposalId: string) => EvolutionProposal;
 }
 
 /** Capabilities the learner is granted at session setup (dispatch.<agentId> per ProductRuntimeAgentId). */
@@ -817,6 +847,80 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
   const exportTwin = (twinId: string): TwinState => twins.export(twinId);
   const terminateTwin = (twinId: string): TwinState => twins.terminate(twinId);
 
+  // Governed self-evolution engine (P6.1 — DPS-010, ADR-0021): proposals → shadow tests →
+  // governance gate → rollout/rollback. Default synthetic learners cover zero-knowledge,
+  // intermediate, and advanced learner profiles for representative shadow testing.
+  const DEFAULT_SYNTHETIC_LEARNERS: readonly SyntheticLearnerSeed[] = [
+    {
+      learnerId: "synthetic-beginner",
+      masteryMap: {},
+      goals: ["linear-algebra"],
+    },
+    {
+      learnerId: "synthetic-intermediate",
+      masteryMap: {
+        "linear-algebra": { level: 3, confidence: 0.7 },
+        calculus: { level: 2, confidence: 0.6 },
+      },
+      goals: ["neural-networks"],
+    },
+    {
+      learnerId: "synthetic-advanced",
+      masteryMap: {
+        "linear-algebra": { level: 4, confidence: 0.9 },
+        calculus: { level: 4, confidence: 0.85 },
+        probability: { level: 3, confidence: 0.75 },
+      },
+      goals: ["deep-learning"],
+    },
+  ];
+  let evolutionHlc: Hlc = hlcInit("demo-evolution");
+  const evolution = new EvolutionEngine({
+    clock,
+    idGenerator,
+    publish: (eventType: string, payload: Record<string, unknown>) => {
+      const created = createEvent(
+        {
+          eventType,
+          producerCid: session.learnerIdentity.cid,
+          producerType: "system.evolution-engine",
+          payload,
+          topic: `cos.${eventType}`,
+          classification: "internal",
+        },
+        { clock, hlc: evolutionHlc, idGenerator },
+      );
+      evolutionHlc = created.hlc;
+      void bus.publish(created.event);
+    },
+    guard: (action: string) => {
+      const result = governanceGuard(governance, {
+        subjectCid: session.learnerIdentity.cid,
+        resource: "evolution.proposal",
+        action,
+        context: {},
+      });
+      return result.allowed;
+    },
+  });
+  const proposeEvolution = (
+    kind: ProposalKind,
+    description: string,
+    config: ProposalConfiguration,
+  ): EvolutionProposal =>
+    evolution.propose({
+      kind,
+      description,
+      configuration: config,
+      syntheticLearners: DEFAULT_SYNTHETIC_LEARNERS,
+    });
+  const evaluateEvolution = (proposalId: string): EvaluationResult =>
+    evolution.evaluate(proposalId);
+  const approveEvolution = (proposalId: string): EvolutionProposal => evolution.approve(proposalId);
+  const rolloutEvolution = (proposalId: string): EvolutionProposal => evolution.rollout(proposalId);
+  const rollbackEvolution = (proposalId: string): EvolutionProposal =>
+    evolution.rollback(proposalId);
+
   return {
     surface,
     bus,
@@ -837,6 +941,12 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     branchTwin,
     exportTwin,
     terminateTwin,
+    evolution,
+    proposeEvolution,
+    evaluateEvolution,
+    approveEvolution,
+    rolloutEvolution,
+    rollbackEvolution,
   };
 }
 
