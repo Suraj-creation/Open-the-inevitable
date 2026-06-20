@@ -29,9 +29,13 @@ import {
   PRODUCT_DISPATCH_POLICIES,
   ProductRuntimeDispatcher,
   SupervisorUnit,
+  TwinRegistry,
   curriculumSlug,
   type ModelBackedRole,
   type OnboardingSession,
+  type TwinConsent,
+  type TwinSnapshot,
+  type TwinState,
 } from "@inevitable/product-cognition";
 import type {
   CognitiveEvent,
@@ -163,6 +167,37 @@ function applyLearnerSeed(
   for (const mutation of seed.memoryMutations) memory.commit(mutation);
 }
 
+/**
+ * Build a TwinSnapshot from a learner's cross-surface cognition seed (DPS-004 / ADR-0020 D2).
+ * Extracts mastery from mastery_checkpoint nodes and digests durable memory per layer.
+ */
+export function buildTwinSnapshot(cognition: LearnerCognitionSeed, nowMs: number): TwinSnapshot {
+  const masteryMap: Record<string, { level: number; confidence: number }> = {};
+  for (const node of cognition.worldNodes) {
+    if (node.type === "mastery_checkpoint") {
+      const conceptId = String(node.props["conceptId"] ?? "");
+      const level = typeof node.props["level"] === "number" ? node.props["level"] : 0;
+      const confidence =
+        typeof node.props["confidence"] === "number" ? node.props["confidence"] : 0;
+      if (conceptId) masteryMap[conceptId] = { level, confidence };
+    }
+  }
+  const layerMap = new Map<string, string[]>();
+  for (const m of cognition.memoryMutations) {
+    const layer = m.memory_layer;
+    if (!layerMap.has(layer)) layerMap.set(layer, []);
+    const payload = (m.payload ?? {}) as Record<string, unknown>;
+    const text = String(payload["conceptId"] ?? payload["content"] ?? m.mutation_id);
+    layerMap.get(layer)!.push(text);
+  }
+  const memoryDigest = [...layerMap.entries()].map(([layer, contents]) => ({
+    layer,
+    content: contents.join(", "),
+    weight: contents.length,
+  }));
+  return { snapshotAt: nowMs, masteryMap, memoryDigest, goals: [] };
+}
+
 export interface DemoFixture {
   readonly surface: SurfaceSession;
   readonly bus: InMemoryEventBus;
@@ -221,6 +256,20 @@ export interface DemoFixture {
    * Spec: spec/architecture-decisions/ADR-0019-governed-tool-runtime.md.
    */
   readonly tools: InMemoryToolRuntime;
+  /**
+   * The digital twin registry (P5.1 — ADR-0020): manages consent-scoped cognitive twins for the
+   * learner. Use `twins.list(learnerId)` to query, or the lifecycle helpers below.
+   * Spec: spec/persistence/DPS-009-digital-twin.md.
+   */
+  readonly twins: TwinRegistry;
+  /** Mint a new digital twin from the current learner cognition state. Emits `twin.created`. */
+  readonly createTwin: (displayName: string) => TwinState;
+  /** Fork an existing twin into an independent cognitive branch. Emits `twin.branched`. */
+  readonly branchTwin: (twinId: string, displayName: string) => TwinState;
+  /** Mark a twin as exported (portable artifact created). Emits `twin.exported`. */
+  readonly exportTwin: (twinId: string) => TwinState;
+  /** Terminate a twin (consent revoked; data preserved for audit). Emits `twin.terminated`. */
+  readonly terminateTwin: (twinId: string) => TwinState;
 }
 
 /** Capabilities the learner is granted at session setup (dispatch.<agentId> per ProductRuntimeAgentId). */
@@ -725,6 +774,49 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     return ok(matches);
   });
 
+  // Digital twin registry (P5.1 — ADR-0020): consent-scoped cognitive artifact lifecycle.
+  let twinHlc: Hlc = hlcInit("demo-twins");
+  const twins = new TwinRegistry({
+    clock,
+    idGenerator,
+    publish: (eventType: string, payload: Record<string, unknown>) => {
+      const created = createEvent(
+        {
+          eventType,
+          producerCid: session.learnerIdentity.cid,
+          producerType: "system.twin-registry",
+          payload,
+          topic: `cos.${eventType}`,
+          classification: "internal",
+        },
+        { clock, hlc: twinHlc, idGenerator },
+      );
+      twinHlc = created.hlc;
+      void bus.publish(created.event);
+    },
+  });
+
+  const createTwin = (displayName: string): TwinState => {
+    const cognition = extractLearnerCognition(world, memory, learner.userId);
+    const twinSnapshot = buildTwinSnapshot(cognition, clock.nowMs());
+    const consent: TwinConsent = {
+      learnerId: learner.userId,
+      grantedAt: clock.nowMs(),
+      allowedSurfaces: ["*"],
+      allowedAgents: ["*"],
+    };
+    return twins.create({
+      learnerId: learner.userId,
+      displayName,
+      consent,
+      snapshot: twinSnapshot,
+    });
+  };
+  const branchTwin = (twinId: string, displayName: string): TwinState =>
+    twins.branch(twinId, displayName);
+  const exportTwin = (twinId: string): TwinState => twins.export(twinId);
+  const terminateTwin = (twinId: string): TwinState => twins.terminate(twinId);
+
   return {
     surface,
     bus,
@@ -740,6 +832,11 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     analysis,
     proposals,
     tools,
+    twins,
+    createTwin,
+    branchTwin,
+    exportTwin,
+    terminateTwin,
   };
 }
 

@@ -83,6 +83,7 @@ Naming grammar: `family.subdomain.action` (e.g. `memory.mutation.committed`). Al
 | `model.*` | output.recorded, invocation.failed | runtime | permanent | replayable |
 | `gateway.*` | stream.attached, stream.detached | gateway | 1d | recorded-observation |
 | `tool.*` | invoked, completed | tool-runtime | 90d | replayable |
+| `twin.*` | created, branched, exported, terminated | twin-registry | 1y-archive | replayable |
 
 Per-family schema registration — canonical JSON Schema for a family entry:
 

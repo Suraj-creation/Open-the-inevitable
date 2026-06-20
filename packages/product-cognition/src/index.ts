@@ -54,3 +54,12 @@ export {
   deterministicIntent,
   parseIntentOutput,
 } from "./intent-inference-unit";
+export type {
+  CreateTwinParams,
+  TwinConsent,
+  TwinRegistryOptions,
+  TwinSnapshot,
+  TwinState,
+  TwinStatus,
+} from "./twin";
+export { TwinRegistry } from "./twin";
