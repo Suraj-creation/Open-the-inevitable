@@ -109,6 +109,9 @@ importers:
       '@inevitable/memory':
         specifier: workspace:*
         version: link:../../packages/memory
+      '@inevitable/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@inevitable/product-cognition':
         specifier: workspace:*
         version: link:../../packages/product-cognition

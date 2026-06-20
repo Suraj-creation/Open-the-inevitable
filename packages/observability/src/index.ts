@@ -13,3 +13,11 @@ export { InMemoryMeter } from "./metrics";
 
 export { getTracer, withSpan, SpanStatusCode } from "./otel";
 export type { Span, Tracer, Attributes } from "./otel";
+
+export type {
+  AnalysisEngineOptions,
+  CalibrationBin,
+  ConceptOutcomeStats,
+  DriftStats,
+} from "./cognitive-analysis";
+export { CognitiveAnalysisEngine } from "./cognitive-analysis";

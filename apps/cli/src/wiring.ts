@@ -53,6 +53,7 @@ import {
   type IdGenerator,
   type Result,
 } from "@inevitable/shared";
+import { CognitiveAnalysisEngine, InMemoryMeter } from "@inevitable/observability";
 import { SurfaceSession, type SurfaceAskInput, type VoiceSynthesizer } from "@inevitable/surface";
 import {
   KnowledgeGraphEngine,
@@ -199,6 +200,13 @@ export interface DemoFixture {
    * Spec: spec/world-state/knowledge-graph-engine.md, ADR-0015.
    */
   readonly kg: KnowledgeGraphEngine;
+  /**
+   * The cognitive observability analysis engine (DPS-007): subscribes to mastery and loop
+   * events and produces drift, calibration, and learning-outcome signals. Inspect via
+   * `analysis.driftStats()`, `analysis.calibrationStats()`, `analysis.outcomeStats(conceptId)`.
+   * Spec: spec/observability/DPS-007-observability-analysis.md, ADR-0017.
+   */
+  readonly analysis: CognitiveAnalysisEngine;
 }
 
 /** Capabilities the learner is granted at session setup (dispatch.<agentId> per ProductRuntimeAgentId). */
@@ -640,6 +648,35 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
   ];
   kg.seedConcepts(DEMO_KG_CONCEPTS);
 
+  // Observability analysis engine (DPS-007): subscribes to mastery and loop events, emitting
+  // drift/calibration/outcome signals back onto the bus and into the metrics store.
+  const analysisMeter = new InMemoryMeter();
+  let analysisHlc = hlcInit("analysis");
+  const analysis = new CognitiveAnalysisEngine({
+    meter: analysisMeter,
+    publish: (eventType: string, payload: Record<string, unknown>) => {
+      const created = createEvent(
+        {
+          eventType,
+          producerCid: "cog-analysis",
+          producerType: "system.analysis",
+          payload,
+          topic: `cos.${eventType}`,
+          classification: "internal",
+        },
+        { clock, hlc: analysisHlc, idGenerator },
+      );
+      analysisHlc = created.hlc;
+      void bus.publish(created.event);
+    },
+  });
+  bus.subscribe("mastery.checkpoint.created", async (event) => {
+    analysis.handleEvent(event);
+  });
+  bus.subscribe("learning.loop.completed", async (event) => {
+    analysis.handleEvent(event);
+  });
+
   return {
     surface,
     bus,
@@ -652,6 +689,7 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     inferIntent,
     capabilities,
     kg,
+    analysis,
   };
 }
 
