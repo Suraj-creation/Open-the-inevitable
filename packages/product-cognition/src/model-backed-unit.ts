@@ -49,9 +49,22 @@ export interface ModelBackedUnitDeps {
   readonly idGenerator?: IdGenerator;
 }
 
-/** The JSON shape the model must return (PCR-001 §11 output contract). */
+/**
+ * The JSON shape the model must return (PCR-001 §11 output contract).
+ * Layers 0-6 correspond to F04's seven-layer concept model (ADR-0016).
+ * Layer 0 is always required; layers 1-6 are optional and populated based on
+ * the concept's natural depth and the learner's requested depth.
+ */
 export interface ModelLayeredOutput {
-  readonly layers: { readonly layer_0: string; readonly layer_1?: string };
+  readonly layers: {
+    readonly layer_0: string;
+    readonly layer_1?: string;
+    readonly layer_2?: string;
+    readonly layer_3?: string;
+    readonly layer_4?: string;
+    readonly layer_5?: string;
+    readonly layer_6?: string;
+  };
   readonly summary: string;
   readonly confidence: number;
   readonly reasoning?: string;
@@ -66,6 +79,17 @@ const ROLE_INSTRUCTION: Record<ModelBackedRole, string> = {
     "Produce one mastery-probing question for the concept and describe what a passing answer demonstrates. Lead with the intuition being verified.",
 };
 
+/** F04 seven-layer names for adaptive prompt assembly (ADR-0016). */
+const LAYER_NAMES: readonly string[] = [
+  "layer_0: Intuition & Story (required — always lead with this; use analogy, narrative, or concrete image)",
+  "layer_1: Visual Understanding (mental model — describe a diagram, spatial metaphor, or visual structure)",
+  "layer_2: Conceptual Definition (formal definition, key abstractions, theoretical framework in plain language)",
+  "layer_3: Mathematical Framework (equations, derivations — use readable notation e.g. f(x) = x^2)",
+  "layer_4: Applied Implementation (code snippet or fully-worked example with step-by-step explanation)",
+  "layer_5: Advanced Extensions (edge cases, optimizations, variations, production-grade concerns)",
+  "layer_6: Research Frontier (open problems, state-of-the-art, ongoing research directions)",
+];
+
 const OUTPUT_CONTRACT_SCHEMA: Record<string, unknown> = {
   type: "object",
   required: ["layers", "summary", "confidence"],
@@ -73,7 +97,15 @@ const OUTPUT_CONTRACT_SCHEMA: Record<string, unknown> = {
     layers: {
       type: "object",
       required: ["layer_0"],
-      properties: { layer_0: { type: "string" }, layer_1: { type: "string" } },
+      properties: {
+        layer_0: { type: "string" },
+        layer_1: { type: "string" },
+        layer_2: { type: "string" },
+        layer_3: { type: "string" },
+        layer_4: { type: "string" },
+        layer_5: { type: "string" },
+        layer_6: { type: "string" },
+      },
     },
     summary: { type: "string" },
     confidence: { type: "number" },
@@ -90,7 +122,7 @@ function clamp01(n: number): number {
   return Math.min(1, Math.max(0, n));
 }
 
-/** Strip optional markdown fences and parse/validate the layered output contract. */
+/** Strip optional markdown fences and parse/validate the layered output contract (layers 0-6). */
 export function parseModelLayeredOutput(text: string): ModelLayeredOutput {
   const trimmed = text
     .trim()
@@ -104,20 +136,31 @@ export function parseModelLayeredOutput(text: string): ModelLayeredOutput {
       sample: trimmed.slice(0, 200),
     });
   }
-  const candidate = raw as Partial<ModelLayeredOutput> & { layers?: { layer_0?: unknown } };
-  const layer0 = candidate.layers?.layer_0;
+  const candidate = raw as Partial<ModelLayeredOutput> & {
+    layers?: Record<string, unknown>;
+  };
+  const layer0 = candidate.layers?.["layer_0"];
   if (typeof layer0 !== "string" || layer0.trim().length === 0) {
     throw modelError("E_MODEL_OUTPUT_MALFORMED", "model output is missing layers.layer_0");
   }
   if (typeof candidate.summary !== "string" || candidate.summary.trim().length === 0) {
     throw modelError("E_MODEL_OUTPUT_MALFORMED", "model output is missing summary");
   }
-  const layer1 = candidate.layers && (candidate.layers as { layer_1?: unknown }).layer_1;
+  const optionalLayer = (key: string): string | undefined => {
+    const v = candidate.layers?.[key];
+    return typeof v === "string" && v.trim().length > 0 ? v : undefined;
+  };
+  const layers: ModelLayeredOutput["layers"] = {
+    layer_0: layer0,
+    ...(optionalLayer("layer_1") ? { layer_1: optionalLayer("layer_1") } : {}),
+    ...(optionalLayer("layer_2") ? { layer_2: optionalLayer("layer_2") } : {}),
+    ...(optionalLayer("layer_3") ? { layer_3: optionalLayer("layer_3") } : {}),
+    ...(optionalLayer("layer_4") ? { layer_4: optionalLayer("layer_4") } : {}),
+    ...(optionalLayer("layer_5") ? { layer_5: optionalLayer("layer_5") } : {}),
+    ...(optionalLayer("layer_6") ? { layer_6: optionalLayer("layer_6") } : {}),
+  };
   return {
-    layers: {
-      layer_0: layer0,
-      ...(typeof layer1 === "string" && layer1.trim().length > 0 ? { layer_1: layer1 } : {}),
-    },
+    layers,
     summary: candidate.summary,
     confidence: clamp01(typeof candidate.confidence === "number" ? candidate.confidence : 0.5),
     ...(typeof candidate.reasoning === "string" ? { reasoning: candidate.reasoning } : {}),
@@ -207,34 +250,70 @@ export class ModelBackedUnit implements CognitiveUnit {
 
   private buildRequest(packet: CognitionPacket): ModelGenerationRequest {
     const conceptIds = packet.concept_ids ?? [];
+    const content = (packet.content ?? {}) as Record<string, unknown>;
+
+    // Determine target explanation depth (explanation role only; practice/assessment stay at 0).
+    const requestedLayer =
+      this.role === "explanation" && typeof content["layer"] === "number"
+        ? (content["layer"] as number)
+        : 0;
+    // Read the concept's natural depth from the KG (seeded by KnowledgeGraphEngine, ADR-0015).
+    const primaryConceptNode =
+      this.world?.getNode(`concept:${conceptIds[0] ?? ""}`) ??
+      this.world?.getNode(conceptIds[0] ?? "");
+    const conceptNaturalLayer =
+      this.role === "explanation" && typeof primaryConceptNode?.props["layer"] === "number"
+        ? (primaryConceptNode.props["layer"] as number)
+        : 0;
+    const targetLayer = Math.max(requestedLayer, conceptNaturalLayer);
+
+    // Assembled context from P2.4 working memory (assembled_context_items in packet content,
+    // threaded from FiberedLearningLoopInput.assembledContextItems — ADR-0016).
+    const assembledContextItems = Array.isArray(content["assembled_context_items"])
+      ? (content["assembled_context_items"] as Array<{ text: string; score: number }>)
+      : [];
+
     const conceptLines = conceptIds.map((id) => {
       const node = this.world?.getNode(`concept:${id}`) ?? this.world?.getNode(id);
-      const title = node && typeof node.props["title"] === "string" ? node.props["title"] : id;
-      return `- ${id}: ${title}`;
+      const label =
+        (node && typeof node.props["label"] === "string" ? node.props["label"] : null) ??
+        (node && typeof node.props["title"] === "string" ? node.props["title"] : id);
+      const layerNote =
+        typeof node?.props["layer"] === "number"
+          ? ` (natural depth: layer ${String(node.props["layer"])})`
+          : "";
+      return `  - ${id}: ${label}${layerNote}`;
     });
-    const content = (packet.content ?? {}) as Record<string, unknown>;
-    const requestedLayer = typeof content["layer"] === "number" ? content["layer"] : 0;
+
+    const targetLayerNames = LAYER_NAMES.slice(0, targetLayer + 1);
 
     const system = [
       `You are "${this.manifest.id}". ${this.manifest.role}`,
       ROLE_INSTRUCTION[this.role],
+      assembledContextItems.length > 0
+        ? `Prior learner knowledge (already understood — build on it, do not re-explain):\n${assembledContextItems.map((item) => `  • ${item.text}`).join("\n")}`
+        : "",
+      this.role === "explanation" && targetLayer > 0
+        ? `Produce ALL of the following explanation layers:\n${targetLayerNames.map((name) => `  ${name}`).join("\n")}`
+        : "Produce a clear layer_0 (Intuition & Story). Include layer_1 when a visual mental model genuinely helps.",
       `Respond with JSON only (no markdown fences) matching:`,
-      `{"layers":{"layer_0":"<Story/Intuition — mandatory, leads>","layer_1":"<Visual Understanding — described diagram/mental model>"},"summary":"<one-sentence essence>","confidence":<0..1>,"reasoning":"<why this explanation fits>"}`,
-      requestedLayer >= 1
-        ? "The learner asked to go deeper: layer_1 (Visual Understanding) is required."
-        : "Include layer_1 when a visual mental model genuinely helps.",
-    ].join("\n");
+      `{"layers":{"layer_0":"<required>","layer_1":"<optional>",...},"summary":"<one-sentence essence>","confidence":<0..1>,"reasoning":"<optional>"}`,
+      targetLayer >= 3 ? "For mathematical content use readable notation (e.g. f(x) = x^2)." : "",
+      targetLayer >= 4 ? "For code, use the most relevant language (Python preferred for ML)." : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     const prompt = [
       `Intent: ${packet.intent ?? "learn"}`,
       conceptLines.length > 0 ? `Concepts:\n${conceptLines.join("\n")}` : "Concepts: (none given)",
-      `Requested layer: ${requestedLayer}`,
+      `Target depth: layers 0–${String(targetLayer)}`,
     ].join("\n");
 
     return {
       prompt,
       system,
-      maxTokens: 1024,
+      maxTokens: Math.max(1024, 512 * (targetLayer + 1)),
       responseSchema: OUTPUT_CONTRACT_SCHEMA,
       invocation_key: `${this.manifest.id}:${packet.packet_id}:${this.role}`,
     };

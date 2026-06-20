@@ -17,6 +17,7 @@ This is the high-level map of spec domains.
 - `orchestration`
 - `memory`
 - `world-state` — generic delta-sourced versioned graph (`WorldStateGraph`) + knowledge-graph engine (`KnowledgeGraphEngine`: concept seeding, prerequisite decomposition, learner-state queries, cross-domain bridges; DPS-006 / ADR-0015)
+- `f04-adaptive-explanation` — seven-layer F04 explanation depth (layers 0–6) with adaptive prompt assembly consuming concept-natural layer (KG, P3.1), assembled context (P2.4), and interpreted intent (P2.5); ADR-0016
 - `events`
 - `protocols`
 - `governance`

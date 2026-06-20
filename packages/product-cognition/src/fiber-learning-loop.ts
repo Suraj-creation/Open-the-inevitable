@@ -72,6 +72,12 @@ export interface FiberedLearningLoopInput {
   readonly explanationPrompt: string;
   readonly practicePrompt: string;
   readonly mastery: LearningLoopMasteryInput;
+  /**
+   * Assembled working-memory context items from P2.4 context-lease-bounded retrieval.
+   * When present, threaded into the explanation dispatch content so the model can build on
+   * what the learner already knows (ADR-0016). Plain {text, score} to avoid cross-package deps.
+   */
+  readonly assembledContextItems?: ReadonlyArray<{ readonly text: string; readonly score: number }>;
 }
 
 export interface FiberedLearningLoopResult {
@@ -402,6 +408,11 @@ export class FiberedLearningLoop {
       targetAgentId: agentId,
       intent,
       conceptIds,
+      // Thread assembled context into explanation dispatch (ADR-0016): the explanation unit reads
+      // assembled_context_items from packet.content to build adaptive prompts grounded in prior knowledge.
+      ...(agentId === "explanation" && input.assembledContextItems?.length
+        ? { content: { assembled_context_items: input.assembledContextItems } }
+        : {}),
       priority: 3,
     });
     const dispatchResult = result.ok ? result.value : null;

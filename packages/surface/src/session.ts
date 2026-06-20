@@ -83,6 +83,12 @@ export interface SurfaceAskInput {
   readonly explanationPrompt: string;
   readonly practicePrompt: string;
   readonly mastery: LearningLoopMasteryInput;
+  /**
+   * Assembled working-memory context from P2.4 context-lease-bounded retrieval. When present,
+   * threaded into the explanation agent's prompt so the model builds on prior learner knowledge
+   * instead of re-explaining it (ADR-0016). Optional — absent on first ask or for fresh learners.
+   */
+  readonly assembledContextItems?: ReadonlyArray<{ readonly text: string; readonly score: number }>;
 }
 
 export interface SurfaceAskResult {
@@ -250,6 +256,9 @@ export class SurfaceSession {
       explanationPrompt: input.explanationPrompt,
       practicePrompt: input.practicePrompt,
       mastery: input.mastery,
+      ...(input.assembledContextItems
+        ? { assembledContextItems: input.assembledContextItems }
+        : {}),
     });
     if (!loopResult.ok) return loopResult;
     const cycle = loopResult.value;

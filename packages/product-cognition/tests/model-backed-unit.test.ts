@@ -8,6 +8,7 @@ import { InMemoryEventBus } from "@inevitable/events";
 import { GovernanceEngine } from "@inevitable/governance";
 import type { CognitionPacket, CognitiveIdentity } from "@inevitable/protocols";
 import { ManualClock, SeededIdGenerator } from "@inevitable/shared";
+import { WorldStateGraph } from "@inevitable/world-state";
 import { MVP_AGENT_MANIFESTS } from "../src/agent-catalog";
 import { ModelBackedUnit, parseModelLayeredOutput } from "../src/model-backed-unit";
 import { PRODUCT_DISPATCH_POLICIES } from "../src/product-dispatch-policies";
@@ -88,6 +89,41 @@ describe("parseModelLayeredOutput", () => {
     expect(() => parseModelLayeredOutput('{"summary":"s","confidence":0.5}')).toThrowError(
       /layer_0/,
     );
+  });
+
+  test("parses all seven layers when present (F04 layers 2-6)", () => {
+    const input = JSON.stringify({
+      layers: {
+        layer_0: "Intuition",
+        layer_1: "Visual",
+        layer_2: "Conceptual",
+        layer_3: "Mathematical",
+        layer_4: "Applied",
+        layer_5: "Advanced",
+        layer_6: "Research",
+      },
+      summary: "Full depth.",
+      confidence: 0.9,
+    });
+    const parsed = parseModelLayeredOutput(input);
+    expect(parsed.layers.layer_0).toBe("Intuition");
+    expect(parsed.layers.layer_2).toBe("Conceptual");
+    expect(parsed.layers.layer_3).toBe("Mathematical");
+    expect(parsed.layers.layer_4).toBe("Applied");
+    expect(parsed.layers.layer_5).toBe("Advanced");
+    expect(parsed.layers.layer_6).toBe("Research");
+  });
+
+  test("omits empty optional layers — no layer_2 in output when model omits it", () => {
+    const input = JSON.stringify({
+      layers: { layer_0: "Intuition", layer_3: "Math formula" },
+      summary: "Sparse.",
+      confidence: 0.7,
+    });
+    const parsed = parseModelLayeredOutput(input);
+    expect(parsed.layers.layer_0).toBe("Intuition");
+    expect(parsed.layers.layer_2).toBeUndefined();
+    expect(parsed.layers.layer_3).toBe("Math formula");
   });
 });
 
@@ -237,5 +273,102 @@ describe("ModelBackedUnit", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("E_PRODUCT_RUNTIME_DISPATCH");
     expect(model.calls).toBe(0); // the model was never reached — the gate is structural
+  });
+});
+
+describe("ModelBackedUnit — adaptive prompt assembly (P3.2, ADR-0016)", () => {
+  function spyModel(): ModelRuntime & { lastSystem: string; lastPrompt: string } {
+    const m = {
+      lastSystem: "",
+      lastPrompt: "",
+      async generate(req: { system?: string; prompt: string }) {
+        m.lastSystem = req.system ?? "";
+        m.lastPrompt = req.prompt;
+        return {
+          text: JSON.stringify({
+            layers: { layer_0: "story", layer_3: "f(x)=x^2" },
+            summary: "test",
+            confidence: 0.8,
+          }),
+          model: "spy",
+          finishReason: "stop" as const,
+        };
+      },
+      async embed() {
+        return [];
+      },
+    };
+    return m;
+  }
+
+  test("reads concept natural layer from world-state and targets that depth", async () => {
+    const world = new WorldStateGraph({ acyclicEdgeTypes: ["prerequisite_of"] });
+    // Seed a math concept with natural layer 3
+    world.apply({
+      kind: "upsert_node",
+      id: "concept:gradient-descent",
+      type: "concept",
+      props: { conceptId: "gradient-descent", label: "Gradient Descent", domain: "math", layer: 3 },
+    });
+
+    const spy = spyModel();
+    const unit = new ModelBackedUnit({
+      manifest: expManifest,
+      model: spy,
+      role: "explanation",
+      world,
+      idGenerator: new SeededIdGenerator("layer-test"),
+    });
+
+    await unit.execute(packet({ concept_ids: ["gradient-descent"] }));
+
+    expect(spy.lastPrompt).toContain("Target depth: layers 0–3");
+    expect(spy.lastSystem).toContain("layer_2");
+    expect(spy.lastSystem).toContain("layer_3");
+  });
+
+  test("includes assembled context items as prior knowledge in prompt", async () => {
+    const spy = spyModel();
+    const unit = new ModelBackedUnit({
+      manifest: expManifest,
+      model: spy,
+      role: "explanation",
+      idGenerator: new SeededIdGenerator("ctx-test"),
+    });
+
+    const assembledContextItems = [
+      { text: "linear-algebra", score: 0.92 },
+      { text: "calculus-basics", score: 0.75 },
+    ];
+
+    await unit.execute(packet({ content: { assembled_context_items: assembledContextItems } }));
+
+    expect(spy.lastSystem).toContain("linear-algebra");
+    expect(spy.lastSystem).toContain("Prior learner knowledge");
+  });
+
+  test("practice role stays at layer 0 regardless of concept natural layer", async () => {
+    const world = new WorldStateGraph({ acyclicEdgeTypes: ["prerequisite_of"] });
+    world.apply({
+      kind: "upsert_node",
+      id: "concept:gradient-descent",
+      type: "concept",
+      props: { conceptId: "gradient-descent", layer: 5 },
+    });
+
+    const prcManifest = MVP_AGENT_MANIFESTS.find((m) => m.id === "agent.practice")!;
+    const spy = spyModel();
+    const unit = new ModelBackedUnit({
+      manifest: prcManifest,
+      model: spy,
+      role: "practice",
+      world,
+      idGenerator: new SeededIdGenerator("prc-test"),
+    });
+
+    await unit.execute(packet({ concept_ids: ["gradient-descent"] }));
+
+    // Practice stays at layer 0 — no deep-layer instructions
+    expect(spy.lastPrompt).toContain("Target depth: layers 0–0");
   });
 });
