@@ -46,7 +46,8 @@ the workspace root (guarded dynamic import; never a substrate dependency).
 ## Current State
 
 **Phases 1A–1E, 2A–2D, the 2E durable-substrate milestone, all of P2 (Identity, Continuity &
-Context — P2.1 through P2.6), and all of P3 (the ULI core — P3.1 through P3.3) are complete.
+Context — P2.1 through P2.6), all of P3 (the ULI core — P3.1 through P3.3), and all of P4
+(Multi-Agent Cognition — P4.1 through P4.2) are complete.
 `pnpm verify` is green across the whole monorepo** (22 packages/apps + 1 service: codegen,
 typecheck, test, lint, format).
 
@@ -196,6 +197,20 @@ typecheck, test, lint, format).
   `cos.learning.outcome_rate` metrics. `publish` callback injected at the composition root — engine has no
   bus dependency. Satisfies the §25.4 reasoning-quality observability invariant. `DemoFixture.analysis` exposes
   the inspection API. **P3 is complete.**
+- **P4.1 — Proposal blackboard + `surface.agent.disagreed`** — *multi-agent cognition made visible.*
+  (DPS-008, ADR-0018.) `ProposalBlackboard` (`@inevitable/orchestration`) wraps `InMemoryBlackboard`
+  with a typed proposal lifecycle: `propose/proposals/arbitrate/arbitrations` — append-only, audit-friendly.
+  `FiberedLearningLoop.handleDispatch` runs explanation + challenger (`agent.revision`) concurrently via
+  `Promise.all` when `challengerDispatcher` is present; Jaccard similarity on `layer_0` text < 0.3 triggers
+  `surface.agent.disagreed` emission. `SurfaceState.disagreements[]` folds `surface.agent.disagreed`.
+  `surfaceId` threaded through `FiberedLearningLoopInput` from `SurfaceSession.ask()` for fold routing.
+  `DemoFixture.proposals` exposes the board. All new deps optional — no existing tests broken.
+- **P4.2 — Governed tool runtime** — *`tool.*` event family + capability-gated invocation.*
+  (ADR-0019.) `InMemoryToolRuntime` (`@inevitable/adapters`): `register/discover/invoke`; optional
+  `checkCapability` callback for `tool.<name>` governance (no hard dep on `@inevitable/kernel`); emits
+  `tool.invoked` + `tool.completed` when bus present. `tool.*` added to event taxonomy. `apps/cli`
+  registers `search-concepts` demo tool, grants `tool.search-concepts`, exposes `DemoFixture.tools`.
+  **P4 is complete.**
 
 ## Traceability Map
 
@@ -213,13 +228,13 @@ implementation even if it works locally.
 | `@inevitable/runtime` | runtime/cognitive-unit-runtime, protocols/cognitive-unit-abi | lifecycle FSM, ABI, manifest loader, unit host |
 | `@inevitable/scheduler` | kernel/cognitive-scheduler, scheduler/ | DepthScheduler: preemption, fairness, budgets, backpressure |
 | `@inevitable/memory` | protocols/memory-mutation, memory/memory-tiers | TieredMemoryStore: tiers, projections, decay, distribution |
-| `@inevitable/orchestration` | orchestration/\* | versioned blackboard (foundation) |
+| `@inevitable/orchestration` | orchestration/\*, DPS-008 | versioned blackboard (foundation), **`ProposalBlackboard`** (typed proposal/arbitrate lifecycle, ADR-0018) |
 | `@inevitable/contracts` | interop (ADR-0003) | transport/graph/vector/model/tool adapter interfaces |
 | `@inevitable/tooling` | tooling/, developer-experience/ | schema/protocol introspection |
 | `@inevitable/execution` | execution/, replay/ | deterministic engine, cognitive fibers, execution journal |
 | `@inevitable/world-state` | world-state/world-state-graph, DPS-006 | delta protocol, materialized graph, acyclicity, snapshots, **`KnowledgeGraphEngine`** (concept seeding, prereq decomposition, learner-state queries, cross-domain bridges, ADR-0015) |
 | `@inevitable/context` | persistence/context-lease-bounded-retrieval (DPS-005), kernel/context-lease, memory/memory-tiers | `ContextAssembler` (VectorStore-backed, lease-bounded working-memory assembly), deterministic local embedding |
-| `@inevitable/adapters` | interop/infrastructure-adapters (ADR-0005), protocols/model-invocation, surface/multimodal-provider-abstraction, persistence/durable-cognitive-persistence (ADR-0008) | in-memory reference adapters + conformance harness; NATS/Qdrant/Neo4j/Postgres (edge-provisioned); **`FileEventTransport`** (durable JSONL event log, passes the conformance harness); Null/Gemini/Recording model runtimes (D3 seam); Null/Gemini **voice runtimes** (SRF-004, out-of-band WAV) |
+| `@inevitable/adapters` | interop/infrastructure-adapters (ADR-0005), protocols/model-invocation, surface/multimodal-provider-abstraction, persistence/durable-cognitive-persistence (ADR-0008), ADR-0019 | in-memory reference adapters + conformance harness; NATS/Qdrant/Neo4j/Postgres (edge-provisioned); **`FileEventTransport`** (durable JSONL event log); Null/Gemini/Recording model runtimes (D3 seam); Null/Gemini **voice runtimes** (SRF-004, out-of-band WAV); **`InMemoryToolRuntime`** (governed `tool.*` invocation with capability check + event emission, ADR-0019) |
 | `@inevitable/product-cognition` | product/product-cognition-runtime, agents/supervisor-agent, protocols/model-invocation, kernel/intent-inference + capability-registry, features F01–F07/F13/F14, ADR-0016 | onboarding, path projection, manifests, governed dispatch (GOV-P01/P02/**P03 capability gate**), supervisor routing, fibered learning loop, mastery checkpoints, **ModelBackedUnit (F04 all 7 layers 0–6; adaptive depth from KG; assembled context in prompts)**, CurriculumUnit (goal → concept DAG, PCR §12), **IntentInferenceUnit** (goal → intent lease) |
 | `@inevitable/surface` | surface/ (SRF-001…004), features F09/F16 | cognition blocks, surface.\* events, timeline projection, contribution runtime, fold/replay, trace capture, provider registry, SurfaceSession (+ expand), **`SurfaceChoreographer`** (narration/focus/presence choreography, ADR-0007) |
 | `@inevitable/cli` (app) | surface/, product/product-cognition-runtime, protocols/model-invocation | demo composition root: full governed substrate wired into one terminal surface (`pnpm demo`) |
@@ -244,8 +259,9 @@ continuity, the digital twin, and every future manifestation. Next, in dependenc
    learner-state queries. ✓ P3.2 F04 layers 2–6 + adaptive prompt assembly (ADR-0016): target depth from KG,
    assembled context consumed in explanation prompts. ✓ P3.3 Cognitive observability analysis (DPS-007,
    ADR-0017): `CognitiveAnalysisEngine` — drift detection, confidence calibration, learning-outcome signals.
-3. **P4 — Multi-agent cognition.** Real blackboard arbitration + `surface.agent.disagreed` (F07);
-   wire the (built but unwired) DepthScheduler for concurrent dispatch; governed tool runtime (MCP).
+3. **P4 — Multi-agent cognition.** ✓ **COMPLETE.** ✓ P4.1 `ProposalBlackboard` + concurrent challenger
+   dispatch + `surface.agent.disagreed` fold (ADR-0018, DPS-008). ✓ P4.2 `InMemoryToolRuntime` +
+   `tool.*` event family + capability-gated invocation (ADR-0019).
 4. **P5 — Digital Twin / Personal Cognitive Companion** (consent-scoped twin-state over durable
    memory+events; snapshot/branch/export/terminate).
 5. **P6 — Governed self-evolution** (proposals → shadow tests on synthetic learners → replay-based

@@ -738,3 +738,49 @@ engine a pure event-driven subscriber so it never touches the production call pa
 prerequisite decomposition, universal explanation depth (all seven F04 layers), adaptive prompts that
 consume real context and KG-derived depth, and a cognitive quality signal loop (drift + calibration +
 outcomes) that P6 self-evolution will read as its inputs.
+
+---
+
+## Phase 4 — Multi-Agent Cognition (2026-06-20)
+
+### P4.1 — Proposal Blackboard + surface.agent.disagreed
+
+**Goal:** make multiple agents visibly contend. The FiberedLearningLoop previously dispatched exactly one agent per phase (explanation or practice). P4.1 adds a concurrent challenger dispatch and records both proposals on a typed blackboard.
+
+**ProposalBlackboard** (`packages/orchestration/src/proposals.ts`, DPS-008, ADR-0018) wraps `InMemoryBlackboard` with a typed proposal lifecycle: `propose(key, agentCid, value)` accumulates proposals for a key; `arbitrate(key, winnerCid, reason)` records the winner. Both logs are append-only. The blackboard version increments on every write (audit/replay friendly).
+
+**Concurrent dispatch.** `FiberedLearningLoop.handleDispatch` was modified (ADR-0018 D2): when `challengerDispatcher` is present in deps, the explanation phase runs both dispatchers concurrently via `Promise.all([explanationDispatcher.dispatch(...), challengerDispatcher.dispatch(...)])`. The fiber routine is unchanged — the fan-out happens in the bridge layer, preserving D2 byte-identical journals. The explanation result is always the authoritative output; the challenger is a cognitive probe.
+
+**Disagreement detection** (ADR-0018 D4): Jaccard similarity on the word-sets of each agent's `layer_0` text. If the similarity is < 0.3 (< 30% word overlap), the outputs are declared divergent. If either agent's `layer_0` is absent, no disagreement is declared. Private helpers: `wordSet`, `jaccardSimilarity`, `extractLayer0`, `outputsDisagree`.
+
+**Emission** (ADR-0018 D5): a new `private orchestrationHlc: Hlc` field on the class (initialized in the constructor, separate from the run-scoped HLC) so bridge-layer events get their own monotonic clock. `emitDisagreement` builds a `surface.agent.disagreed` event via `createEvent` and publishes to `this.deps.bus`.
+
+**Surface routing** (ADR-0018 D6): `FiberedLearningLoopInput.surfaceId?: string` is threaded from `SurfaceSession.ask()` (which has `this.surfaceId`) into the loop input. When present, the disagreement payload includes `surface_id` so the surface fold picks it up.
+
+**Fold.** `SurfaceState` gains `readonly disagreements: DisagreementRecord[]`. `foldSurfaceEvents` handles `surface.agent.disagreed` by appending a `DisagreementRecord`. Three new projection tests cover: single disagreement, multiple accumulating in order, and empty initial state.
+
+**Package change:** `@inevitable/product-cognition/package.json` adds `@inevitable/orchestration` as a dependency. `apps/cli/package.json` also adds `@inevitable/orchestration`. `pnpm install` run to update the lockfile.
+
+**Challenger agent:** uses `DeterministicMvpUnit(manifest("revision"), idGenerator)` in `buildDemoSession` — `ModelBackedRole` only covers explanation/practice/assessment; model-backed revision is P7.
+
+**Tests added:** `packages/orchestration/tests/proposals.test.ts` (14 tests — propose, multi-agent, independence, arbitration, timestamps, snapshots); `packages/surface/tests/projection.test.ts` extended with 4 disagreement fold tests.
+
+### P4.2 — Governed Tool Runtime
+
+**Goal:** implement the `ToolRuntime` contract (`packages/contracts`) with a governed in-process adapter, observable via the event bus.
+
+**InMemoryToolRuntime** (`packages/adapters/src/tools.ts`, ADR-0019): `register(spec, handler)` at composition time; `discover()` → `Promise<Array<{name, sideEffecting}>>` (the contract's exact shape); `invoke(name, params)` → capability check + event emission + handler call. Handler throws are caught and returned as `err(E_TOOL_HANDLER_THROWN)`.
+
+**Governance** (ADR-0019 D3): the `checkCapability?: (ownerCid, capability) => boolean` callback pattern (same as P3.3's `publish` callback injection) avoids a hard dependency on `@inevitable/kernel`. At invocation time: `checkCapability(ownerCid, 'tool.${name}')`. Denial returns `err(E_TOOL_CAPABILITY_DENIED)` before the handler runs.
+
+**Observability** (ADR-0019 D4): `tool.invoked` emitted before the handler; `tool.completed` emitted after (with `ok`, `durationMs`, optional `error`). The `emitEvent` helper uses the class's own HLC (initialized in constructor) and publishes to the bus. No bus → no events, no errors.
+
+**Event taxonomy:** `tool.*` family added to `spec/events/event-taxonomy.md` (90d retention, replayable).
+
+**Demo wiring** (`apps/cli/src/wiring.ts`): `search-concepts` tool registered (queries `world.snapshot().nodes` for `concept` type nodes matching the keyword parameter); `tool.search-concepts` capability pre-granted to the learner via `capabilities.grant`; `DemoFixture.tools: InMemoryToolRuntime` exposed.
+
+**Tests:** `packages/adapters/tests/tools.test.ts` — 15 tests covering: discover empty/populated, invoke not-found, invoke handler success/err/throw, capability deny/allow/absent, event emission success/failure/no-bus.
+
+**Format fix:** `clock.nowMs()` (not `clock.now()`) — caught by typecheck. Prettier applied to `tools.ts` and `fiber-learning-loop.ts` before commit.
+
+**P4 closes the multi-agent orchestration phase.** The COS substrate now expresses visible agent disagreement, a proposal board for arbitration audit, and a governed tool ecosystem. These feed P6 (self-evolution can arbitrate over competing pedagogical proposals) and P5 (the digital twin can observe agent disagreements across a learner's history).

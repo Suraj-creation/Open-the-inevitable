@@ -9,6 +9,31 @@ paragraph or a few bullets per milestone. Implementation detail lives in the own
 
 ## [Unreleased]
 
+> **Phase 4 (Multi-Agent Cognition) is complete** — P4.1 through P4.2.
+
+### Added — Phase 4 (P4.2): Governed Tool Runtime — `tool.*` events, capability-gated invocation
+
+- **Agents can now invoke governed tools.** `InMemoryToolRuntime` (`@inevitable/adapters`, ADR-0019)
+  implements the `ToolRuntime` contract: tools registered at composition time; `discover()` lists them;
+  `invoke(name, params)` checks `tool.<name>` capability via an injected `checkCapability` callback (no hard
+  dep on `@inevitable/kernel`, consistent with the injection pattern from P3.3). When an `EventBus` is
+  provided, `tool.invoked` and `tool.completed` events are emitted for full observability. The **`tool.*`
+  event family** is now registered in the event taxonomy (90d retention, replayable). `apps/cli` registers a
+  `search-concepts` demo tool (keyword search over world-state concept nodes), pre-grants `tool.search-concepts`
+  to the learner, and exposes `DemoFixture.tools`.
+
+### Added — Phase 4 (P4.1): Proposal Blackboard + `surface.agent.disagreed` — multi-agent cognition
+
+- **Multiple agents now visibly contend.** `ProposalBlackboard` (`@inevitable/orchestration`, DPS-008,
+  ADR-0018) wraps `InMemoryBlackboard` with a typed proposal lifecycle: `propose/proposals/arbitrate/arbitrations`
+  — append-only and audit-friendly. `FiberedLearningLoop.handleDispatch` runs the explanation and a challenger
+  (`agent.revision`) concurrently via `Promise.all` when `challengerDispatcher` is present; both proposals land
+  on the blackboard. **Disagreement detection** uses Jaccard similarity on `layer_0` text: word overlap < 30%
+  emits `surface.agent.disagreed` (ADR-0018). The **surface fold** now accumulates `disagreements:
+  DisagreementRecord[]` — every multi-agent conflict is permanently visible in the surface state and participates
+  in replay. `surfaceId` is threaded through `FiberedLearningLoopInput` from `SurfaceSession.ask()` so
+  disagreement events carry `surface_id` for fold routing. `DemoFixture.proposals` exposes the board.
+
 > **Phase 3 (the ULI core) is complete** — P3.1 through P3.3.
 
 ### Added — Phase 3 (P3.3): Cognitive Observability Analysis — the reasoning-quality invariant met
