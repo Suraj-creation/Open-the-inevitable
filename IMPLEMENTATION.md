@@ -47,9 +47,9 @@ the workspace root (guarded dynamic import; never a substrate dependency).
 
 **Phases 1A–1E, 2A–2D, the 2E durable-substrate milestone, all of P2 (Identity, Continuity &
 Context — P2.1 through P2.6), all of P3 (the ULI core — P3.1 through P3.3), all of P4
-(Multi-Agent Cognition — P4.1 through P4.2), and all of P5 (Digital Twin — P5.1) are complete.
-`pnpm verify` is green across the whole monorepo** (22 packages/apps + 1 service: codegen,
-typecheck, test, lint, format).
+(Multi-Agent Cognition — P4.1 through P4.2), all of P5 (Digital Twin — P5.1), and all of P6
+(Governed Self-Evolution — P6.1) are complete. `pnpm verify` is green across the whole monorepo**
+(22 packages/apps + 1 service: codegen, typecheck, test, lint, format).
 
 - **1A** — spec ecosystem (`spec/meta/`, `spec/indexes/`), ADRs, domain map, ownership skeleton.
 - **1B** — kernel / protocol / event / runtime foundational specs; ADR-0003 (tech stack).
@@ -211,6 +211,16 @@ typecheck, test, lint, format).
   `tool.invoked` + `tool.completed` when bus present. `tool.*` added to event taxonomy. `apps/cli`
   registers `search-concepts` demo tool, grants `tool.search-concepts`, exposes `DemoFixture.tools`.
   **P4 is complete.**
+- **P6.1 — Governed self-evolution** — *proposals → shadow tests → governance gate → rollout / rollback.*
+  (DPS-010, ADR-0021.) `EvolutionEngine` (`@inevitable/orchestration`): full proposal FSM (`proposed →
+  evaluated → approved → rolled_out | rolled_back`); deterministic `ShadowEvaluator` projects outcomes from
+  `ProposalConfiguration` + `SyntheticLearnerSeed` (no model calls — replay-safe); governance gate injected
+  as a `guard` callback at `approve()` (same injection pattern as ADR-0017/ADR-0020); every state transition
+  emits an `evolution.*` event (`proposal.created`, `experiment.started`, `shadow_result.recorded`,
+  `rollout.completed`, `rollback.completed` — permanent, replayable); `rollback()` is idempotent from
+  `"approved"` or `"rolled_out"`, data preserved for audit. `evolution.rollback.completed` added to the event
+  taxonomy. `DemoFixture.evolution` + five lifecycle helpers + three default synthetic learner profiles
+  (beginner/intermediate/advanced) wired with the real governance guard. 26 new tests. **P6 is complete.**
 - **P5.1 — Digital Twin lifecycle** — *consent-scoped cognitive artifact: create / branch / export / terminate.*
   (DPS-009, ADR-0020.) `TwinRegistry` (`@inevitable/product-cognition`, `publish` callback pattern from
   ADR-0017/P3.3): manages `TwinState` lifecycle — `create(params)` mints a twin from a caller-supplied
@@ -242,7 +252,7 @@ implementation even if it works locally.
 | `@inevitable/runtime` | runtime/cognitive-unit-runtime, protocols/cognitive-unit-abi | lifecycle FSM, ABI, manifest loader, unit host |
 | `@inevitable/scheduler` | kernel/cognitive-scheduler, scheduler/ | DepthScheduler: preemption, fairness, budgets, backpressure |
 | `@inevitable/memory` | protocols/memory-mutation, memory/memory-tiers | TieredMemoryStore: tiers, projections, decay, distribution |
-| `@inevitable/orchestration` | orchestration/\*, DPS-008 | versioned blackboard (foundation), **`ProposalBlackboard`** (typed proposal/arbitrate lifecycle, ADR-0018) |
+| `@inevitable/orchestration` | orchestration/\*, DPS-008, DPS-010 | versioned blackboard (foundation), **`ProposalBlackboard`** (typed proposal/arbitrate lifecycle, ADR-0018), **`EvolutionEngine`** (governed self-evolution: proposal FSM, deterministic shadow testing, governance gate, `evolution.*` events, ADR-0021) |
 | `@inevitable/contracts` | interop (ADR-0003) | transport/graph/vector/model/tool adapter interfaces |
 | `@inevitable/tooling` | tooling/, developer-experience/ | schema/protocol introspection |
 | `@inevitable/execution` | execution/, replay/ | deterministic engine, cognitive fibers, execution journal |
@@ -282,8 +292,11 @@ continuity, the digital twin, and every future manifestation. Next, in dependenc
    *Deferred within the theme:* IdenticalAgent (model-backed agent speaking as the learner using
    TwinState as context; P5.2+), consent enforcement at query time (P5.2+), durable twin persistence
    across restarts (P5.2+, `FileEventTransport` pattern from DPS-001).
-5. **P6 — Governed self-evolution** (proposals → shadow tests on synthetic learners → replay-based
-   evaluation → governed rollout/rollback). **This is next.**
+5. **P6 — Governed self-evolution.** ✓ **COMPLETE.** ✓ P6.1 `EvolutionEngine` in
+   `@inevitable/orchestration`: proposal FSM, deterministic shadow testing, governance gate at approve,
+   rollout/rollback lifecycle, `evolution.*` event family (DPS-010, ADR-0021). *Deferred within the theme:*
+   applying rolled-out proposals to the live runtime configuration; durable proposal persistence; replay-based
+   evaluation over real recorded session history; multi-agent consensus on proposals.
 6. **P7 — Platform API/SDK + duplex** (harden the substrate's public surface so mobile/desktop/CLI/MCP
    attach as manifestations; MCP/CLI is the cheap first second-manifestation). Discipline now, phase later.
 

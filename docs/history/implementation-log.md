@@ -818,3 +818,36 @@ outcomes) that P6 self-evolution will read as its inputs.
 **Note on `CosError` throw-checking:** the tests use `.toThrow("not found")` and `.toThrow("terminated")` rather than `.toThrow("E_TWIN_NOT_FOUND")` because `CosError.message` is the human-readable second argument (the code is the `.code` property). Matching the message string is correct and informative.
 
 **P5 closes the Digital Twin phase.** The COS substrate now has a governed twin lifecycle with a full event audit trail. Deferred to P5.2+: IdenticalAgent (model-backed; speaks as the learner using `TwinState` as context), consent enforcement at query time (access blocked by `allowedSurfaces`/`allowedAgents`), durable twin persistence across restarts (`FileEventTransport` pattern, DPS-001), and streaming twin state from live session events. These deferred items require the `IdenticalAgent` model ABI and cross-process twin replay — consciously out of scope for P5.1.
+
+---
+
+## 2026-06-20 — P6.1: Governed Self-Evolution
+
+**What shipped:** `EvolutionEngine` in `packages/orchestration/src/evolution.ts` (DPS-010, ADR-0021) — the capstone invariant: governed self-improvement. The engine manages pedagogical change proposals through a typed FSM from conception to live rollout, with deterministic shadow testing and a real governance gate.
+
+**Architecture decisions:**
+
+- **D1 (location):** `EvolutionEngine` lands in `@inevitable/orchestration` alongside `ProposalBlackboard`. Both are orchestration concerns — one governs per-session agent arbitration, the other governs cross-session pedagogical evolution.
+- **D2 (deterministic shadow testing):** The `ShadowEvaluator` projects outcomes from `ProposalConfiguration` + `SyntheticLearnerSeed` using a closed-form formula (base mastery rate + kind-specific delta) — no model invoked. This preserves replay-safety (ADR-0005: model calls are guarded optional) and keeps `pnpm verify` green fully offline.
+- **D3 (governance callback):** `approve()` calls an injected `guard: (action: string) => boolean` callback. The composition root wraps `guard()` from `@inevitable/governance`. Same injection pattern as `CognitiveAnalysisEngine` (ADR-0017) and `TwinRegistry` (ADR-0020).
+- **D4 (FSM):** `proposed → evaluated → approved → rolled_out | rolled_back`. `rollback()` is valid from `"approved"` or `"rolled_out"` only; idempotent from `"rolled_back"`; throws from earlier states (nothing to roll back). Data preserved on `"rolled_back"` for audit.
+- **D5 (event taxonomy):** `evolution.rollback.completed` added to the `evolution.*` family (permanent, replayable) — the existing taxonomy listed `rollout.completed` but omitted the rollback event, creating a silent state change.
+- **D6 (DemoFixture):** `evolution: EvolutionEngine` + five lifecycle helpers. Three built-in `SyntheticLearnerSeed` profiles (beginner: no mastery; intermediate: 2 concepts at level 3; advanced: 3 concepts at level 4). The real governance guard calls `guard()` from `@inevitable/governance` with `resource: "evolution.proposal"` and `action: "evolution.approve"`.
+
+**Shadow evaluator projection formula (ADR-0021 D2):**
+- Base pass rate: `mean(masteryLevel) / 5` (0.4 floor if no mastery entries)
+- `depth_adjustment`: `min(0.95, base + delta * 0.05)`; confidence delta `delta * 0.03`
+- `strategy_shift`: `min(0.95, base + 0.1)`; confidence delta `0.05`
+- `curriculum_reorder`: `min(0.95, base + 0.05)`; confidence delta `0.02`
+- `driftDetected`: `simulatedPassRate < 0.4`
+- `overallPassRate`: mean across all synthetic learners; `recommendation: "approve"` if `≥ 0.6`
+
+**Event wiring:** `publish` callback wraps `createEvent` + `bus.publish` + per-engine local HLC (`hlcInit("demo-evolution")`) — same pattern as all other engines. Events: `evolution.proposal.created`, `evolution.experiment.started`, `evolution.shadow_result.recorded`, `evolution.rollout.completed`, `evolution.rollback.completed`.
+
+**Governance wiring in wiring.ts:** `guard: (action) => governanceGuard(governance, { subjectCid: session.learnerIdentity.cid, resource: "evolution.proposal", action, context: {} }).allowed` — calling the real governance engine with the current PRODUCT_DISPATCH_POLICIES. (P6.2 can add a dedicated GOV-P04 evolution policy.)
+
+**Tests:** `packages/orchestration/tests/evolution.test.ts` — 26 tests covering propose/get/list/evaluate/approve/rollout/rollback. Key coverage: shadow evaluator produces "approve" for intermediate+advanced seeds with `depth_adjustment +2` (overallPassRate ≥ 0.6); "reject" for beginner-only seed with `targetDepthDelta: -1`; governance guard returning `false` blocks `approve()`; `rollback()` is idempotent (second call returns current state, no re-emit); data (evaluationResult) intact after rollback; `evaluate()` throws when not "proposed"; `rollout()` throws when not "approved"; empty synthetic learners → overallPassRate 0 → "reject".
+
+**Deferred to P6.2+:** applying the rolled-out configuration to the live runtime (proposal state is advisory in P6.1); durable persistence of proposals across restarts (`FileEventTransport` pattern); replay-based evaluation over real historical session events (CognitiveAnalysisEngine signals → P6.2 evaluation loop); multi-agent consensus on proposals; GOV-P04 dedicated evolution policy.
+
+**P6 closes the roadmap's core phases.** The COS now satisfies all six foundational invariants from §25.4: event sourcing, persistent memory, governed orchestration, reasoning-quality observability, self-evolution, and temporal cognition. P7 (Platform API/SDK + duplex transport) is the next frontier — hardening the substrate's public surface for a second manifestation (MCP or CLI as the first cheap proof).

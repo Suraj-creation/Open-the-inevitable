@@ -9,6 +9,28 @@ paragraph or a few bullets per milestone. Implementation detail lives in the own
 
 ## [Unreleased]
 
+> **Phase 6 (Governed Self-Evolution) is complete** — P6.1.
+
+### Added — Phase 6 (P6.1): Governed Self-Evolution — proposal FSM + shadow tests + governance gate
+
+- **The COS can now propose, test, and govern changes to its own pedagogy.** `EvolutionEngine`
+  (`@inevitable/orchestration`, DPS-010, ADR-0021) implements the full governed evolution lifecycle:
+  `propose()` mints an `EvolutionProposal` (status: `"proposed"`) and emits `evolution.proposal.created`;
+  `evaluate()` runs a deterministic `ShadowEvaluator` against each injected `SyntheticLearnerSeed`
+  projecting `simulatedPassRate`/`confidenceDelta`/`driftDetected` from the proposal configuration (no
+  model calls — replay-safe per ADR-0021 D2), emitting `evolution.experiment.started` + one
+  `evolution.shadow_result.recorded` per learner; `approve()` gates on the evaluation `recommendation`
+  ("approve" if `overallPassRate ≥ 0.6`) AND an injected `guard` callback (the real governance engine
+  at the composition root — keeping the engine free of a hard dep, consistent with the ADR-0017/ADR-0020
+  injection pattern); `rollout()` emits `evolution.rollout.completed`; `rollback()` is a reversible,
+  idempotent terminal operation from `"approved"` or `"rolled_out"` — data preserved for audit, emits
+  `evolution.rollback.completed`. `evolution.rollback.completed` is now registered in the event taxonomy
+  (additive, permanent, replayable; ADR-0021 D5). `DemoFixture` exposes `evolution: EvolutionEngine` plus
+  five lifecycle helpers (`proposeEvolution`, `evaluateEvolution`, `approveEvolution`, `rolloutEvolution`,
+  `rollbackEvolution`) with three default synthetic learner profiles (beginner/intermediate/advanced) and the
+  real governance guard wired. 26 new tests cover the full FSM, shadow evaluation accuracy, governance block,
+  and idempotency.
+
 > **Phase 5 (Digital Twin) is complete** — P5.1.
 
 ### Added — Phase 5 (P5.1): Digital Twin lifecycle — consent-scoped cognitive artifact
