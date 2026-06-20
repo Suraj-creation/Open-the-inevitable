@@ -12,6 +12,7 @@ describe("MVP agent catalog", () => {
       "assessment",
       "revision",
       "memory",
+      "intent",
     ]);
 
     for (const manifest of MVP_AGENT_MANIFESTS) {

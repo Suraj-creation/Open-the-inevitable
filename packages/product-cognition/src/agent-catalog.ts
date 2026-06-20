@@ -8,6 +8,7 @@ const MVP_AGENT_IDS = [
   "assessment",
   "revision",
   "memory",
+  "intent",
 ] as const;
 
 type MvpAgentId = (typeof MVP_AGENT_IDS)[number];
@@ -77,6 +78,14 @@ const SEEDS: readonly ManifestSeed[] = [
     memoryRead: ["working", "episodic", "semantic", "procedural", "reflective"],
     memoryWrite: ["working", "episodic", "semantic", "procedural", "reflective"],
     requiredEvents: ["memory.committed", "memory.subscription.fanout"],
+  },
+  {
+    id: "intent",
+    role: "Interprets a learner goal into a bounded, confidence-scored intent lease.",
+    capabilities: ["intent.interpret", "goal.scope"],
+    memoryRead: ["semantic", "reflective"],
+    memoryWrite: [],
+    requiredEvents: ["intent.received", "intent.interpreted"],
   },
 ];
 

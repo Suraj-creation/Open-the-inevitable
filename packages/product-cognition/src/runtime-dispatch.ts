@@ -47,7 +47,8 @@ export type ProductRuntimeAgentId =
   | "practice"
   | "assessment"
   | "revision"
-  | "memory";
+  | "memory"
+  | "intent";
 
 export interface RuntimeAgentBinding {
   readonly identity: CognitiveIdentity;
@@ -111,6 +112,7 @@ function workTypeFor(agentId: ProductRuntimeAgentId): CognitiveWorkItem["work_ty
     case "explanation":
     case "practice":
     case "revision":
+    case "intent":
       return "student_interaction";
   }
 }

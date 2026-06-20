@@ -47,3 +47,9 @@ export {
   deterministicCurriculum,
   parseCurriculumOutput,
 } from "./curriculum-unit";
+export type { InferredIntent, IntentInferenceUnitDeps } from "./intent-inference-unit";
+export {
+  IntentInferenceUnit,
+  deterministicIntent,
+  parseIntentOutput,
+} from "./intent-inference-unit";

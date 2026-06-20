@@ -16,7 +16,15 @@ import type { Policy, PolicyOutcome, PolicyRequest } from "@inevitable/governanc
 // ---------------------------------------------------------------------------
 
 /** Agents available to standard learners (trust_level >= 1). */
-const STUDENT_AGENTS = new Set(["supervisor", "explanation", "practice", "assessment", "revision"]);
+const STUDENT_AGENTS = new Set([
+  "supervisor",
+  "explanation",
+  "practice",
+  "assessment",
+  "revision",
+  // Interpreting a learner's own goal is fundamental to asking and low-risk (DPS intent inference).
+  "intent",
+]);
 
 /** Agents that require elevated trust (trust_level >= 3). */
 const PRIVILEGED_AGENTS = new Set(["memory", "curriculum"]);

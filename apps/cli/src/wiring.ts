@@ -13,7 +13,7 @@ import {
   type WorkingMemoryContext,
 } from "@inevitable/context";
 import type { ModelRuntime } from "@inevitable/contracts";
-import { InMemoryEventBus, type EventBus } from "@inevitable/events";
+import { InMemoryEventBus, createEvent, type EventBus } from "@inevitable/events";
 import { GovernanceEngine } from "@inevitable/governance";
 import { TieredMemoryStore, type MemoryLayer } from "@inevitable/memory";
 import {
@@ -22,6 +22,7 @@ import {
   FiberedLearningLoop,
   LearningPathProjector,
   MVP_AGENT_MANIFESTS,
+  IntentInferenceUnit,
   MasteryCheckpointRecorder,
   ModelBackedUnit,
   PRODUCT_DISPATCH_POLICIES,
@@ -31,16 +32,23 @@ import {
   type ModelBackedRole,
   type OnboardingSession,
 } from "@inevitable/product-cognition";
-import type { CognitiveEvent, CognitiveIdentity, MemoryMutation } from "@inevitable/protocols";
+import type {
+  CognitiveEvent,
+  CognitiveIdentity,
+  IntentLease,
+  MemoryMutation,
+} from "@inevitable/protocols";
 import {
   CosError,
   CryptoIdGenerator,
   ManualClock,
   SeededIdGenerator,
   err,
+  hlcInit,
   newMutationId,
   ok,
   type Clock,
+  type Hlc,
   type IdGenerator,
   type Result,
 } from "@inevitable/shared";
@@ -166,6 +174,12 @@ export interface DemoFixture {
    * `working` tier (distributed). Returns the bounded context. Spec: DPS-005. Empty for a fresh learner.
    */
   readonly assembleContext: (query: string) => Promise<WorkingMemoryContext>;
+  /**
+   * Interpret a learner goal into the session's intent lease (DPS intent inference): refreshes
+   * `interpreted_goal`/`scope`/`constraints`/`confidence` in place (stable `intent_id`) via the governed
+   * intent agent, emitting `intent.received` then `intent.interpreted`. Spec: kernel/intent-inference.
+   */
+  readonly inferIntent: (goal: string) => Promise<Result<IntentLease, CosError>>;
 }
 
 export interface DemoOptions {
@@ -451,6 +465,66 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     });
   };
 
+  // Intent inference (kernel/intent-inference): interpret the learner's goal into the session's intent
+  // lease through the governed path, emitting intent.received → intent.interpreted.
+  const intentDispatcher = dispatcher(
+    "intent",
+    "cog-int-demo",
+    new IntentInferenceUnit({ manifest: manifest("intent"), model, idGenerator }),
+  );
+  let intentHlc: Hlc = hlcInit("demo-intent");
+  const emitIntent = async (eventType: string, payload: Record<string, unknown>): Promise<void> => {
+    const created = createEvent(
+      {
+        eventType,
+        producerCid: session.learnerIdentity.cid,
+        producerType: "kernel.intent",
+        payload,
+        topic: `cos.${eventType}`,
+        classification: "internal",
+      },
+      { clock, hlc: intentHlc, idGenerator },
+    );
+    intentHlc = created.hlc;
+    await bus.publish(created.event);
+  };
+  const inferIntent = async (goal: string): Promise<Result<IntentLease, CosError>> => {
+    await emitIntent("intent.received", { goal, owner_user_id: session.intentLease.owner_user_id });
+    const dispatched = await intentDispatcher.dispatch({
+      session,
+      targetAgentId: "intent",
+      intent: `interpret: ${goal}`,
+      content: { goal },
+      maxTimeSeconds: 30,
+    });
+    if (!dispatched.ok) return err(dispatched.error);
+    const content = (dispatched.value.responsePackets[0]?.content ?? {}) as Record<string, unknown>;
+    const interpretedGoal =
+      typeof content["interpreted_goal"] === "string" && content["interpreted_goal"].trim()
+        ? (content["interpreted_goal"] as string)
+        : goal;
+    const scope = Array.isArray(content["scope"])
+      ? content["scope"].filter((s): s is string => typeof s === "string")
+      : [];
+    const constraints = Array.isArray(content["constraints"])
+      ? content["constraints"].filter((s): s is string => typeof s === "string")
+      : [];
+    const confidence = typeof content["confidence"] === "number" ? content["confidence"] : 0.5;
+    // Re-interpret the session's intent lease IN PLACE: keep intent_id (= surface session_id) stable.
+    session.intentLease.interpreted_goal = interpretedGoal;
+    session.intentLease.scope = scope;
+    session.intentLease.constraints = constraints;
+    session.intentLease.confidence = confidence;
+    await emitIntent("intent.interpreted", {
+      intent_id: session.intentLease.intent_id,
+      owner_user_id: session.intentLease.owner_user_id,
+      interpreted_goal: interpretedGoal,
+      scope,
+      confidence,
+    });
+    return ok(session.intentLease);
+  };
+
   // Context-lease-bounded retrieval (DPS-005): assemble the learner's relevant prior knowledge into
   // working memory on demand, bounded by the session's context lease. VectorStore-backed; deterministic.
   const contextAssembler = new ContextAssembler({ vectors: new InMemoryVectorStore() });
@@ -514,6 +588,7 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     idGenerator,
     generateCurriculum,
     assembleContext,
+    inferIntent,
   };
 }
 

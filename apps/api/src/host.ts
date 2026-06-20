@@ -424,6 +424,10 @@ export class SurfaceHost {
     hosted: HostedSurface,
     goal: string,
   ): Promise<Result<SurfaceAskResult, CosError>> {
+    // Intent inference (kernel/intent-inference): interpret the goal into the session's intent lease.
+    // Best-effort — a blocked/failed interpretation (e.g. an untrusted learner) must not change the
+    // existing ask-degradation behavior; the cycle's own governance gates remain the decider.
+    await hosted.fixture.inferIntent(goal);
     // Context-lease-bounded retrieval (DPS-005): assemble the learner's relevant prior knowledge into
     // working memory for this ask, bounded by their context lease. A fresh learner assembles nothing.
     await hosted.fixture.assembleContext(goal);
