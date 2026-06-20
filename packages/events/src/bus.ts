@@ -51,5 +51,12 @@ export interface EventBus {
   publish(event: CognitiveEvent): Promise<PublishResult>;
   subscribe(subject: string, handler: EventHandler, options?: SubscribeOptions): Subscription;
   replay(options?: ReplayOptions): CognitiveEvent[];
+  /**
+   * Load previously-published events into the log WITHOUT re-delivery, validation, or governance —
+   * for reconstructing a session from a durable log (DPS-002). The events were already governed and
+   * validated at first publish; re-publishing would re-run side effects. Advances the sequence past
+   * the loaded maximum so subsequently-published events do not collide. Only valid on an empty bus.
+   */
+  hydrate(events: readonly CognitiveEvent[]): void;
   readonly log: readonly CognitiveEvent[];
 }

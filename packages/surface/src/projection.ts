@@ -31,6 +31,52 @@ export interface SurfaceContributionRecord {
   readonly packet_id: string | null;
 }
 
+// --- Choreography slice (Phase 2D, SRF-002 §4; ADR-0007) ---------------------
+// These make cognition visible over time. They carry only logical order + durations,
+// never a playback clock — the animation schedule is a client projection (ADR-0007).
+
+export type FocusTargetType = "block" | "concept" | "region";
+
+/** Directed attention: "look here now". */
+export interface SurfaceFocus {
+  readonly target_type: FocusTargetType;
+  readonly target_id: string;
+  readonly reason: string;
+  readonly spotlight: boolean;
+}
+
+/** An out-of-band voice artifact reference (binaries never enter events — SRF-004). */
+export interface NarrationVoice {
+  readonly artifact_id: string;
+  readonly content_ref: string;
+  readonly duration_ms: number;
+  readonly provider_id: string;
+}
+
+/** One unit of spoken/visible narration, in logical order. */
+export interface NarrationSegment {
+  readonly segment_id: string;
+  readonly block_id: string | null;
+  readonly concept_id: string | null;
+  readonly sequence: number;
+  readonly text: string;
+  readonly focus: SurfaceFocus | null;
+  readonly reveal_ids: readonly string[];
+  readonly voice: NarrationVoice | null;
+}
+
+export type AgentPresenceState = "idle" | "thinking" | "contributing" | "speaking";
+
+/** An agent as a first-class visible entity on the surface (the pub/sub seam). */
+export interface AgentPresence {
+  readonly agent_cid: string;
+  readonly agent_id: string;
+  readonly role: string;
+  readonly state: AgentPresenceState;
+  readonly block_id: string | null;
+  readonly hlc: string;
+}
+
 export interface SurfaceState {
   readonly surface_id: string;
   readonly session_id: string;
@@ -42,6 +88,9 @@ export interface SurfaceState {
   readonly agents_joined: readonly string[];
   readonly contributions: readonly SurfaceContributionRecord[];
   readonly routing_decisions: readonly SurfaceRoutingRecord[];
+  readonly narration: readonly NarrationSegment[];
+  readonly focus: SurfaceFocus | null;
+  readonly presence: readonly AgentPresence[];
   readonly version: number;
   readonly last_hlc: string | null;
 }
@@ -61,8 +110,21 @@ interface MutableSurfaceState {
   agents_joined: string[];
   contributions: SurfaceContributionRecord[];
   routing_decisions: SurfaceRoutingRecord[];
+  narration: NarrationSegment[];
+  focus: SurfaceFocus | null;
+  presence: AgentPresence[];
   version: number;
   last_hlc: string | null;
+}
+
+function readFocus(raw: Record<string, unknown> | undefined): SurfaceFocus | null {
+  if (!raw) return null;
+  return {
+    target_type: (raw["target_type"] as FocusTargetType | undefined) ?? "block",
+    target_id: (raw["target_id"] as string | undefined) ?? "",
+    reason: (raw["reason"] as string | undefined) ?? "",
+    spotlight: (raw["spotlight"] as boolean | undefined) ?? true,
+  };
 }
 
 function payloadOf(event: CognitiveEvent): Record<string, unknown> {
@@ -101,6 +163,9 @@ export function foldSurfaceEvents(
         agents_joined: [],
         contributions: [],
         routing_decisions: [],
+        narration: [],
+        focus: null,
+        presence: [],
         version: 1,
         last_hlc: event.hlc,
       };
@@ -196,6 +261,56 @@ export function foldSurfaceEvents(
             version: existing.version + 1,
             content: { ...existing.content, layers: { ...existingLayers, ...layers } },
           };
+        }
+        break;
+      }
+      case "surface.narration.segment": {
+        const segmentId = payload["segment_id"] as string | undefined;
+        if (segmentId) {
+          const focus = readFocus(payload["focus"] as Record<string, unknown> | undefined);
+          const voiceRaw = payload["voice"] as Record<string, unknown> | undefined;
+          const voice: NarrationVoice | null = voiceRaw
+            ? {
+                artifact_id: (voiceRaw["artifact_id"] as string | undefined) ?? "",
+                content_ref: (voiceRaw["content_ref"] as string | undefined) ?? "",
+                duration_ms: (voiceRaw["duration_ms"] as number | undefined) ?? 0,
+                provider_id: (voiceRaw["provider_id"] as string | undefined) ?? "",
+              }
+            : null;
+          state.narration.push({
+            segment_id: segmentId,
+            block_id: (payload["block_id"] as string | null | undefined) ?? null,
+            concept_id: (payload["concept_id"] as string | null | undefined) ?? null,
+            sequence: (payload["sequence"] as number | undefined) ?? state.narration.length,
+            text: (payload["text"] as string | undefined) ?? "",
+            focus,
+            reveal_ids: (payload["reveal_ids"] as string[] | undefined) ?? [],
+            voice,
+          });
+          // A narration segment that carries a focus directive also moves the surface's attention.
+          if (focus) state.focus = focus;
+        }
+        break;
+      }
+      case "surface.focus.changed": {
+        const focus = readFocus(payload["focus"] as Record<string, unknown> | undefined);
+        if (focus) state.focus = focus;
+        break;
+      }
+      case "surface.presence.updated": {
+        const cid = payload["agent_cid"] as string | undefined;
+        if (cid) {
+          const presence: AgentPresence = {
+            agent_cid: cid,
+            agent_id: (payload["agent_id"] as string | undefined) ?? "",
+            role: (payload["role"] as string | undefined) ?? "",
+            state: (payload["state"] as AgentPresenceState | undefined) ?? "idle",
+            block_id: (payload["block_id"] as string | null | undefined) ?? null,
+            hlc: event.hlc,
+          };
+          const index = state.presence.findIndex((p) => p.agent_cid === cid);
+          if (index >= 0) state.presence[index] = presence;
+          else state.presence.push(presence);
         }
         break;
       }

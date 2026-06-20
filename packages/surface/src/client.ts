@@ -1,0 +1,33 @@
+/**
+ * Browser-safe surface client surface — the projection layer's shared truth function.
+ *
+ * This entry exposes ONLY pure, Node-free pieces so a remote viewport (apps/web) can fold the
+ * streamed `surface.*` event log into `SurfaceState` with the SAME function the runtime uses.
+ * Replay equivalence (SRF-005 §6.2) holds because there is exactly one fold.
+ *
+ * Import boundary: `foldSurfaceEvents` (from ./projection) has no runtime imports — its only
+ * dependencies are type-only and erased at compile. Everything else here is a `type` re-export.
+ * Do NOT add runtime value exports that import Node APIs (e.g. anything pulling in @inevitable/shared)
+ * — that would break the browser bundle and the "the UI is a projection" boundary.
+ *
+ * Spec: spec/surface/surface-streaming-sync-protocol.md §2, §6; spec/surface/cognitive-surface-runtime.md §4.5.
+ */
+export { foldSurfaceEvents } from "./projection";
+export type {
+  SurfaceState,
+  SurfaceContributionRecord,
+  SurfaceRoutingRecord,
+  SurfaceFocus,
+  FocusTargetType,
+  NarrationSegment,
+  NarrationVoice,
+  AgentPresence,
+  AgentPresenceState,
+} from "./projection";
+export type {
+  CognitionBlock,
+  CognitionBlockType,
+  BlockProvenance,
+  BlockClassification,
+} from "./blocks";
+export type { TimelineProjection, SurfaceTimelineNode, TimelineNodeStatus } from "./timeline";

@@ -16,6 +16,7 @@ Initial event families:
 - `evolution.*`
 - `surface.*`
 - `model.*`
+- `gateway.*`
 
 Every event family must define schema, producer, consumer, retention, replay, governance classification, and failure behavior.
 

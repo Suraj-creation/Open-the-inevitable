@@ -14,11 +14,13 @@ import {
   LearningPathProjector,
   MVP_AGENT_MANIFESTS,
   MasteryCheckpointRecorder,
+  ModelBackedUnit,
   PRODUCT_DISPATCH_POLICIES,
   ProductRuntimeDispatcher,
   SupervisorUnit,
   type OnboardingSession,
 } from "@inevitable/product-cognition";
+import type { ModelRuntime } from "@inevitable/contracts";
 import type { CognitiveIdentity } from "@inevitable/protocols";
 import { ManualClock, SeededIdGenerator } from "@inevitable/shared";
 import { WorldStateGraph } from "@inevitable/world-state";
@@ -109,9 +111,38 @@ interface Fixture {
   bus: InMemoryEventBus;
 }
 
+/**
+ * A minimal fake model that returns layered explanation JSON — stands in for live, dynamic
+ * generation (Gemini in production). Deterministic per call so replay stays exact, but the
+ * content is *generated*, not pre-authored: this is the dynamic classroom path, not a static script.
+ */
+function fakeLayeredModel(): ModelRuntime {
+  return {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          layers: {
+            layer_0:
+              "A perceptron weighs each input and fires when the weighted sum crosses a threshold.",
+            layer_1: "Picture a row of dials feeding a single gate that flips on past a cutoff.",
+          },
+          summary: "A perceptron is a threshold-weighted linear classifier.",
+          confidence: 0.9,
+          reasoning: "intuition-first, then a visual model",
+        }),
+        model: "fake-layered-model",
+        finishReason: "stop",
+      };
+    },
+    async embed() {
+      return [0, 0, 0, 0, 0, 0, 0, 0];
+    },
+  };
+}
+
 function makeFixture(
   seed = "surface-session",
-  options: { governance?: boolean; trustLevel?: number } = {},
+  options: { governance?: boolean; trustLevel?: number; explanationModel?: ModelRuntime } = {},
 ): Fixture {
   const clock = new ManualClock(Date.UTC(2026, 5, 11));
   const idGenerator = new SeededIdGenerator(seed);
@@ -152,7 +183,18 @@ function makeFixture(
         nodeId: "surface-explanation",
         agent: {
           identity: agentIdentity("explanation", "cog-exp-surface"),
-          unit: new DeterministicMvpUnit(expManifest, idGenerator),
+          // Default: deterministic offline unit. With an explanationModel, the explanation is
+          // generated dynamically (model-backed) — the product's real, live path.
+          unit: options.explanationModel
+            ? new ModelBackedUnit({
+                manifest: expManifest,
+                model: options.explanationModel,
+                role: "explanation",
+                fallback: new DeterministicMvpUnit(expManifest, idGenerator),
+                world,
+                idGenerator,
+              })
+            : new DeterministicMvpUnit(expManifest, idGenerator),
         },
         governance,
       }),
@@ -340,6 +382,31 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
     expect(world.getNode(assessment!.provenance.world_state_nodes[0]!)?.type).toBe(
       "mastery_checkpoint",
     );
+  });
+
+  test("the surface speaks live: dynamic explanation is narrated, focused, with agent presence", async () => {
+    // Dynamic (model-backed) explanation — the real classroom path, not a static script.
+    const { surface } = makeFixture("surface-choreo", { explanationModel: fakeLayeredModel() });
+    await surface.start("Teach me Neural Networks");
+    const asked = await surface.ask(teachMeNeuralNetworks());
+    expect(asked.ok).toBe(true);
+    if (!asked.ok) throw asked.error;
+
+    const state = asked.value.state;
+    // The dynamically-generated explanation was narrated, segment by segment, focused on its block.
+    const explanation = asked.value.blocks.find((b) => b.block_type === "explanation");
+    expect(explanation).toBeTruthy();
+    expect(state.narration.length).toBeGreaterThanOrEqual(1);
+    expect(state.narration.every((s) => s.block_id === explanation!.block_id)).toBe(true);
+    expect(state.narration[0]?.sequence).toBe(0);
+    // The narration is the generated content, not a canned line.
+    expect(state.narration.map((s) => s.text).join(" ")).toContain("perceptron");
+    expect(state.focus?.target_id).toBe(explanation!.block_id);
+    // Agents are visible entities (presence keyed by CID; one CID may play several roles in the MVP).
+    expect(state.presence.length).toBeGreaterThanOrEqual(2);
+    const roles = new Set(state.presence.map((p) => p.role));
+    expect(roles.has("explainer")).toBe(true);
+    expect(state.presence.find((p) => p.role === "explainer")?.state).toBe("contributing");
   });
 
   test("event ordering laws hold (created first, joined before contributed, closed terminal)", async () => {

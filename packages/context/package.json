@@ -1,0 +1,25 @@
+{
+  "name": "@inevitable/context",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Context-lease-bounded retrieval: VectorStore-backed semantic retrieval over memory, assembled into working memory under a context lease.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/shared": "workspace:*",
+    "@inevitable/protocols": "workspace:*",
+    "@inevitable/contracts": "workspace:*"
+  }
+}

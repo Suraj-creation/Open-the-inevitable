@@ -21,6 +21,7 @@ export const DEFAULT_EVENT_FAMILIES: readonly EventFamilyRegistration[] = [
   fam("system", "kernel", "90d", "non-replayable", "internal"),
   fam("surface", "surface", "permanent", "replayable", "internal"),
   fam("model", "runtime", "permanent", "replayable", "internal"),
+  fam("gateway", "gateway", "1d", "recorded-observation", "internal"),
 ];
 
 function fam(

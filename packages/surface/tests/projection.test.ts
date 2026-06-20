@@ -199,6 +199,116 @@ describe("foldSurfaceEvents", () => {
     expect(state?.routing_decisions).toHaveLength(0);
   });
 
+  test("narration.segment appends in order and carries focus into state.focus", async () => {
+    const f = makeFixture("projection-narration");
+    await seedSurface(f);
+    await f.emit("surface.narration.segment", {
+      surface_id: "srf-proj",
+      segment_id: "seg-1",
+      block_id: "blk-x",
+      concept_id: "fourier",
+      sequence: 0,
+      text: "A signal is a sum of rotations.",
+      focus: { target_type: "block", target_id: "blk-x", spotlight: true },
+      reveal_ids: ["el-1"],
+      voice: {
+        artifact_id: "art-1",
+        content_ref: "mem://art-1",
+        duration_ms: 4200,
+        provider_id: "null",
+      },
+    });
+
+    const state = foldSurfaceEvents(f.bus.replay({ subject: "surface.>" }), "srf-proj");
+    expect(state?.narration).toHaveLength(1);
+    expect(state?.narration[0]?.text).toBe("A signal is a sum of rotations.");
+    expect(state?.narration[0]?.voice?.duration_ms).toBe(4200);
+    expect(state?.narration[0]?.reveal_ids).toEqual(["el-1"]);
+    // a segment-carried focus moves the surface's attention
+    expect(state?.focus?.target_id).toBe("blk-x");
+    expect(state?.focus?.spotlight).toBe(true);
+  });
+
+  test("focus.changed replaces the current focus", async () => {
+    const f = makeFixture("projection-focus");
+    await seedSurface(f);
+    await f.emit("surface.focus.changed", {
+      surface_id: "srf-proj",
+      sequence: 0,
+      focus: { target_type: "concept", target_id: "fourier", reason: "now explaining the core" },
+    });
+    await f.emit("surface.focus.changed", {
+      surface_id: "srf-proj",
+      sequence: 1,
+      focus: { target_type: "block", target_id: "blk-2", reason: "look at the diagram" },
+    });
+
+    const state = foldSurfaceEvents(f.bus.replay({ subject: "surface.>" }), "srf-proj");
+    expect(state?.focus?.target_type).toBe("block");
+    expect(state?.focus?.target_id).toBe("blk-2");
+    expect(state?.focus?.reason).toBe("look at the diagram");
+  });
+
+  test("presence.updated upserts by agent_cid (latest state wins, no duplicates)", async () => {
+    const f = makeFixture("projection-presence");
+    await seedSurface(f);
+    await f.emit("surface.presence.updated", {
+      surface_id: "srf-proj",
+      agent_cid: "cog-exp",
+      agent_id: "explanation",
+      role: "explainer",
+      state: "thinking",
+    });
+    await f.emit("surface.presence.updated", {
+      surface_id: "srf-proj",
+      agent_cid: "cog-soc",
+      agent_id: "socratic",
+      role: "socratic",
+      state: "idle",
+    });
+    await f.emit("surface.presence.updated", {
+      surface_id: "srf-proj",
+      agent_cid: "cog-exp",
+      agent_id: "explanation",
+      role: "explainer",
+      state: "speaking",
+      block_id: "blk-x",
+    });
+
+    const state = foldSurfaceEvents(f.bus.replay({ subject: "surface.>" }), "srf-proj");
+    expect(state?.presence).toHaveLength(2);
+    const exp = state?.presence.find((p) => p.agent_cid === "cog-exp");
+    expect(exp?.state).toBe("speaking");
+    expect(exp?.block_id).toBe("blk-x");
+  });
+
+  test("choreography events satisfy replay equivalence (deep-equal under re-fold)", async () => {
+    const f = makeFixture("projection-choreo-replay");
+    await seedSurface(f);
+    await f.emit("surface.presence.updated", {
+      surface_id: "srf-proj",
+      agent_cid: "cog-exp",
+      agent_id: "explanation",
+      role: "explainer",
+      state: "speaking",
+    });
+    await f.emit("surface.narration.segment", {
+      surface_id: "srf-proj",
+      segment_id: "seg-1",
+      sequence: 0,
+      text: "Segment one.",
+      focus: { target_type: "concept", target_id: "fourier", spotlight: true },
+    });
+    await f.emit("surface.focus.changed", {
+      surface_id: "srf-proj",
+      sequence: 1,
+      focus: { target_type: "block", target_id: "blk-1", reason: "next" },
+    });
+
+    const events = f.bus.replay({ subject: "surface.>" });
+    expect(foldSurfaceEvents(events, "srf-proj")).toEqual(foldSurfaceEvents(events, "srf-proj"));
+  });
+
   test("fold is pure and deterministic: same events ⇒ deep-equal state", async () => {
     const f = makeFixture("projection-pure");
     await seedSurface(f);

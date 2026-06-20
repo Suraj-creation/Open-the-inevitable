@@ -138,8 +138,18 @@ record, never the provider. **Realized in Phase 2B** for the text-generation mod
 [Model Invocation Protocol](../protocols/model-invocation-protocol.md): `RecordingModelRuntime`
 in `packages/adapters` wraps any `ModelRuntime` (Gemini first), publishing
 `model.output.recorded` before use in record mode and resolving from the record (never the
-provider, failing closed on a miss) in replay mode. Media modalities (image/video/voice/live)
-adopt the same seam in Phase 2C.
+provider, failing closed on a miss) in replay mode.
+
+**Phase 2D — voice (realized).** Narration voice ships through a `VoiceRuntime` adapter in
+`packages/adapters` (`GeminiVoiceRuntime`, guarded dynamic import; `NullVoiceRuntime`, the
+deterministic silent-clip reference). Gemini returns base64 PCM, which the adapter wraps in a WAV
+container and stamps with a duration derived from the sample count. Per ADR-0007, the audio bytes
+are stored **out-of-band** (the gateway `MediaStore`, served by `GET /api/surface/:id/media/:artifactId`)
+and never enter events or world-state; the narration event carries only `voice {artifact_id,
+content_ref, duration_ms, provider_id}`. `GeminiVoiceRuntime` declares `deterministic: false`, so its
+output reference is recorded in the event log (the segment's `voice` ref + `surface.visual.generated`);
+durable cross-process audio persistence is deferred (the event log still replays the timing exactly).
+Image/video/live adopt the same seam next.
 
 ## 7. Event and State Transitions
 
@@ -180,7 +190,8 @@ neither check — the gate is structural.
 Phase 2B (shipped): `GeminiModelRuntime` + `RecordingModelRuntime` + `NullModelRuntime` in
 `packages/adapters` (guarded dynamic import of the Gemini SDK, per ADR-0003 adapter doctrine)
 realize the text-generation path with D3 recorded-output replay — see the
-[Model Invocation Protocol](../protocols/model-invocation-protocol.md). Phase 2C:
-`GeminiImageProvider`, `GeminiLiveProvider`, `GeminiMultimodalProvider` implementing the media
-interfaces above through the same recording seam. Additional vendors register beside Gemini
-without surface changes.
+[Model Invocation Protocol](../protocols/model-invocation-protocol.md). Phase 2D (shipped):
+`GeminiVoiceRuntime` + `NullVoiceRuntime` realize narration voice with out-of-band audio + a
+recorded reference (see §6). Next: `GeminiImageProvider`, `GeminiLiveProvider`,
+`GeminiMultimodalProvider` implementing the media interfaces above through the same recording seam.
+Additional vendors register beside Gemini without surface changes.

@@ -1,0 +1,27 @@
+{
+  "name": "@inevitable/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 2C Visible Surface — a browser viewport that folds the live surface.* stream into SurfaceState and renders cognition as it happens.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/surface": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  }
+}

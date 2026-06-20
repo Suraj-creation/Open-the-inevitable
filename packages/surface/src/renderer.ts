@@ -71,6 +71,26 @@ export class TextSurfaceRenderer implements SurfaceRenderer {
       }
     }
 
+    if (state.narration.length > 0) {
+      lines.push("");
+      const here = state.focus
+        ? `  (focus: ${state.focus.target_type}:${state.focus.target_id})`
+        : "";
+      lines.push(`--- Narration (${state.narration.length})${here} ---`);
+      for (const segment of state.narration) {
+        const voice = segment.voice ? ` [voice ${segment.voice.duration_ms}ms]` : "";
+        lines.push(`  ${segment.sequence}. ${segment.text}${voice}`);
+      }
+    }
+
+    if (state.presence.length > 0) {
+      lines.push("");
+      lines.push("--- Agent Presence ---");
+      for (const agent of state.presence) {
+        lines.push(`  ${agent.agent_id} (${agent.role}): ${agent.state}`);
+      }
+    }
+
     if (state.agents_joined.length > 0) {
       lines.push("");
       lines.push(`Agents: ${state.agents_joined.join(", ")}`);

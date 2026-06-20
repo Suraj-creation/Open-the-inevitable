@@ -10,13 +10,16 @@
 import { GeminiModelRuntime, NullModelRuntime, RecordingModelRuntime } from "@inevitable/adapters";
 import type { ModelRuntime } from "@inevitable/contracts";
 import { TextSurfaceRenderer } from "@inevitable/surface";
-import { buildDemoSession, demoAsk } from "./wiring";
+import { geminiApiKey, loadEnv } from "./env";
+import { buildDemoSession } from "./wiring";
+
+loadEnv(); // hydrate process.env from .env before resolving the model
 
 const goal = process.argv[2] ?? "Teach me Neural Networks";
 
 let inner: ModelRuntime;
 let provider: string;
-const apiKey = process.env["GEMINI_API_KEY"];
+const apiKey = geminiApiKey();
 if (apiKey) {
   const connected = await GeminiModelRuntime.connect({ apiKey });
   if (connected.ok) {
@@ -56,7 +59,9 @@ const started = await surface.start(goal);
 if (!started.ok) throw started.error;
 
 console.log(`\nask: "${goal}"`);
-const asked = await surface.ask(demoAsk(goal));
+const curriculum = await fixture.generateCurriculum(goal);
+if (!curriculum.ok) throw curriculum.error;
+const asked = await surface.ask(curriculum.value);
 if (!asked.ok) throw asked.error;
 render();
 

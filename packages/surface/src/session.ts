@@ -38,6 +38,7 @@ import type { WorldStateGraph } from "@inevitable/world-state";
 
 import type { CognitionBlock } from "./blocks";
 import { AgentContributionRuntime, contributionFromDispatch } from "./contribution";
+import { SurfaceChoreographer, type VoiceSynthesizer } from "./narration";
 import { foldSurfaceEvents, type SurfaceState } from "./projection";
 import { SurfaceTimelineBuilder, type TimelineProjection } from "./timeline";
 import { traceBlock, type BlockTrace } from "./trace";
@@ -62,6 +63,11 @@ export interface SurfaceSessionDeps {
    * deepening). Expansion re-dispatches through the SAME gate — no bypass.
    */
   readonly explanationDispatcher?: GovernedDispatcher;
+  /**
+   * Optional voice synthesis for narration choreography (Phase 2D-S4). Absent ⇒ text-only,
+   * fully deterministic narration. Bytes never enter events — see ADR-0007.
+   */
+  readonly voice?: VoiceSynthesizer;
   /** CID stamped on supervisor routing blocks. */
   readonly supervisorCid?: string;
   readonly clock?: Clock;
@@ -104,6 +110,7 @@ export class SurfaceSession {
   private readonly clock: Clock;
   private readonly idGenerator: IdGenerator;
   private readonly contributions: AgentContributionRuntime;
+  private readonly choreographer: SurfaceChoreographer;
   private readonly supervisorCid: string;
   private hlc: Hlc;
 
@@ -123,6 +130,13 @@ export class SurfaceSession {
       clock: this.clock,
       idGenerator: this.idGenerator,
       nodeId: `${deps.nodeId ?? "surface-session"}-contrib`,
+    });
+    this.choreographer = new SurfaceChoreographer({
+      bus: deps.bus,
+      clock: this.clock,
+      idGenerator: this.idGenerator,
+      nodeId: `${deps.nodeId ?? "surface-session"}-choreo`,
+      ...(deps.voice ? { voice: deps.voice } : {}),
     });
   }
 
@@ -182,6 +196,20 @@ export class SurfaceSession {
       session_id: learner.intentLease.intent_id,
       goal: goal ?? null,
     });
+    return ok(surfaceId);
+  }
+
+  /**
+   * Resume an existing surface after a restart (DPS-002): adopt the persisted `surfaceId` without
+   * minting a new one. Emits and writes nothing — the surface's world-state nodes are already present
+   * (restored from the snapshot) and `surface.created` is already in the hydrated event log. From here
+   * the session is fully live: `ask`/`expand` run the same governed path.
+   */
+  resume(surfaceId: string): Result<string, CosError> {
+    if (this.surfaceId) {
+      return err(sessionError("surface session already started", { surfaceId: this.surfaceId }));
+    }
+    this.surfaceId = surfaceId;
     return ok(surfaceId);
   }
 
@@ -257,8 +285,18 @@ export class SurfaceSession {
     });
     if (!routingBlock.ok) return routingBlock;
     blocks.push(routingBlock.value);
+    // The supervisor is a visible cognitive entity, not metadata.
+    await this.choreographer.presence({
+      surface_id: surfaceId,
+      agent_cid: this.supervisorCid,
+      agent_id: "supervisor",
+      role: "supervisor",
+      state: "contributing",
+      block_id: routingBlock.value.block_id,
+    });
 
-    // 4. Agent contributions become blocks.
+    // 4. Agent contributions become blocks — and the explanation is narrated, segment by segment,
+    //    so the surface speaks and directs attention as understanding unfolds.
     if (cycle.explanation) {
       const block = await this.contributions.contribute(
         contributionFromDispatch({
@@ -274,6 +312,14 @@ export class SurfaceSession {
       );
       if (!block.ok) return block;
       blocks.push(block.value);
+      await this.choreographer.narrateBlock({
+        surface_id: surfaceId,
+        block: block.value,
+        agent_cid: block.value.provenance.producer_cid,
+        agent_id: "explanation",
+        role: "explainer",
+        concept_id: input.focusConceptId,
+      });
     }
     if (cycle.practice) {
       const block = await this.contributions.contribute(
@@ -290,6 +336,14 @@ export class SurfaceSession {
       );
       if (!block.ok) return block;
       blocks.push(block.value);
+      await this.choreographer.presence({
+        surface_id: surfaceId,
+        agent_cid: block.value.provenance.producer_cid,
+        agent_id: "practice",
+        role: "coach",
+        state: "contributing",
+        block_id: block.value.block_id,
+      });
     }
 
     // 5. Mastery evidence becomes an assessment block backed by its memory mutation.
@@ -319,6 +373,14 @@ export class SurfaceSession {
         block_id: assessmentBlock.value.block_id,
         mutation_id: cycle.mastery.mutationId,
         memory_layer: "semantic",
+      });
+      await this.choreographer.presence({
+        surface_id: surfaceId,
+        agent_cid: input.mastery.assessorCid,
+        agent_id: "assessment",
+        role: "assessor",
+        state: "contributing",
+        block_id: assessmentBlock.value.block_id,
       });
     }
 
@@ -378,6 +440,23 @@ export class SurfaceSession {
 
     const expanded = this.state()?.blocks.find((b) => b.block_id === blockId);
     if (!expanded) return err(sessionError("block disappeared after expansion", { blockId }));
+
+    // The learner asked to go deeper — so the surface speaks the newly-generated layer live.
+    // Interaction drives dynamic (re-)explanation; nothing here is pre-authored.
+    const deepenedTexts = Object.keys(layers)
+      .sort()
+      .map((key) => layers[key])
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+    await this.choreographer.narrate({
+      surface_id: this.surfaceId,
+      block_id: blockId,
+      agent_cid: expanded.provenance.producer_cid,
+      agent_id: "explanation",
+      role: "explainer",
+      concept_id: expanded.concept_ids[0] ?? null,
+      texts: deepenedTexts,
+    });
+
     return ok(expanded);
   }
 

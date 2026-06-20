@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Phase 2A Cognitive Surface Runtime — where cognition becomes visible.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -22,6 +23,7 @@
     "@inevitable/world-state": "workspace:*"
   },
   "devDependencies": {
+    "@inevitable/contracts": "workspace:*",
     "vitest": "^2.1.8"
   }
 }

@@ -1,0 +1,29 @@
+{
+  "name": "@inevitable/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 2C Surface Gateway — streams the canonical surface.* event log to viewports (SSE) and routes governed commands back to the runtime.",
+  "exports": {
+    ".": "./src/server.ts"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/adapters": "workspace:*",
+    "@inevitable/cli": "workspace:*",
+    "@inevitable/contracts": "workspace:*",
+    "@inevitable/events": "workspace:*",
+    "@inevitable/product-cognition": "workspace:*",
+    "@inevitable/protocols": "workspace:*",
+    "@inevitable/shared": "workspace:*",
+    "@inevitable/surface": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

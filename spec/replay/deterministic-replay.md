@@ -46,6 +46,14 @@ cannot be trusted.
 The Phase 1D substrate guarantees **D0–D2 deterministically in-process** and provides the recording
 seam (the resolver) for **D3**; D4 depends on model-output recording at the adapter edge.
 
+**Durability (Phase 2E):** the ladder governs *fidelity*; durability is the orthogonal axis beneath
+it. D0 requires "the event log preserved" — the durable file backend
+([Durable Cognitive Persistence](../persistence/durable-cognitive-persistence.md), DPS-001; ADR-0008)
+makes "preserved" **literal and cross-process** rather than an in-memory lifetime assumption, so
+D0–D3 hold across restarts and over time. Persisting is a sink (never part of the canonical record);
+replaying the durable log re-invokes no provider (model/tool I/O is already recorded as
+`model.output.recorded`).
+
 **D3 realization (Phase 2B):** model I/O is recorded by the `RecordingModelRuntime` at the adapter
 edge as `model.output.recorded` events (format_version `1.0.0`) per the
 [Model Invocation Protocol](../protocols/model-invocation-protocol.md): record-before-use in live

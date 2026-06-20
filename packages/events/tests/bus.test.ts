@@ -28,6 +28,37 @@ describe("InMemoryEventBus", () => {
     expect(bus.log).toHaveLength(1);
   });
 
+  it("hydrate loads a durable log without re-delivery and continues the sequence (DPS-002)", async () => {
+    // Capture a published log (with bus-assigned sequences) to act as a durable artifact.
+    const source = new InMemoryEventBus();
+    await source.publish(makeEvent("surface.created"));
+    await source.publish(makeEvent("surface.block.generated"));
+    const durable = source.replay();
+    expect(durable.map((e) => e.sequence)).toEqual([0, 1]);
+
+    // A fresh bus hydrated from the durable log: same events, NO delivery to subscribers.
+    const resumed = new InMemoryEventBus();
+    const delivered: string[] = [];
+    resumed.subscribe(">", (e) => {
+      delivered.push(e.event_type);
+    });
+    resumed.hydrate(durable);
+    expect(delivered).toEqual([]); // hydration must not re-run side effects
+    expect(resumed.log).toHaveLength(2);
+
+    // A new publish continues past the hydrated max sequence (no collision) and DOES deliver.
+    const result = await resumed.publish(makeEvent("surface.block.generated"));
+    expect(result.sequence).toBe(2);
+    expect(delivered).toEqual(["surface.block.generated"]);
+  });
+
+  it("hydrate refuses a non-empty bus", async () => {
+    const bus = new InMemoryEventBus();
+    bus.hydrate([]); // empty hydrate on empty bus is a no-op
+    await bus.publish(makeEvent("agent.completed"));
+    expect(() => bus.hydrate([makeEvent("agent.completed")])).toThrow(/empty bus/);
+  });
+
   it("delivers only to subject-matching subscribers", async () => {
     const bus = new InMemoryEventBus();
     const got: string[] = [];

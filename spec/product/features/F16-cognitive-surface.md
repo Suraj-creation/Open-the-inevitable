@@ -77,7 +77,10 @@ collaboration+replay model, and block-type registry* the experience is built fro
   knowledge graph** ([F03](./F03-recursive-prerequisite-intelligence.md), [F08](./F08-interdisciplinary-knowledge-graph.md)).
 - **Non-goals:** a freeform canvas that is its own source of truth; persistence that bypasses Memory
   Mutation; agent-generated HTML blobs that cannot be replayed or governed; "everything visible at
-  once" maximalism; immersion or animation for spectacle rather than understanding.
+  once" maximalism; immersion or animation for spectacle rather than understanding; **static
+  pre-generation of all content** — the surface is a live, continuously-planning, interactive
+  classroom where cognition is generated dynamically on demand (SRF-001 §2; ADR-0007 §7), not a
+  lesson frozen at generation time and replayed.
 
 ## 3. Personas & Modes
 

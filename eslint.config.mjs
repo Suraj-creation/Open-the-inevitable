@@ -42,4 +42,12 @@ export default tseslint.config(
       "no-console": "off",
     },
   },
+  {
+    // apps/web is a browser leaf (React + Vite): browser globals + JSX.
+    files: ["apps/web/**/*.{ts,tsx}"],
+    languageOptions: {
+      globals: { ...globals.browser },
+      parserOptions: { ecmaFeatures: { jsx: true } },
+    },
+  },
 );

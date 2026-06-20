@@ -48,11 +48,17 @@ These principles are sacred. The ten non-negotiable invariants live in
   and learning outcomes.
 - Self-evolution happens only through governed proposals, evaluation, replay, shadow tests,
   and rollback.
+- The COS is a substrate, not a product. Every surface, app, agent runtime, API, and integration
+  is a manifestation of it; dependencies point inward — manifestations depend on the substrate, the
+  substrate on its contracts, contracts on nothing — and no vendor, model, transport, or store leaks
+  past its adapter.
 
 **Never:** bypass protocols, event sourcing, governance, or observability for convenience;
 mutate memory without a typed memory mutation; create undocumented state transitions; hardcode
 fragile orchestration; treat prompts as the agent architecture; treat a planning document as
-final code law; let the two foundational architecture documents drift into contradiction.
+final code law; let the two foundational architecture documents drift into contradiction; reverse
+the dependency direction so the substrate depends on a manifestation, a vendor, or an adapter's
+internals.
 
 Code that violates these laws is invalid implementation even if it works locally.
 
@@ -99,8 +105,8 @@ timeline, multimodal, or rendering work:
 - `spec/cognitive_surface/` — the research corpus behind the cognitive whiteboard: what the
   surface *is*, why it is the product's heart, and the decision-grade research it rests on.
   Start with `cognitive-whiteboard-system.md` and `cognitive_surface_dossier.md`.
-- `spec/surface/` — the implemented runtime specs (SRF-001…SRF-004: surface runtime, event
-  architecture, timeline engine, multimodal provider abstraction).
+- `spec/surface/` — the implemented runtime specs (SRF-001…SRF-005: surface runtime, event
+  architecture, timeline engine, multimodal provider abstraction, streaming/sync protocol).
 - `spec/product/features/F16-cognitive-surface.md` (substrate) and `F09` (experience);
   `spec/research/cognitive-surface-frontier-research.md` (frontier dossier).
 
@@ -147,15 +153,11 @@ implementation evidence reveals a stronger primitive: propose it, check coherenc
 outcome vision, update the specs, then implement. Preserve important research and rejected
 designs in `spec/research/`.
 
-## 5. Current Posture
+## 5. Orientation
 
-> Replace-only. Maximum 8 lines. Details live in `IMPLEMENTATION.md`.
-
-Phases 1A–2B are complete: the full COS substrate, the product-cognition runtime bridge, the
-Cognitive Surface Runtime, and now **real model-backed cognition** — the Model Invocation
-Protocol (D3 recorded replay), Gemini/Null/Recording model runtimes, `ModelBackedUnit` through
-the governed dispatch path, surface `expand()`, and the first runnable demo (`pnpm demo`,
-`apps/cli`). Active frontier: **Phase 2C — The Visible Surface** (see `IMPLEMENTATION.md`).
+CLAUDE.md is timeless and carries no status. Current state, active frontier, traceability, and run
+commands live in `IMPLEMENTATION.md`; abstract milestone history in `CHANGELOG.md`; dated build
+narratives in `docs/history/implementation-log.md`.
 
 ## 6. Build and Verify
 
@@ -190,6 +192,6 @@ describes *what was built* rather than *how to think and where to look*, it does
 | Architecture/runtime/product semantics | The owning spec under `spec/` |
 | Feature catalog | `spec/indexes/product-feature-index.md` |
 
-**Size law:** this file stays under ~200 lines. §5 is replace-only and capped at 8 lines. If an
-edit would push past the cap, compress or relocate — never append. When a milestone lands, the
-entire CLAUDE.md update is: rewrite §5 (≤8 lines) and nothing else.
+**Size law:** this file stays under ~200 lines. If an edit would push past the cap, compress or
+relocate — never append. When a milestone lands, CLAUDE.md is **not** touched — update
+`IMPLEMENTATION.md` and the other homes in the table above.

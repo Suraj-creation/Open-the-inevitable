@@ -280,3 +280,323 @@ working doctrine, replace-only Current Posture capped at 8 lines, and explicit C
 Governance rules). `IMPLEMENTATION.md` restructured as a current-state document (state +
 traceability + active frontier; dated narratives moved to this file). `CHANGELOG.md` scoped to
 abstract milestone entries.
+
+## Phase 2C — The Visible Surface (2026-06-12)
+
+The Cognitive Surface became visible and live in a browser — the first moment a human can open
+The Inevitable and watch cognition unfold. The runtime stays the source of truth; the UI is a
+projection. Built on a deliberate architectural re-review (the user's three considerations):
+
+**Re-review decisions.** (1) *Layout primitives* stay at the projection layer, not canonical —
+SRF-001 already declares "layout state remains outside the canonical record," so canonical
+`SurfaceNode/Region/Layout` would both be speculative complexity *and* a law violation. The
+foundation went where it belongs: a client block-renderer registry + region composition.
+(2) *The Surface is a Runtime, not a UI* and *provider-agnostic rendering* — codified in ADR-0006;
+the registry keys on `block_type`, never on provider. (3) *Cognitive environment, not
+prompt→response* — baked into the transport via a persistent session + a typed command envelope.
+
+**Specs (spec-first).** `spec/surface/surface-streaming-sync-protocol.md` (SRF-005): snapshot +
+incremental SSE delivery (`id` = bus sequence), `Last-Event-ID` resume / re-snapshot, the typed
+command channel as the only mutation path, the network trust boundary, replay equivalence (client
+fold ≡ server state), and the cognitive-environment framing. `spec/architecture-decisions/ADR-0006-surface-gateway-transport.md`:
+SSE-down + POST-up over `node:http` (zero runtime deps; chosen over WebSocket for clean
+events-down/intents-up separation and replay-friendly resume), React+Vite for the leaf app, and
+the three principles above. Registered the `gateway.*` family (recorded-observation,
+non-replayable) in the taxonomy, event-index, dependency-graph, and `family-registry.ts` — kept a
+*separate* family so the canonical `surface.*` fold never sees ephemeral connection events.
+
+**Implementation.**
+- `@inevitable/surface` gained a browser-safe `./client` export (`src/client.ts`) re-exporting only
+  `foldSurfaceEvents` + pure types — the fold's runtime imports are all type-only, so the browser
+  bundle pulls zero Node deps. The *same* fold runs server-side and in the browser.
+- `apps/api` (Surface Gateway): `host.ts` registers long-lived sessions (reusing the CLI's proven
+  `buildDemoSession`, one unique seed per surface so id-spaces never collide; `gateway.*` events use
+  a *separate* id generator so they never perturb the session's seeded determinism). `server.ts` is
+  a `node:http` router: `POST /api/surface` (enter), `POST /api/surface/:id/command` (typed
+  `ask|expand|close`), `GET …/stream` (SSE snapshot + live, `Last-Event-ID` resume, `: snapshot-complete`
+  marker), `GET …/state`, `GET …/trace/:blockId`. Governance is unchanged — every mutation crosses
+  `ProductRuntimeDispatcher`.
+- `apps/web` (Vite + React): `useSurfaceStream` (EventSource → accumulate → `foldStream`),
+  `SurfaceView` (regions: timeline rail · cognition stream · provenance inspector), `blocks.tsx`
+  (the `block_type` registry; text renderer default, typed media placeholders), `App` (enter →
+  auto-ask → live), `api.ts` (typed command client). `vite.config.ts` aliases the `./client` source
+  and proxies `/api` to the gateway.
+
+**Verification.** Full `pnpm verify` green — 21 turbo tasks per gate (was 19) across packages +
+apps + services. `apps/api` in-process tests (6): snapshot fold ≡ `session.state()`, strict
+sequence order, `Last-Event-ID` resume with no gaps/dupes, live command frames after snapshot, the
+governed boundary (untrusted ask → zero agent blocks), and unknown-command rejection. `apps/web`
+tests (5): `SurfaceView` renders timeline/blocks/routing/provenance and the multimodal placeholder
+via `renderToStaticMarkup`; `foldStream` reconstructs state from a synthetic event log. Manual e2e:
+`pnpm dev:gateway` (:8787) + `pnpm dev:web` (http://localhost:5173) — enter a goal, watch the
+timeline and cognition blocks stream in live, deepen an explanation block.
+
+Governance-relevant nuance discovered + spec-aligned: an untrusted `ask` *degrades* (200, zero
+agent blocks) rather than erroring, per SRF-001 §10; a single-dispatch `expand` returns a typed
+governance error. SRF-005 §10/§11 were tightened to record both behaviors.
+
+## Phase 2D — Curriculum Generation & Live Gemini (2026-06-12)
+
+The first 2D increment: any goal generates its own living timeline, and real Gemini cognition runs
+end-to-end.
+
+**Live Gemini.** Standardized on `GEMINI_API_KEY` (the user's key saved to a gitignored `.env`;
+`.env.example` committed). Added a zero-dependency `.env` loader (`apps/api/src/env.ts`,
+`apps/cli/src/env.ts`) since tsx/node don't auto-load `.env` across all supported versions — it sets
+only keys not already present (real env wins). `@google/genai` provisioned at the workspace root
+(edge-provisioned per ADR-0005; the adapter still imports it via a guarded dynamic import, so it is
+never a substrate dependency and typecheck never sees it). The provisioned-SDK reality made the
+adapter's old "SDK absent → E_ADAPTER_UNAVAILABLE" test obsolete; rewrote it to assert the
+guarded-import *contract* (typed Result, resolves a client offline, no network until `generate()`).
+The gateway test was made hermetic (clears `GEMINI_API_KEY` in `beforeAll`) so tests never make live
+calls. Verified live: gateway reports `model: gemini`; a real ask returns genuine `gemini-2.5-flash`
+cognition (confidence 1, no `fallback_reason`).
+
+**Curriculum generation (PCR §12).** `CurriculumUnit` (`packages/product-cognition/src/curriculum-unit.ts`)
+is the F02/F03 curriculum agent: goal → prerequisite-ordered concept DAG, dispatched through the
+*same* governed path (a privileged agent, GOV-P01 trust ≥ 3; governance gate + scheduler + OTel +
+D3 recording all apply). Self-contained: model attempt + inline deterministic scaffold fallback
+(`Foundations → Core → Applying <goal>`), so the NullModelRuntime (which returns layered text, not
+concepts) and any model failure still yield a real, deterministic, acyclic timeline.
+`parseCurriculumOutput` de-dupes ids, drops prerequisites referencing unknown ids, and defaults the
+focus to the first prerequisite-free concept. `buildDemoSession` (the shared composition root in
+`@inevitable/cli`) gained a governed `generateCurriculum(goal) → SurfaceAskInput`; the gateway
+`host.ask` and the CLI `main.ts` now generate a curriculum per goal instead of the seeded
+`demoAsk` DAG (kept as a fixture for tests).
+
+**A bug found by the live e2e.** The first arbitrary-goal run fell back to the scaffold even with
+Gemini connected. A throwaway probe showed `finishReason: max_tokens` — gemini-2.5-flash spends
+output budget on internal "thinking", and a 5–8 concept DAG overran the 1024-token request, so the
+JSON truncated and parse failed. Fix: raised the curriculum request to `maxTokens: 4096`
+(`responseSchema` itself was fine — it produced clean, fence-free JSON). Re-verified live: "Teach me
+Photosynthesis" → a 7-concept, foundational-first photosynthesis curriculum.
+
+**Verification.** Full `pnpm verify` green — 22 typecheck / 22 test / 21 lint tasks, format clean.
+New: `curriculum-unit.test.ts` (6 — parser dedupe/drop-unknown-prereq/focus-default, deterministic
+scaffold determinism, model-curriculum happy path, non-curriculum-output fallback). Gateway tests
+updated for the curriculum-first flow (untrusted ask blocked at the privileged curriculum dispatch →
+zero agent blocks). The CLI demo (D3 record/replay) is unchanged — it drives `surface.ask(demoAsk)`
+directly.
+
+---
+
+## Phase 2D — The Cognitive Stage: synchronized, narrated, visible cognition (2026-06-14)
+
+A deep product-experience review preceded this work: the founder judged the visible surface still
+"felt like a typical AI app." We studied OpenMAIC (open.maic.chat) live, re-read the Cognitive
+Surface research corpus and F09/F16, mined the reference repos, and diagnosed the gap precisely — the
+trajectory `Runtime → Event Stream → React UI` was correct but stopped one layer short: there was no
+**choreography layer** turning the event stream into *time-synchronized, attention-directed,
+multi-agent visible cognition*, and the viewport rendered state as a static 3-column dashboard. The
+fix grafts OpenMAIC's grammar of synchronized attention (timed narration, spotlight, staged reveal,
+speaker presence over a transport) onto our governed, replayable substrate — expressed as
+`surface.*` events, not a frozen lesson.
+
+**S1 — Choreography foundation (spec-first).** Authored **ADR-0007 (Surface Choreography & Timing)**
+and updated SRF-002 (schema 1.1.0) / SRF-001 / event-taxonomy. Added three additive `surface.*`
+subtypes — `narration.segment`, `focus.changed`, `presence.updated` — and folded them into a new
+choreography slice on `SurfaceState` (`narration[]`, `focus`, `presence[]`) in `projection.ts`,
+preserving forward-compatibility and replay equivalence. The central resolution: events carry only
+**logical order + durations, never a playback clock**; the animation schedule is a client projection,
+so `fold(events)` stays byte-identical.
+
+**S2 — Choreography producer.** Added `SurfaceChoreographer` (`packages/surface/src/narration.ts`): a
+deterministic sentence/clause segmenter + emitters for presence → narration.segment (with focus) →
+presence. Wired into `SurfaceSession.ask()` (narrate the freshly-generated explanation) and
+`expand()` (**re-narrate the freshly-generated deeper layer** — interaction drives live
+re-explanation). The `TextSurfaceRenderer` surfaces narration + presence. **Principle codified
+(SRF-001 §2, ADR-0007 §7, F16 non-goal):** the surface is a *live, continuously-planning, interactive
+classroom* — explanations are generated dynamically on demand (the product default is the
+model-backed `ModelBackedUnit`; `DeterministicMvpUnit` is only the offline fallback); static
+pre-generation is a non-goal; "not deterministic" applies to *generation*, while *replay* stays exact
+via recorded outputs.
+
+**S3 — The Cognitive Stage (the milestone).** Rebuilt `apps/web` as a theater of thought: a
+`CognitiveStage` (spotlighted focused concept + dim context ribbon), a `LivingTimeline` spine that
+glows in sync with focus, an `AgentPresence` ensemble (per-role sigils + presence states), a
+`ProvenancePeek` (the `/trace` chain — "why this appeared"), and a `NarrationTrack` with transport,
+all driven by a client `useChoreographer` (pure projection; cursor + transport over the folded
+narration). A new design language (`tokens.css`) — deep observatory palette, editorial serif
+(Fraunces) for concepts/narration, geometric grotesk for chrome, light-models-attention, restrained
+cubic-bezier motion, `prefers-reduced-motion` honored. Guided by the high-end-visual-design skill.
+Verified live in-browser against the real Gemini gateway: "Teach me Neural Networks" rendered a real
+curriculum spine, a spotlighted narrated *Vectors and Matrices* explanation with an unfolding
+Intuition layer, three contributing agents, and provenance — no console errors.
+
+**S4 — Gemini voice + out-of-band media.** Added `GeminiVoiceRuntime` + deterministic
+`NullVoiceRuntime` (`@inevitable/adapters/voice.ts`): Gemini TTS → base64 PCM → WAV wrap + duration
+from sample count; guarded dynamic import + `fromClient` test seam, mirroring the model adapter. A
+gateway `MediaStore` + route `GET /api/surface/:id/media/:artifactId` serve audio **out-of-band**
+(bytes never on the SSE stream); a `createVoiceSynthesizer` bridge stores bytes and returns only a
+`voice {artifact_id, content_ref, duration_ms, provider_id}` reference, threaded through
+`buildDemoSession` into the choreographer. The client `useChoreographer` plays the audio and uses its
+`ended`/`currentTime` as the pacing ground truth, falling back to a reading-time estimate for
+text-only segments. Updated SRF-004/SRF-005.
+
+**S5 — Polish & docs.** Global `:focus-visible` rings (keyboard navigability), contrast bumps on
+instructional text, reduced-motion. Docs updated (this entry, CHANGELOG, IMPLEMENTATION, CLAUDE §5).
+
+**Verification.** Full `pnpm verify` green across all 21 tasks (typecheck/test/lint/format). New
+tests: `projection.test.ts` (+4 choreography fold/replay), `narration.test.ts` (7 — segmenter,
+collection, emit→fold round trip), `session.test.ts` (+1 live model-backed narration via an injected
+fake `ModelRuntime`), adapters `voice.test.ts` (5 — WAV header, Null determinism, Gemini fromClient,
+empty/throw), gateway `voice-media.test.ts` (2 — narration carries voice, media route serves WAV).
+Replay equivalence (client fold ≡ server state) re-confirmed with all new events present.
+
+## 2026-06-18 — Architectural roadmap + Phase 2E (Durable Substrate, P1)
+
+**Chief-Architect gap analysis.** Before resuming feature work, ran a repo-wide maturity audit (three
+parallel substrate/spec/product explorations). Finding: the cognitive path is genuinely
+PRODUCTION-grade and deterministic, but **all state is in-memory** — a process restart is total data
+loss, so event sourcing, replay, temporal cognition, and persistent learner memory hold only within
+one process lifetime, and no second manifestation can share substrate state. Produced a minimal phased
+roadmap (P1 durable persistence → P2 identity/continuity/context → P3 KG engine + explanation depth +
+observability analysis → P4 multi-agent cognition → P5 digital twin → P6 governed self-evolution; P7
+platform/SDK as continuous discipline). Many specced domains (federation, cognitive-ir/isa/compiler,
+query-engine, networking, economics, filesystem, consensus) consciously deferred off the critical path.
+
+**P1 — Durable substrate (spec-first).** Authored **DPS-001** (`spec/persistence/durable-cognitive-persistence.md`)
+and **ADR-0008**: the event log is the unit of durability (world-state/memory are replay projections of
+it; snapshots are a later optimization); out-of-band media is persisted separately (it is never in the
+log); persistence is a sink, never part of the canonical record; the determinism ladder's "event log
+preserved" becomes literal/cross-process (not a new rung). Registered `persistence` in the domain index,
+added a Phase 2E dependency block, and noted durability in the replay spec.
+
+**Implementation (pure `node:fs`, behind existing contracts).** `FileEventTransport`
+(`packages/adapters/src/durable.ts`): append-only JSONL, per-subject monotonic sequence, ordered
+subject-matched replay, reopen-safe, torn-final-line tolerant; preserves each event's original bus
+`sequence`. Zero native/third-party deps (`node:fs` is a builtin, so it is always available — the
+ideal offline default) and it passes the *same* `runEventTransportConformance` harness as the
+in-memory reference. Refactored `apps/api/src/media.ts` into a `MediaStore` interface +
+`InMemoryMediaStore` (default) + `FileMediaStore` (disk). The gateway (`host.ts`) gained a
+`ServedSurface` seam so the server (`server.ts`) talks to live and restored surfaces identically; when
+`COS_PERSIST_DIR` is set it mirrors every surface event to a per-surface durable log (one buffering
+sink, flushed once the surface id is known — nothing missed, nothing double-written) and reconstructs
+a surface **read-side** on restart by folding the durable log. Live write-continuity after restart
+(world-state rehydration) is explicitly P2; a restored surface returns a typed signal for live commands.
+
+**Verification.** Full `pnpm verify` green (21/21 typecheck/test/lint + format). New tests: adapters
+`durable.test.ts` (conformance pass, reopen + sequence preservation, catch-all subject) and gateway
+`durable-persistence.test.ts` (a fresh gateway over the same dir folds the durable log to a
+byte-identical `SurfaceState`; out-of-band WAV resolves post-restart; a restored surface rejects live
+`ask` with a typed error). CLAUDE.md untouched (it is now timeless; §5 is a pure pointer).
+
+## 2026-06-19 — Phase 2.1 (Cognitive Continuity / live rehydration)
+
+**Gap closed.** DPS-001 deferred *write-continuity*: a restored surface could be viewed but not driven.
+This increment (the first of P2) makes a restored surface live. Investigation confirmed the crux:
+world-state and tiered memory are each event-sourced on their *own* logs (the `WorldStateGraph` keeps a
+private delta log + `snapshot()`/`restore()`; `TieredMemoryStore` keeps per-tier mutation logs +
+`history()`), **not** on the event bus — so P1's durable event log alone cannot rebuild them. The
+id-collision risk (the `SeededIdGenerator` counter is seed-independent, so a "fresh seed" would re-emit
+identical ids) is sidestepped by giving the resumed session a `CryptoIdGenerator`.
+
+**Spec-first.** Authored DPS-002 (`spec/persistence/cognitive-continuity-and-rehydration.md`) + ADR-0009:
+restore three artifacts each from its own source of truth; `hydrate` not replay-through-publish (no
+re-run side effects); resumed sessions use crypto ids; a `resume()` path distinct from `start()`; the
+gateway upgrades a restored surface to live, falling back to read-side only on missing/corrupt snapshots.
+Registered DPS-002 in the dependency graph; the domain index already carried `persistence`.
+
+**Implementation.** `EventBus.hydrate(events)` (events package): load into an empty bus, advance the
+sequence past the max, no delivery/validation/governance. `SurfaceSession.resume(surfaceId)` (surface):
+adopt the id, emit/write nothing. `buildDemoSession` (cli): exposes `memory` on the fixture and takes an
+optional `restore` (world snapshot + memory mutations + events + surfaceId) → `world.restore`, replay
+`memory.commit`, `bus.hydrate`, and a `CryptoIdGenerator`. Gateway `host.ts`: `persistSnapshots()`
+writes `world.json` + `memory.json` after each command; `get()` is now async and, on a cold-miss,
+`rehydrate()`s a live session (re-attaching the durable sink so new events keep appending) or falls back
+to read-side `resumedServed`. `server.ts` awaits `host.get`.
+
+**Verification.** Full `pnpm verify` green (21/21 + format). New tests: events `bus.test.ts` (+2 —
+hydrate loads without delivery + continues the sequence; refuses a non-empty bus); gateway
+`continuity.test.ts` (a new ask after restart appends fresh cognition with prior state intact and unique
+ids; expand works live). The DPS-001 "rejects live commands" test was repurposed to cover the DPS-002
+failure mode (missing snapshots → read-only fallback). CLAUDE.md untouched (timeless).
+
+## 2026-06-19 — Phase 2.2 (Durable Learner Identity & Resume-by-Learner)
+
+**Gap closed.** Every surface was owned by one hardcoded demo learner (`cog-demo-learner`/`user-demo`):
+all users shared an identity, surfaces belonged to no one, nothing persisted across a learner's
+sessions. This increment makes the learner first-class and durable — continuity of *who*, layered on
+P2.1's continuity of *state*, and the precondition for the Digital Twin.
+
+**Spec-first.** DPS-003 (`spec/persistence/durable-learner-identity.md`) + ADR-0010: a durable learner
+registry at the gateway boundary; resolve-or-mint on create (known id reuses identity + trust; unknown
+id never claimed); the real learner threaded through `onboarding()`; resume-by-learner via a learner
+route; identity minted via the shared `newCid` authority (kernel `IdentityService` as sole authority is
+a noted future refinement). Registered DPS-003 in the dependency graph.
+
+**Implementation.** `apps/api/src/learners.ts` — `LearnerRegistry` (resolveOrCreate / get / recordSurface;
+file-backed at `<dir>/learners/<id>.json`, in-memory otherwise). `apps/cli/src/wiring.ts` — `onboarding()`
+takes a `LearnerDescriptor {userId,cid,trustLevel}` with ids derived from `userId`; `buildDemoSession`
+gains `learner` and `idGenerator` options (the demo learner remains the default). `apps/api/src/host.ts`
+— `create()` resolves-or-mints the learner, threads the descriptor, records the surface↔learner
+association, writes `learnerId` into `meta.json`, returns `{surfaceId, learnerId}`; `rehydrate()` loads
+the learner by `meta.learnerId` (read-side fallback if missing) and threads it so a resumed surface keeps
+the right identity; `getLearner()` added. `apps/api/src/server.ts` — `POST /api/surface` accepts
+`learnerId` and returns `learner_id`; new `GET /api/learner/:learnerId`.
+
+**Latent bug fixed.** The `SeededIdGenerator` is seed-independent (only its counter drives output), so
+the gateway's "unique seed per surface" never actually separated id-spaces — two surfaces minted the
+same `srf-…` id (exposed by the first multi-surface test). Gateway-hosted surfaces now use a
+`CryptoIdGenerator` (resumed sessions already did); the broader `SeededIdGenerator` fix is left out of
+scope (wide blast radius on seeded-id assertions across packages) and noted.
+
+**Verification.** Full `pnpm verify` green (21/21 + format). New test: `learner-identity.test.ts` (3 —
+distinct learners by default + surface ownership; a known learnerId reuses identity across a restart and
+accrues surfaces, first surface still rehydrates live; an unknown id is never claimed). All prior gateway
+tests stay green under crypto surface ids. CLAUDE.md untouched (timeless).
+
+## Phase 2 — P2.3: Shared Per-Learner Cognitive Memory (2026-06-20)
+
+Continuity of *cognition*, the fourth movement of the continuity arc (durability → state → identity →
+cognition) and the substrate on-ramp to the Digital Twin (P5). Full `pnpm verify` green (21/21 + format),
+fully offline.
+
+**The gap.** After P2.2 a learner was durable and owned surfaces, but each surface's world-state and
+memory were per-surface: mastery earned in surface A was invisible to surface B even for the same learner,
+so the supervisor re-taught already-mastered concepts the moment a new surface opened. This was the
+explicit deferred next increment of DPS-003.
+
+**Spec-first.** Authored **DPS-004 — Shared Per-Learner Cognitive Memory** (`spec/persistence/`) and
+**ADR-0011**. The cut follows the memory-tier semantics: a learner's *durable knowledge* carries across
+surfaces; *session scratch* does not. A learner's **cognition profile** is the deduplicated union, across
+their surfaces, of (a) the mastery subgraph — `mastery_checkpoint` nodes scoped by `ownerUserId`, the
+`concept` nodes they verify, and the assess edges between carried nodes — and (b) durable-tier memory
+mutations (`semantic`/`procedural`/`reflective`). It is a *derived projection* of the per-surface durable
+artifacts (which remain the unit of durability, DPS-001), never a second source of truth. Registered
+DPS-004/ADR-0011 in the persistence domain index.
+
+**Design — capture-then-seed, around the canonical record.** Verified the linchpin first: mastery
+checkpoints carry `props.ownerUserId = session.intentLease.owner_user_id`, and the supervisor queries
+exactly that — so seeding surface B (same `userId`) with surface A's mastery short-circuits routing to
+`complete`. After each `ask` the gateway extracts the learner-durable subset from the live surface and
+merges it (idempotent, id-keyed: nodes/edges by id, mutations by `mutation_id`) into the profile. On
+surface **create** for a resolved learner the profile is seeded into the fresh substrate **before**
+`start()` — applied via `world.apply`/`memory.commit` while nothing is wired, so it is silent state
+reconstruction: no `surface.*` event fires, no subscriber is re-triggered, no model is re-invoked (the
+same discipline as DPS-002 `hydrate`/`restore`). Seed and `restore` are mutually exclusive: create seeds
+a new surface; resume restores an existing one (which already contains the cognition seeded at its create).
+
+**Implementation.** `apps/cli/src/wiring.ts` — `LearnerCognitionSeed` type, `extractLearnerCognition()`
+(pure read of the mastery subgraph + durable tiers), an internal `applyLearnerSeed()` (best-effort/
+fail-soft), and a `learnerSeed` build option applied in the `else if` branch beside `restore`.
+`apps/api/src/learners.ts` — `LearnerRegistry` gains an in-memory cognition map + `readCognition()` /
+`mergeCognition()`, persisted to `<dir>/learners/<id>.cognition.json` when durable (in memory otherwise,
+so cross-surface carry works in-process without persistence). `apps/api/src/host.ts` — `HostedSurface`
+carries the owning `learnerId`; `create()` loads the profile and passes `learnerSeed`; a `captureCognition()`
+runs after each `ask` (guarded for legacy surfaces with no learner). Decision: the extract/seed seam lives
+in the composition root (`buildDemoSession`), co-located with the existing `DemoRestore` machinery that
+`apps/api` already reuses; promoting it into a substrate package is a noted future refinement once a second
+manifestation needs it (the §2 discipline already holds — apps depend on the substrate, never the reverse).
+
+**Verification.** New tests: `apps/cli/tests/shared-cognition.test.ts` (4 — a fresh surface routes to
+`explanation`; extract captures the mastery subgraph + durable memory but not session scratch; a seeded new
+surface starts with prior mastery and routes the mastered concept to `complete` with no re-explanation;
+seeding emits no `surface.*` event). `apps/api/tests/shared-cognition.test.ts` (2 — cross-surface carry in
+memory within one process, with a fresh-learner control; carry across a simulated restart with the profile
+loaded from disk). All prior tests stay green. CLAUDE.md untouched (timeless).
+
+**Scope note.** P2.3 makes durable knowledge *present* in a new surface; making it *retrieved on demand*
+(context-lease-bounded, VectorStore-backed working-memory assembly) is the next P2 increment. The profile
+a surface carries is a point-in-time snapshot taken at create; continuous cross-surface convergence and
+cross-surface consolidation/decay are deferred (naturally twin concerns).

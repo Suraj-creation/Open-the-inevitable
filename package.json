@@ -18,6 +18,8 @@
     "format:check": "prettier --check .",
     "verify": "pnpm run codegen && pnpm run typecheck && pnpm run test && pnpm run lint && pnpm run format:check",
     "demo": "tsx apps/cli/src/main.ts",
+    "dev:gateway": "tsx apps/api/src/main.ts",
+    "dev:web": "pnpm --filter @inevitable/web run dev",
     "prepare": "husky || exit 0"
   },
   "devDependencies": {
@@ -49,5 +51,8 @@
     "onlyBuiltDependencies": [
       "esbuild"
     ]
+  },
+  "dependencies": {
+    "@google/genai": "^2.8.0"
   }
 }

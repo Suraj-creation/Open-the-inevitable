@@ -159,10 +159,14 @@ describe("RecordingModelRuntime — replay mode", () => {
 });
 
 describe("GeminiModelRuntime", () => {
-  test("connect() without the SDK installed yields a typed adapter-unavailable error", async () => {
+  test("connect() resolves a client via the guarded import (SDK provisioned), never throws", async () => {
+    // @google/genai is edge-provisioned at the workspace root (ADR-0005). The guarded dynamic
+    // import resolves it and connect() returns a typed Result with a runtime — no network call
+    // happens until generate(). If the SDK were absent, requireOptional would instead yield a
+    // typed E_ADAPTER_UNAVAILABLE (a typed Result, never a throw).
     const result = await GeminiModelRuntime.connect({ apiKey: "test-key" });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.code).toBe("E_ADAPTER_UNAVAILABLE");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBeInstanceOf(GeminiModelRuntime);
   });
 
   test("connect() without an API key yields E_MODEL_UNAVAILABLE", async () => {

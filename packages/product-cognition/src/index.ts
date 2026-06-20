@@ -40,3 +40,10 @@ export type {
 export { FiberedLearningLoop } from "./fiber-learning-loop";
 export type { ModelBackedRole, ModelBackedUnitDeps, ModelLayeredOutput } from "./model-backed-unit";
 export { ModelBackedUnit, parseModelLayeredOutput } from "./model-backed-unit";
+export type { CurriculumConcept, CurriculumUnitDeps, GeneratedCurriculum } from "./curriculum-unit";
+export {
+  CurriculumUnit,
+  curriculumSlug,
+  deterministicCurriculum,
+  parseCurriculumOutput,
+} from "./curriculum-unit";

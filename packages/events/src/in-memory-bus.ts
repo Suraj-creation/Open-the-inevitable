@@ -138,6 +138,19 @@ export class InMemoryEventBus implements EventBus {
     };
   }
 
+  hydrate(events: readonly CognitiveEvent[]): void {
+    if (this.events.length > 0) {
+      throw new Error("hydrate: bus already has events; hydration is only valid on an empty bus");
+    }
+    let maxSequence = -1;
+    for (const event of events) {
+      this.events.push(event);
+      if ((event.sequence ?? 0) > maxSequence) maxSequence = event.sequence ?? 0;
+    }
+    // Continue publishing after the loaded log without colliding sequences.
+    this.sequence = maxSequence + 1;
+  }
+
   replay(options: ReplayOptions = {}): CognitiveEvent[] {
     const from = options.fromSequence ?? 0;
     return this.events.filter((event) => {

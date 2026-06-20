@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@inevitable/adapters": "workspace:*",
+    "@inevitable/context": "workspace:*",
     "@inevitable/contracts": "workspace:*",
     "@inevitable/events": "workspace:*",
     "@inevitable/governance": "workspace:*",

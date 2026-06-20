@@ -16,7 +16,13 @@ export {
 } from "./contribution";
 export {
   foldSurfaceEvents,
+  type AgentPresence,
+  type AgentPresenceState,
+  type FocusTargetType,
+  type NarrationSegment,
+  type NarrationVoice,
   type SurfaceContributionRecord,
+  type SurfaceFocus,
   type SurfaceRoutingRecord,
   type SurfaceState,
 } from "./projection";
@@ -35,6 +41,17 @@ export {
   type VideoGenerationProvider,
   type VoiceProvider,
 } from "./providers";
+export {
+  SurfaceChoreographer,
+  segmentNarration,
+  collectNarrationTexts,
+  type NarrateBlockInput,
+  type NarrateInput,
+  type PresenceInput,
+  type SurfaceChoreographerDeps,
+  type VoiceSynthesisRequest,
+  type VoiceSynthesizer,
+} from "./narration";
 export { TextSurfaceRenderer, type SurfaceRenderer } from "./renderer";
 export {
   SurfaceSession,

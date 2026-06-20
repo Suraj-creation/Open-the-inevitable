@@ -27,7 +27,7 @@ spec:
   related_protocols:
     [cognition-packet-protocol, cognitive-event-protocol, memory-mutation-protocol, reasoning-trace-protocol]
   related_events:
-    [surface.created, surface.block.generated, surface.block.modified, surface.timeline.updated, surface.agent.joined, surface.agent.contributed, surface.memory.attached, surface.reasoning.recorded, surface.session.closed]
+    [surface.created, surface.block.generated, surface.block.modified, surface.timeline.updated, surface.agent.joined, surface.agent.contributed, surface.memory.attached, surface.reasoning.recorded, surface.session.closed, surface.narration.segment, surface.focus.changed, surface.presence.updated]
   related_runtime_systems:
     [cognitive-unit-runtime, deterministic-execution-engine, world-state-graph, universal-cognitive-bus]
   related_governance_systems: [governance-kernel, capability-envelope, context-lease, intent-lease]
@@ -59,6 +59,14 @@ on a **living timeline**. The UI is merely a projection. The runtime is the prod
 - **The surface is generated, not authored.** Every visible artifact is derived from substrate
   primitives (packets, events, world-state, memory). Nothing appears magically; everything is
   explainable.
+- **Cognition is generated live, never pre-scripted.** Explanations, narration, and visuals are
+  produced *dynamically and on demand* by model-backed cognitive units as the learner engages — a
+  continuously-planning, interactive classroom, not a lesson frozen at generation time and replayed
+  (the explicit contrast with slide/deck systems such as OpenMAIC). The learner may interject at any
+  moment — ask, deepen, redirect — and the surface re-understands and re-explains in response,
+  re-narrating the freshly-generated content. Determinism lives in **replay, not generation**: every
+  model output is recorded (D3 `model.output.recorded`), so a past session reconstructs exactly while
+  live sessions stay adaptive. **Static pre-generation of all content is a non-goal.**
 - **State and projection are strictly separated.** The canonical record is the `surface.*`
   event log plus the world-state graph. `SurfaceState` is a deterministic fold over that record.
   Rendering state (layout, viewport, fold/expand) never enters the canonical record.
@@ -173,10 +181,20 @@ interface SurfaceState {
   readonly agents_joined: readonly string[];       // CIDs in join order
   readonly contributions: readonly SurfaceContributionRecord[];  // agent → block linkage
   readonly routing_decisions: readonly SurfaceRoutingRecord[];
+  readonly narration: readonly NarrationSegment[];  // ordered choreography cues (Phase 2D)
+  readonly focus: SurfaceFocus | null;              // current directed attention ("look here now")
+  readonly presence: readonly AgentPresence[];      // agents as visible entities, by CID
   readonly version: number;               // count of folded events
   readonly last_hlc: string | null;
 }
 ```
+
+The **choreography slice** (`narration`, `focus`, `presence`) makes cognition *visible over time*:
+narration segments carry the spoken/visible explanation in logical order (with an optional focus
+directive and an out-of-band `voice` artifact reference), `focus` is the currently spotlighted
+block/concept/region, and `presence` is each agent's live activity state (idle/thinking/
+contributing/speaking). These fields carry **order and durations, never a playback clock** — the
+animation schedule is a client projection (ADR-0007), so replay equivalence is preserved.
 
 ### 4.4 SurfaceSession
 
@@ -192,6 +210,14 @@ must produce byte-identical state. This is the replay primitive.
 
 A pure function `(state: SurfaceState) → frame`. Phase 2A ships a text renderer. Future
 renderers (scene-graph, immersive) consume the same state; the runtime does not change.
+
+The **lead viewport projection (Phase 2D) is the Cognitive Stage** — a "theater of thought" with one
+central stage (the focused block, rendered richly and morphing), a living-timeline spine that lights
+up in sync with `focus`, agent-presence at the periphery, and a narration track with transport. It
+is the *block-document/scene* manifestation of F16 §9; the spatial Living-Canvas and Living-Document
+projections layer in later over the **same** `SurfaceState`. A client **Choreographer** interprets
+the `narration`/`focus`/`presence` cues over a client clock (audio `currentTime` as ground truth) —
+it owns no truth and never enters the canonical record.
 
 ## 5. Protocols and Contracts
 
@@ -228,7 +254,9 @@ created ──ask*──▶ active ──close──▶ closed
       `surface.agent.contributed` + `surface.block.generated` per block);
    d. record the supervisor decision as a `routing` block and `surface.reasoning.recorded`.
 3. **expand** — `SurfaceSession.expand(blockId, layer)` (Phase 2B, optional capability):
-   progressive deepening of an existing explanation block per F04 layers 0–1.
+   progressive deepening of an existing explanation block per F04 layers 0–1. This is a live
+   interaction point: the deeper layer is **generated dynamically** through the governed dispatcher
+   and then **re-narrated** (the choreographer voices the new layer), so deepening *speaks*.
    a. resolve the target block from the folded state (`E_SURFACE_SESSION` if absent or the
       session lacks an explanation dispatcher);
    b. re-dispatch through the **governed** explanation dispatcher with
@@ -274,6 +302,9 @@ owned by `surface/surface-event-architecture`. Summary of state-affecting transi
 | `surface.agent.joined` | append CID to `agents_joined` |
 | `surface.agent.contributed` | record contribution metadata (block linkage) |
 | `surface.reasoning.recorded` | append routing/reasoning record |
+| `surface.narration.segment` | append to `narration`; set `focus` when the segment carries one |
+| `surface.focus.changed` | replace `focus` (directed attention) |
+| `surface.presence.updated` | upsert `presence` by `agent_cid` |
 | `surface.memory.attached` | mark block as memory-backed (`memory_mutation_id`) |
 | `surface.session.closed` | `status: "closed"` |
 

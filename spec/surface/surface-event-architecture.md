@@ -16,7 +16,7 @@ spec:
     - indexes/event-index
   related_protocols: [cognitive-event-protocol, cognition-packet-protocol, memory-mutation-protocol]
   related_events:
-    [surface.created, surface.session.closed, surface.timeline.generated, surface.timeline.updated, surface.timeline.completed, surface.block.generated, surface.block.modified, surface.agent.joined, surface.agent.contributed, surface.agent.disagreed, surface.memory.attached, surface.visual.generated, surface.simulation.started, surface.explanation.expanded, surface.reasoning.recorded, surface.contribution.dropped]
+    [surface.created, surface.session.closed, surface.timeline.generated, surface.timeline.updated, surface.timeline.completed, surface.block.generated, surface.block.modified, surface.agent.joined, surface.agent.contributed, surface.agent.disagreed, surface.memory.attached, surface.visual.generated, surface.simulation.started, surface.explanation.expanded, surface.reasoning.recorded, surface.contribution.dropped, surface.narration.segment, surface.focus.changed, surface.presence.updated]
   related_runtime_systems: [universal-cognitive-bus, world-state-graph]
   related_governance_systems: [governance-kernel]
   related_observability_systems: [cognitive-observability, otel-edge]
@@ -49,7 +49,7 @@ the Universal Cognitive Bus under topic `cos.<event_type>`. Family registration:
 {
   "family": "surface",
   "owner": "surface",
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "retention": "permanent",
   "replay_behavior": "replayable",
   "classification": "internal",
@@ -81,8 +81,19 @@ causal tracing.
 | `surface.simulation.started` | simulation block began execution | `block_id`, `simulation_id` |
 | `surface.explanation.expanded` | explanation deepened a layer (F04, Phase 2B+) | `block_id`, `from_layer`, `to_layer` |
 | `surface.reasoning.recorded` | supervisor/orchestration decision captured | `decision` (target_agent, reason, concept_id), `producer_cid` |
+| `surface.narration.segment` | a unit of spoken/visible narration is produced (Phase 2D choreography) | `segment_id`, `block_id`, `concept_id`, `sequence`, `text`, `focus?` ({target_type, target_id, spotlight}), `reveal_ids[]?`, `voice?` ({artifact_id, content_ref, duration_ms, provider_id}) |
+| `surface.focus.changed` | attention is directed to a block/concept/region ("look here now") | `sequence`, `focus` ({target_type:"block"\|"concept"\|"region", target_id, reason, spotlight}) |
+| `surface.presence.updated` | an agent's visible presence/activity changes | `agent_cid`, `agent_id`, `role`, `state` ("idle"\|"thinking"\|"contributing"\|"speaking"), `block_id?` |
 | `surface.contribution.dropped` | late/invalid contribution rejected | `agent_cid`, `reason` |
 | `surface.session.closed` | session closed | `block_count`, `reason` |
+
+**Choreography & timing (Phase 2D).** `surface.narration.segment`, `surface.focus.changed`, and
+`surface.presence.updated` form the *choreography sub-family* that turns the surface from a static
+fold viewer into synchronized, attention-directed cognition. They carry only **logical order**
+(`sequence`) and **durations** (`voice.duration_ms`) — never a wall-clock playback position. The
+playback timeline (when a spotlight fires, when text reveals) is a **client-side projection** over
+these ordered cues plus audio `currentTime`; it is not canonical state. Audio binaries never enter
+events (the `voice.content_ref` references an out-of-band artifact). See ADR-0007.
 
 ## 5. Protocols and Contracts
 
@@ -101,14 +112,20 @@ Ordering laws:
 3. `surface.block.generated` for a `block_id` precedes any `surface.block.modified` for it.
 4. `surface.timeline.generated` precedes `surface.timeline.updated` for the same timeline.
 5. `surface.session.closed` is terminal; only `surface.contribution.dropped` may follow.
+6. `surface.narration.segment` (or `surface.focus.changed`) referencing a `block_id` follows that
+   block's `surface.block.generated`; `sequence` is monotone within a surface.
+7. A `surface.presence.updated` with `state:"speaking"` accompanies the narration it voices and is
+   followed by a return to `"contributing"`/`"idle"`.
 
-HLC is monotone within a surface (single producer runtime per session in Phase 2A).
+HLC is monotone within a surface (single producer runtime per session in Phase 2A/2D).
 
 ## 7. Event and State Transitions
 
-State-fold mapping is owned by `surface/cognitive-surface-runtime` §7. Non-state events
-(`surface.visual.generated`, `surface.simulation.started`, `surface.contribution.dropped`)
-fold into version count only.
+State-fold mapping is owned by `surface/cognitive-surface-runtime` §7. The choreography sub-family
+is state-affecting: `surface.narration.segment` appends to `narration[]` (and sets `focus` when it
+carries one), `surface.focus.changed` replaces `focus`, and `surface.presence.updated` upserts
+`presence[]` by `agent_cid`. Non-state events (`surface.visual.generated`,
+`surface.simulation.started`, `surface.contribution.dropped`) fold into version count only.
 
 ## 8. Observability
 
@@ -136,6 +153,7 @@ divergence). Consumers must tolerate unknown future subtypes (forward-compatible
 ## 12. Evolution Strategy
 
 New subtypes are added per spec revision with `schema_version` bumps; folds ignore unknown
-subtypes, so older projections remain valid. `surface.agent.disagreed` and
-`surface.explanation.expanded` activate when the blackboard (F07) and layered explanations
-(F04) land in Phase 2B+.
+subtypes, so older projections remain valid. The choreography sub-family
+(`surface.narration.segment`, `surface.focus.changed`, `surface.presence.updated`) activates in
+Phase 2D (schema_version 1.1.0). `surface.agent.disagreed` and `surface.explanation.expanded`
+activate when the blackboard (F07) and layered explanations (F04) land in Phase 2B+.

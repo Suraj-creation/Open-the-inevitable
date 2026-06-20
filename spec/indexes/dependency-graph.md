@@ -96,4 +96,52 @@ surface/cognitive-surface-runtime §6.1 (expand) -> protocols/model-invocation-p
 surface/multimodal-provider-abstraction §6 (D3) -> protocols/model-invocation-protocol
 ```
 
+## Phase 2C Visible Surface Dependencies
+
+Authored in Phase 2C (The Visible Surface). Acyclic; arrows point from dependent to dependency.
+
+```text
+surface/surface-streaming-sync-protocol -> surface/cognitive-surface-runtime,
+                                          surface/surface-event-architecture,
+                                          surface/surface-timeline-engine,
+                                          product/product-cognition-runtime, events/event-taxonomy,
+                                          protocols/cognitive-event-protocol, kernel/governance-kernel,
+                                          product/features/F09, product/features/F16, product/features/F07
+architecture-decisions/ADR-0006        -> architecture-decisions/ADR-0003, architecture-decisions/ADR-0005,
+                                          surface/cognitive-surface-runtime,
+                                          surface/surface-streaming-sync-protocol
+apps/api (surface gateway)             -> surface/surface-streaming-sync-protocol, packages/surface,
+                                          packages/product-cognition, packages/events, packages/governance
+apps/web (visible surface)             -> surface/surface-streaming-sync-protocol, packages/surface (./client)
+events/event-taxonomy (gateway.*)      -> (new boundary-observability family; not folded into SurfaceState)
+```
+
+## Phase 2E Durable Persistence Dependencies
+
+Authored in Phase 2E (Durable Substrate). Acyclic; arrows point from dependent to dependency.
+
+```text
+persistence/durable-cognitive-persistence -> events/event-taxonomy, protocols/cognitive-event-protocol,
+                                          replay/deterministic-replay, interop/infrastructure-adapters
+architecture-decisions/ADR-0008          -> architecture-decisions/ADR-0003, architecture-decisions/ADR-0005,
+                                          persistence/durable-cognitive-persistence
+packages/adapters (FileEventTransport,   -> @inevitable/contracts (EventTransport), packages/events (matchSubject),
+  FileMediaStore)                           persistence/durable-cognitive-persistence
+apps/api (durable surface log + resume)  -> packages/adapters (file backend), surface/cognitive-surface-runtime,
+                                          persistence/durable-cognitive-persistence
+persistence/cognitive-continuity-and-rehydration -> persistence/durable-cognitive-persistence,
+                                          world-state/world-state-graph, memory/memory-tiers,
+                                          events/event-taxonomy, surface/cognitive-surface-runtime
+architecture-decisions/ADR-0009          -> architecture-decisions/ADR-0008,
+                                          persistence/cognitive-continuity-and-rehydration
+apps/api (live rehydration)              -> persistence/cognitive-continuity-and-rehydration,
+                                          packages/events (hydrate), packages/surface (resume), packages/cli (restore)
+persistence/durable-learner-identity     -> persistence/cognitive-continuity-and-rehydration,
+                                          kernel/cognitive-identity, product/features/F01, product/features/F13
+architecture-decisions/ADR-0010          -> architecture-decisions/ADR-0009,
+                                          persistence/durable-learner-identity
+apps/api (LearnerRegistry + resume-by-learner) -> persistence/durable-learner-identity,
+                                          packages/cli (learner-parameterized onboarding), packages/shared (newCid)
+```
+
 

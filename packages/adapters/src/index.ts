@@ -8,6 +8,8 @@ export { loadOptional, requireOptional } from "./optional";
 
 export { InMemoryEventTransport, InMemoryVectorStore } from "./in-memory";
 
+export { FileEventTransport } from "./durable";
+
 export {
   NatsEventTransport,
   QdrantVectorStore,
@@ -26,5 +28,15 @@ export {
   type RecordingMode,
   type RecordingModelRuntimeDeps,
 } from "./model";
+
+export {
+  GeminiVoiceRuntime,
+  NullVoiceRuntime,
+  pcm16ToWav,
+  type GenAiVoiceClientLike,
+  type SynthesizedAudio,
+  type VoiceRuntime,
+  type VoiceSynthesisInput,
+} from "./voice";
 
 export { runEventTransportConformance, runVectorStoreConformance } from "./conformance";

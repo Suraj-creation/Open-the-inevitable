@@ -310,7 +310,50 @@ On any typed model failure (`E_MODEL_TIMEOUT`, `E_MODEL_REFUSAL`, `E_MODEL_OUTPU
 fallback, the unit throws — the existing host quarantine + dispatcher recovery path applies.
 Degradation is always visible, never silent.
 
-## 12. Implementation Guidance
+## 12. Curriculum Generation Contract (Phase 2D)
+
+A learner enters the surface with a *goal*, not a pre-authored concept list. `CurriculumUnit`
+turns any goal into a prerequisite-ordered concept DAG so the living timeline is generated, not
+seeded. It is the F02/F03 curriculum agent, dispatched through the **same governed path** as every
+other unit (it is a privileged agent — GOV-P01 requires `trust_level ≥ 3`), implements the
+`CognitiveUnit` ABI, and is model-backed with a deterministic fallback.
+
+### Output Contract
+
+The model must return JSON only:
+
+```json
+{
+  "concepts": [
+    { "id": "kebab-case-id", "title": "Human Title", "prerequisites": ["other-id"] }
+  ],
+  "focus_concept_id": "the-first-concept-to-teach",
+  "explanation_prompt": "<optional prompt for the focus concept>",
+  "practice_prompt": "<optional practice prompt>"
+}
+```
+
+Validation (the unit, before the response packet): `concepts` is a non-empty array; each entry has
+a non-empty string `id` and `title`; `prerequisites` is an optional `string[]`. Ids are
+de-duplicated; a prerequisite that references an unknown id is dropped (the model may hallucinate a
+ref — drop, don't fail). `focus_concept_id` must be one of the ids; otherwise it defaults to the
+first concept with no prerequisites, else the first concept. Acyclicity is enforced downstream by
+`LearningPathProjector` (Kahn) when the timeline is built; a cyclic curriculum fails the ask
+(degraded, observable), it never corrupts world-state.
+
+The response packet stamps `content.response_kind: "model-curriculum"`, `content.concepts`,
+`content.focus_concept_id`, and the optional prompts; the surface consumes these to build the
+`SurfaceAskInput`.
+
+### Fallback Semantics
+
+On any typed model failure or non-curriculum output (e.g. the `NullModelRuntime`, which returns
+layered text, not concepts), the unit emits a deterministic scaffold derived from the goal —
+`Foundations of <goal> → Core of <goal> → Applying <goal>` (a valid 3-node acyclic chain) — stamped
+`response_kind: "deterministic-curriculum"`, confidence ≤ 0.5. Offline and seeded runs therefore
+still yield a real, deterministic timeline; degradation is visible, never silent.
+
+## 13. Implementation Guidance
 
 Implement as `@inevitable/product-cognition`. Keep each surface narrow:
 
@@ -324,16 +367,20 @@ Implement as `@inevitable/product-cognition`. Keep each surface narrow:
 - `PRODUCT_DISPATCH_POLICIES` for baseline governance policy set.
 - `ModelBackedUnit` for Phase 2B model-backed cognition (interface-only dependency on
   `@inevitable/contracts`).
+- `CurriculumUnit` for Phase 2D curriculum generation — goal → concept DAG, governed, model-backed
+  with a deterministic scaffold fallback (interface-only dependency on `@inevitable/contracts`).
 
 Do not add model-provider SDK dependencies — provider SDKs live in `packages/adapters` behind
 guarded dynamic imports; this package depends only on the `ModelRuntime` interface. Do not
 introduce database clients. Do not bypass the existing package APIs even if direct object
 mutation looks simpler.
 
-## 13. Future Evolution
+## 14. Future Evolution
 
 The next layer after this package is a product workflow package that composes these primitives into
 long-running sessions with replay, late-agent contributions, and user-facing application surfaces.
 
-Phase 2C extends model-backed cognition to media modalities (image/voice/live) through the same
-recording seam, and deepens the F04 seven-layer model beyond layers 0–1.
+Phase 2C made the surface visible (SRF-005 gateway + viewport). Phase 2D generates the curriculum
+from any goal (this contract), then extends model-backed cognition to media modalities
+(image/voice/live) through the same recording seam, and deepens the F04 seven-layer model beyond
+layers 0–1.
