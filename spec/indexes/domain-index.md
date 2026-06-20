@@ -16,7 +16,7 @@ This is the high-level map of spec domains.
 - `runtime`
 - `orchestration`
 - `memory`
-- `world-state`
+- `world-state` — generic delta-sourced versioned graph (`WorldStateGraph`) + knowledge-graph engine (`KnowledgeGraphEngine`: concept seeding, prerequisite decomposition, learner-state queries, cross-domain bridges; DPS-006 / ADR-0015)
 - `events`
 - `protocols`
 - `governance`

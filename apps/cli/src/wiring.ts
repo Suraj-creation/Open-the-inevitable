@@ -54,7 +54,12 @@ import {
   type Result,
 } from "@inevitable/shared";
 import { SurfaceSession, type SurfaceAskInput, type VoiceSynthesizer } from "@inevitable/surface";
-import { WorldStateGraph, type WorldStateSnapshot } from "@inevitable/world-state";
+import {
+  KnowledgeGraphEngine,
+  WorldStateGraph,
+  type ConceptSpec,
+  type WorldStateSnapshot,
+} from "@inevitable/world-state";
 
 /** Durable state captured for a surface, used to rehydrate a live session on resume (DPS-002). */
 export interface DemoRestore {
@@ -187,6 +192,13 @@ export interface DemoFixture {
    * Spec: spec/kernel/capability-registry.md.
    */
   readonly capabilities: CapabilityRegistry;
+  /**
+   * The knowledge-graph engine (DPS-006): the domain query layer over WorldStateGraph.
+   * Pre-seeded with the demo concept graph at session build time. Use `kg.decompose`,
+   * `kg.learnerState`, `kg.nextConcept`, and `kg.addBridge` to query the knowledge graph.
+   * Spec: spec/world-state/knowledge-graph-engine.md, ADR-0015.
+   */
+  readonly kg: KnowledgeGraphEngine;
 }
 
 /** Capabilities the learner is granted at session setup (dispatch.<agentId> per ProductRuntimeAgentId). */
@@ -605,6 +617,29 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     return context;
   };
 
+  // Knowledge-graph engine (DPS-006): pre-seed the demo concept graph so the KG is queryable
+  // from the first ask. Concepts mirror demoAsk() — idempotent if demoAsk is called later.
+  const kg = new KnowledgeGraphEngine(world);
+  const DEMO_KG_CONCEPTS: readonly ConceptSpec[] = [
+    { id: "linear-algebra", label: "Linear Algebra", domain: "mathematics", layer: 3 },
+    { id: "gradient-descent", label: "Gradient Descent", domain: "optimization", layer: 3 },
+    {
+      id: "perceptron",
+      label: "The Perceptron",
+      domain: "machine-learning",
+      layer: 2,
+      prerequisites: ["linear-algebra"],
+    },
+    {
+      id: "neural-networks",
+      label: "Neural Networks",
+      domain: "machine-learning",
+      layer: 2,
+      prerequisites: ["perceptron", "gradient-descent"],
+    },
+  ];
+  kg.seedConcepts(DEMO_KG_CONCEPTS);
+
   return {
     surface,
     bus,
@@ -616,6 +651,7 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     assembleContext,
     inferIntent,
     capabilities,
+    kg,
   };
 }
 
