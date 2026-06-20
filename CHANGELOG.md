@@ -9,6 +9,23 @@ paragraph or a few bullets per milestone. Implementation detail lives in the own
 
 ## [Unreleased]
 
+> **Phase 5 (Digital Twin) is complete** — P5.1.
+
+### Added — Phase 5 (P5.1): Digital Twin lifecycle — consent-scoped cognitive artifact
+
+- **Learners now have a named, governed cognitive twin.** `TwinRegistry` (`@inevitable/product-cognition`,
+  DPS-009, ADR-0020) implements the full digital twin lifecycle: `create()` mints a `TwinState` from the
+  caller-supplied `TwinSnapshot` (extracted via `buildTwinSnapshot` from the learner's cross-surface
+  cognition profile, DPS-004); `branch(twinId, displayName)` forks an independent cognitive lineage
+  inheriting the parent's consent and current snapshot; `export(twinId)` marks a portable artifact was
+  created (idempotent); `terminate(twinId)` irrevocably deactivates the twin with data preserved for audit
+  (idempotent). Every lifecycle transition emits a `twin.*` event (`twin.created`, `twin.branched`,
+  `twin.exported`, `twin.terminated`) via an injected `publish` callback — the established injection
+  pattern from P3.3 (ADR-0017), keeping the registry free of a direct `@inevitable/events` dependency.
+  The **`twin.*` event family** is now registered in the event taxonomy (1y-archive, replayable).
+  `DemoFixture` exposes `twins: TwinRegistry` plus four lifecycle helpers. The twin consent model records
+  `allowedSurfaces`/`allowedAgents`/`expiresAt` at creation; enforcement at query time follows in P5.2.
+
 > **Phase 4 (Multi-Agent Cognition) is complete** — P4.1 through P4.2.
 
 ### Added — Phase 4 (P4.2): Governed Tool Runtime — `tool.*` events, capability-gated invocation

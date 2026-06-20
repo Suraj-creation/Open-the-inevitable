@@ -46,8 +46,8 @@ the workspace root (guarded dynamic import; never a substrate dependency).
 ## Current State
 
 **Phases 1A–1E, 2A–2D, the 2E durable-substrate milestone, all of P2 (Identity, Continuity &
-Context — P2.1 through P2.6), all of P3 (the ULI core — P3.1 through P3.3), and all of P4
-(Multi-Agent Cognition — P4.1 through P4.2) are complete.
+Context — P2.1 through P2.6), all of P3 (the ULI core — P3.1 through P3.3), all of P4
+(Multi-Agent Cognition — P4.1 through P4.2), and all of P5 (Digital Twin — P5.1) are complete.
 `pnpm verify` is green across the whole monorepo** (22 packages/apps + 1 service: codegen,
 typecheck, test, lint, format).
 
@@ -211,6 +211,20 @@ typecheck, test, lint, format).
   `tool.invoked` + `tool.completed` when bus present. `tool.*` added to event taxonomy. `apps/cli`
   registers `search-concepts` demo tool, grants `tool.search-concepts`, exposes `DemoFixture.tools`.
   **P4 is complete.**
+- **P5.1 — Digital Twin lifecycle** — *consent-scoped cognitive artifact: create / branch / export / terminate.*
+  (DPS-009, ADR-0020.) `TwinRegistry` (`@inevitable/product-cognition`, `publish` callback pattern from
+  ADR-0017/P3.3): manages `TwinState` lifecycle — `create(params)` mints a twin from a caller-supplied
+  `TwinSnapshot` (ADR-0020 D2: caller builds the snapshot from `LearnerCognitionSeed`/DPS-004, keeping
+  the registry free of world-state/memory deps); `branch(twinId, displayName)` forks a twin with inherited
+  consent + snapshot captured at branch time (`branchedFrom` lineage pointer); `export(twinId)` marks the
+  twin as exported (idempotent); `terminate(twinId)` irrevocably deactivates it (data preserved for audit;
+  idempotent). Every transition emits a `twin.*` event (`twin.created`, `twin.branched`, `twin.exported`,
+  `twin.terminated`) via the injected `publish` callback — wired in `apps/cli/wiring.ts` with `createEvent`
+  + `bus.publish` + local HLC. `twin.*` family registered in the event taxonomy (1y-archive, replayable).
+  `buildTwinSnapshot(cognition, nowMs)` helper extracts a `TwinSnapshot` from a `LearnerCognitionSeed`
+  (mastery map from `mastery_checkpoint` nodes; memory digest per durable layer). `DemoFixture` exposes
+  `twins: TwinRegistry` + four lifecycle helpers (`createTwin`, `branchTwin`, `exportTwin`, `terminateTwin`).
+  23 new tests in `packages/product-cognition/tests/twin.test.ts`. **P5 is complete.**
 
 ## Traceability Map
 
@@ -235,7 +249,7 @@ implementation even if it works locally.
 | `@inevitable/world-state` | world-state/world-state-graph, DPS-006 | delta protocol, materialized graph, acyclicity, snapshots, **`KnowledgeGraphEngine`** (concept seeding, prereq decomposition, learner-state queries, cross-domain bridges, ADR-0015) |
 | `@inevitable/context` | persistence/context-lease-bounded-retrieval (DPS-005), kernel/context-lease, memory/memory-tiers | `ContextAssembler` (VectorStore-backed, lease-bounded working-memory assembly), deterministic local embedding |
 | `@inevitable/adapters` | interop/infrastructure-adapters (ADR-0005), protocols/model-invocation, surface/multimodal-provider-abstraction, persistence/durable-cognitive-persistence (ADR-0008), ADR-0019 | in-memory reference adapters + conformance harness; NATS/Qdrant/Neo4j/Postgres (edge-provisioned); **`FileEventTransport`** (durable JSONL event log); Null/Gemini/Recording model runtimes (D3 seam); Null/Gemini **voice runtimes** (SRF-004, out-of-band WAV); **`InMemoryToolRuntime`** (governed `tool.*` invocation with capability check + event emission, ADR-0019) |
-| `@inevitable/product-cognition` | product/product-cognition-runtime, agents/supervisor-agent, protocols/model-invocation, kernel/intent-inference + capability-registry, features F01–F07/F13/F14, ADR-0016 | onboarding, path projection, manifests, governed dispatch (GOV-P01/P02/**P03 capability gate**), supervisor routing, fibered learning loop, mastery checkpoints, **ModelBackedUnit (F04 all 7 layers 0–6; adaptive depth from KG; assembled context in prompts)**, CurriculumUnit (goal → concept DAG, PCR §12), **IntentInferenceUnit** (goal → intent lease) |
+| `@inevitable/product-cognition` | product/product-cognition-runtime, agents/supervisor-agent, protocols/model-invocation, kernel/intent-inference + capability-registry, features F01–F07/F13/F14, ADR-0016, DPS-009 | onboarding, path projection, manifests, governed dispatch (GOV-P01/P02/**P03 capability gate**), supervisor routing, fibered learning loop, mastery checkpoints, **ModelBackedUnit (F04 all 7 layers 0–6; adaptive depth from KG; assembled context in prompts)**, CurriculumUnit (goal → concept DAG, PCR §12), **IntentInferenceUnit** (goal → intent lease), **`TwinRegistry`** (consent-scoped digital twin lifecycle; create/branch/export/terminate; `twin.*` events, ADR-0020) |
 | `@inevitable/surface` | surface/ (SRF-001…004), features F09/F16 | cognition blocks, surface.\* events, timeline projection, contribution runtime, fold/replay, trace capture, provider registry, SurfaceSession (+ expand), **`SurfaceChoreographer`** (narration/focus/presence choreography, ADR-0007) |
 | `@inevitable/cli` (app) | surface/, product/product-cognition-runtime, protocols/model-invocation | demo composition root: full governed substrate wired into one terminal surface (`pnpm demo`) |
 | `@inevitable/api` (app) | surface/surface-streaming-sync-protocol (SRF-005), ADR-0006…0014, product/product-cognition-runtime §12, persistence/{durable-cognitive-persistence, cognitive-continuity-and-rehydration, durable-learner-identity, shared-learner-cognition, context-lease-bounded-retrieval}, kernel/{intent-inference, capability-registry} | Surface Gateway: node:http SSE stream + typed command envelope, governed boundary, `gateway.*` observability, per-goal curriculum generation, `.env`/Gemini, out-of-band media route + Gemini/Null voice wiring, durable persistence + cross-process resume (`COS_PERSIST_DIR`; `ServedSurface` seam, `File{EventTransport,MediaStore}`), live rehydration, **durable `LearnerRegistry`** (resume-by-learner via `GET /api/learner/:id`; per-learner cognition profile seeds prior mastery); each ask runs **intent inference** + **lease-bounded context assembly** under the **capability gate** |
@@ -262,10 +276,14 @@ continuity, the digital twin, and every future manifestation. Next, in dependenc
 3. **P4 — Multi-agent cognition.** ✓ **COMPLETE.** ✓ P4.1 `ProposalBlackboard` + concurrent challenger
    dispatch + `surface.agent.disagreed` fold (ADR-0018, DPS-008). ✓ P4.2 `InMemoryToolRuntime` +
    `tool.*` event family + capability-gated invocation (ADR-0019).
-4. **P5 — Digital Twin / Personal Cognitive Companion** (consent-scoped twin-state over durable
-   memory+events; snapshot/branch/export/terminate).
+4. **P5 — Digital Twin / Personal Cognitive Companion.** ✓ **COMPLETE.** ✓ P5.1 `TwinRegistry` in
+   `@inevitable/product-cognition`: consent-scoped twin lifecycle (create/branch/export/terminate),
+   `TwinSnapshot` from `LearnerCognitionSeed` (DPS-004), `twin.*` event family (DPS-009, ADR-0020).
+   *Deferred within the theme:* IdenticalAgent (model-backed agent speaking as the learner using
+   TwinState as context; P5.2+), consent enforcement at query time (P5.2+), durable twin persistence
+   across restarts (P5.2+, `FileEventTransport` pattern from DPS-001).
 5. **P6 — Governed self-evolution** (proposals → shadow tests on synthetic learners → replay-based
-   evaluation → governed rollout/rollback).
+   evaluation → governed rollout/rollback). **This is next.**
 6. **P7 — Platform API/SDK + duplex** (harden the substrate's public surface so mobile/desktop/CLI/MCP
    attach as manifestations; MCP/CLI is the cheap first second-manifestation). Discipline now, phase later.
 

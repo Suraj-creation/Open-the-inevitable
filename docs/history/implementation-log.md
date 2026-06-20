@@ -784,3 +784,37 @@ outcomes) that P6 self-evolution will read as its inputs.
 **Format fix:** `clock.nowMs()` (not `clock.now()`) — caught by typecheck. Prettier applied to `tools.ts` and `fiber-learning-loop.ts` before commit.
 
 **P4 closes the multi-agent orchestration phase.** The COS substrate now expresses visible agent disagreement, a proposal board for arbitration audit, and a governed tool ecosystem. These feed P6 (self-evolution can arbitrate over competing pedagogical proposals) and P5 (the digital twin can observe agent disagreements across a learner's history).
+
+---
+
+## Phase P5 — Digital Twin Lifecycle (2026-06-20)
+
+**Goal:** give learners a named, consent-scoped cognitive artifact that persists independently of any session or surface — a governance-first entry into the Digital Twin / Identical Agent vision.
+
+### P5.1 — TwinRegistry + twin.* events
+
+**Architecture decision (ADR-0020):** the twin is a `product-cognition` primitive, not a gateway or surface concern. It uses the injected `publish` callback pattern established in P3.3 (ADR-0017 D1) — `TwinRegistry` accepts `publish?: (eventType, payload) => void` — keeping it free of a hard `@inevitable/events` dependency while remaining fully observable.
+
+**`TwinState` and `TwinConsent`** (`packages/product-cognition/src/twin.ts`): `TwinConsent` records `learnerId`, `grantedAt`, `allowedSurfaces`, `allowedAgents`, and optional `expiresAt` at mint time. `TwinSnapshot` captures `masteryMap` (conceptId → `{level, confidence}` from `mastery_checkpoint` world nodes), `memoryDigest` (one entry per durable memory layer), and `goals` (empty in P5.1; cross-session goals arrive in P5.2+). `TwinStatus` is `"active" | "exported" | "terminated"`.
+
+**Snapshot caller pattern (ADR-0020 D2):** `TwinRegistry.create()` accepts a pre-built `TwinSnapshot` from the caller. The `buildTwinSnapshot(cognition, nowMs)` helper in `apps/cli/src/wiring.ts` extracts the snapshot from a `LearnerCognitionSeed` (DPS-004). This keeps the registry free of `WorldStateGraph`/`TieredMemoryStore` deps (same pattern as `ContextAssembler` receiving pre-indexed items, not crawling memory itself).
+
+**Lifecycle transitions (ADR-0020 D4):**
+- `create(params)` → `active` + `twin.created` event
+- `branch(twinId, displayName)` → new `active` twin with `branchedFrom` pointer + inherited consent + snapshot at branch time + `twin.branched` event; throws `CosError("E_TWIN_NOT_FOUND")` or `CosError("E_TWIN_TERMINATED")` on invalid input
+- `export(twinId)` → `exported` (idempotent; repeated export returns current state, emits once) + `twin.exported`
+- `terminate(twinId)` → `terminated` (idempotent; data never deleted; audit-friendly) + `twin.terminated`
+
+**Branch semantics (ADR-0020 D3):** copy-at-fork — the child starts with the parent's current snapshot but evolves independently. `branchedFrom` is an immutable lineage pointer. Consent inherits to the branch. Branching a terminated twin is an error.
+
+**Event wiring in `apps/cli/src/wiring.ts`:** a local `twinHlc` variable + `createEvent` + `bus.publish` inside the `publish` callback, identical to the `analysis` wiring from P3.3. The `twins: TwinRegistry` is exposed on `DemoFixture` alongside four helpers: `createTwin(displayName)` (extracts cognition from current world+memory, builds snapshot, mints twin with full-access consent), `branchTwin(twinId, displayName)`, `exportTwin(twinId)`, `terminateTwin(twinId)`.
+
+**Event taxonomy:** `twin.*` family added to `spec/events/event-taxonomy.md` (1y-archive, replayable, `internal` classification). Twins carry learner-private cognitive state, so 1y-archive mirrors the intent-family retention.
+
+**Spec files:** `spec/persistence/DPS-009-digital-twin.md` (purpose, lifecycle diagram, event payloads, snapshot semantics, consent model, API surface, non-goals), `spec/architecture-decisions/ADR-0020-digital-twin-architecture.md` (6 decisions: D1–D6).
+
+**Tests:** `packages/product-cognition/tests/twin.test.ts` — 23 tests across create/get/list/branch/export/terminate. Key coverage: idempotency of export (emits once, returns same timestamp); idempotency of terminate (emits once); branch from terminated throws; data preserved on terminated twin (snapshot + consent intact); parent twin unchanged after branch.
+
+**Note on `CosError` throw-checking:** the tests use `.toThrow("not found")` and `.toThrow("terminated")` rather than `.toThrow("E_TWIN_NOT_FOUND")` because `CosError.message` is the human-readable second argument (the code is the `.code` property). Matching the message string is correct and informative.
+
+**P5 closes the Digital Twin phase.** The COS substrate now has a governed twin lifecycle with a full event audit trail. Deferred to P5.2+: IdenticalAgent (model-backed; speaks as the learner using `TwinState` as context), consent enforcement at query time (access blocked by `allowedSurfaces`/`allowedAgents`), durable twin persistence across restarts (`FileEventTransport` pattern, DPS-001), and streaming twin state from live session events. These deferred items require the `IdenticalAgent` model ABI and cross-process twin replay — consciously out of scope for P5.1.
