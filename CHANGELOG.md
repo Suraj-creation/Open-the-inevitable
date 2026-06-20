@@ -9,6 +9,25 @@ paragraph or a few bullets per milestone. Implementation detail lives in the own
 
 ## [Unreleased]
 
+> **Phase 7.1 (Platform SDK + MCP Manifestation) is complete** — §2 substrate-independence law proven.
+
+### Added — Phase 7 (P7.1): Platform SDK + MCP manifestation — §2 law proven
+
+- **The §2 substrate-independence law is now mechanically verified by a real second manifestation.**
+  `@inevitable/sdk` (`packages/sdk`, SDK-001, ADR-0022) is a typed HTTP client for the COS Surface Gateway
+  with **zero `@inevitable/*` workspace dependencies** — not even `@inevitable/protocols`. All SDK types
+  (`CosSurface`, `CosLearner`, `CosCommand`, `CosStreamFrame`, `CosClientError`) are defined inline; `grep
+  "@inevitable" packages/sdk/src` returns empty. `CosClient` covers the full gateway surface: `createSurface`,
+  `ask`, `expand`, `close`, `getState`, `getLearner`; injectable `fetch` for hermetic unit tests (11 tests);
+  trailing-slash stripping; `CosClientError` carries the HTTP status code. `apps/mcp` is a pure stdio MCP
+  server whose only COS import is `@inevitable/sdk`: a minimal JSON-RPC 2.0 router (~70 lines, no
+  `@modelcontextprotocol/sdk` external dep, ADR-0022 D3) handles `initialize`, `tools/list`, `tools/call`,
+  and MCP notifications (no response for null/absent id); 4 MCP tools (`cos_create_surface`, `cos_ask`,
+  `cos_expand`, `cos_get_state`) cover the cognitive surface API; configured via `COS_API_URL` env var
+  (ADR-0022 D4). The §2 law verification is explicit in test-file comment headers in both packages (ADR-0022
+  D5 — makes drift visible in code review). 8 new RPC router tests. `pnpm verify` green across all 24
+  packages + apps (codegen + typecheck + test + lint + format).
+
 > **Phase 6 (Governed Self-Evolution) is complete** — P6.1.
 
 ### Added — Phase 6 (P6.1): Governed Self-Evolution — proposal FSM + shadow tests + governance gate

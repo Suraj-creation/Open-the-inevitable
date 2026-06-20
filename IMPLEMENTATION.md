@@ -47,9 +47,10 @@ the workspace root (guarded dynamic import; never a substrate dependency).
 
 **Phases 1A–1E, 2A–2D, the 2E durable-substrate milestone, all of P2 (Identity, Continuity &
 Context — P2.1 through P2.6), all of P3 (the ULI core — P3.1 through P3.3), all of P4
-(Multi-Agent Cognition — P4.1 through P4.2), all of P5 (Digital Twin — P5.1), and all of P6
-(Governed Self-Evolution — P6.1) are complete. `pnpm verify` is green across the whole monorepo**
-(22 packages/apps + 1 service: codegen, typecheck, test, lint, format).
+(Multi-Agent Cognition — P4.1 through P4.2), all of P5 (Digital Twin — P5.1), all of P6
+(Governed Self-Evolution — P6.1), and P7.1 (Platform SDK + MCP manifestation) are complete.
+`pnpm verify` is green across the whole monorepo**
+(24 packages/apps + 1 service: codegen, typecheck, test, lint, format).
 
 - **1A** — spec ecosystem (`spec/meta/`, `spec/indexes/`), ADRs, domain map, ownership skeleton.
 - **1B** — kernel / protocol / event / runtime foundational specs; ADR-0003 (tech stack).
@@ -221,6 +222,18 @@ Context — P2.1 through P2.6), all of P3 (the ULI core — P3.1 through P3.3), 
   `"approved"` or `"rolled_out"`, data preserved for audit. `evolution.rollback.completed` added to the event
   taxonomy. `DemoFixture.evolution` + five lifecycle helpers + three default synthetic learner profiles
   (beginner/intermediate/advanced) wired with the real governance guard. 26 new tests. **P6 is complete.**
+- **P7.1 — Platform SDK + MCP manifestation** — *§2 substrate-independence law proven by a real second manifestation.*
+  (SDK-001, ADR-0022.) Two new packages prove the law mechanically:
+  `@inevitable/sdk` (`packages/sdk`) — a typed HTTP client for the COS Surface Gateway with zero workspace
+  dependencies (not even `@inevitable/protocols`); `grep "@inevitable" packages/sdk/src` returns empty.
+  `CosClient` wraps all `apps/api` HTTP surface: `createSurface`, `ask`, `expand`, `close`, `getState`,
+  `getLearner`; injectable `fetch` for hermetic unit tests (11 new tests); all API types defined inline (no
+  structural leakage from internal protocols). `apps/mcp` — a pure stdio MCP server; its only COS import is
+  `@inevitable/sdk` (zero substrate packages); implements a minimal JSON-RPC 2.0 router (~70 lines, no
+  `@modelcontextprotocol/sdk` external dep, ADR-0022 D3) + 4 MCP tools (`cos_create_surface`, `cos_ask`,
+  `cos_expand`, `cos_get_state`); configured entirely via `COS_API_URL` env var (ADR-0022 D4). The §2 law
+  verification is explicit in test comments in both packages (ADR-0022 D5). 8 new RPC router tests.
+  `pnpm verify` green across all 24 packages+apps (codegen, typecheck, test, lint, format). **P7.1 is complete.**
 - **P5.1 — Digital Twin lifecycle** — *consent-scoped cognitive artifact: create / branch / export / terminate.*
   (DPS-009, ADR-0020.) `TwinRegistry` (`@inevitable/product-cognition`, `publish` callback pattern from
   ADR-0017/P3.3): manages `TwinState` lifecycle — `create(params)` mints a twin from a caller-supplied
@@ -264,6 +277,8 @@ implementation even if it works locally.
 | `@inevitable/cli` (app) | surface/, product/product-cognition-runtime, protocols/model-invocation | demo composition root: full governed substrate wired into one terminal surface (`pnpm demo`) |
 | `@inevitable/api` (app) | surface/surface-streaming-sync-protocol (SRF-005), ADR-0006…0014, product/product-cognition-runtime §12, persistence/{durable-cognitive-persistence, cognitive-continuity-and-rehydration, durable-learner-identity, shared-learner-cognition, context-lease-bounded-retrieval}, kernel/{intent-inference, capability-registry} | Surface Gateway: node:http SSE stream + typed command envelope, governed boundary, `gateway.*` observability, per-goal curriculum generation, `.env`/Gemini, out-of-band media route + Gemini/Null voice wiring, durable persistence + cross-process resume (`COS_PERSIST_DIR`; `ServedSurface` seam, `File{EventTransport,MediaStore}`), live rehydration, **durable `LearnerRegistry`** (resume-by-learner via `GET /api/learner/:id`; per-learner cognition profile seeds prior mastery); each ask runs **intent inference** + **lease-bounded context assembly** under the **capability gate** |
 | `@inevitable/web` (app) | surface/surface-streaming-sync-protocol (SRF-005), surface/ (SRF-001), ADR-0007, F09/F16 | Vite + React **Cognitive Stage**: folds the live stream (`@inevitable/surface/client`); `useChoreographer` playback (narration/focus/presence, audio); block-renderer registry (provider-agnostic) |
+| `@inevitable/sdk` (package) | cognitive-developer-platform/SDK-001, ADR-0022 | **Platform SDK** — typed HTTP client for the COS Surface Gateway; **zero `@inevitable/*` workspace deps** (proves §2 law); `CosClient` (createSurface/ask/expand/close/getState/getLearner); injectable `fetch`; SDK types defined inline |
+| `@inevitable/mcp` (app) | cognitive-developer-platform/SDK-001, ADR-0022 | **MCP stdio server** — only COS dep is `@inevitable/sdk`; pure JSON-RPC 2.0 router (~70 lines, no external MCP SDK); 4 tools (`cos_create_surface`, `cos_ask`, `cos_expand`, `cos_get_state`); `COS_API_URL` env-var configured |
 | `@inevitable/data-plane` (service) | telemetry/otel-edge, data-plane/ | OTel SDK bootstrap (edge) + bus→OTel observability sink |
 
 ## Active Frontier — the architectural roadmap (gap analysis → phased build)
@@ -297,8 +312,11 @@ continuity, the digital twin, and every future manifestation. Next, in dependenc
    rollout/rollback lifecycle, `evolution.*` event family (DPS-010, ADR-0021). *Deferred within the theme:*
    applying rolled-out proposals to the live runtime configuration; durable proposal persistence; replay-based
    evaluation over real recorded session history; multi-agent consensus on proposals.
-6. **P7 — Platform API/SDK + duplex** (harden the substrate's public surface so mobile/desktop/CLI/MCP
-   attach as manifestations; MCP/CLI is the cheap first second-manifestation). Discipline now, phase later.
+6. **P7 — Platform API/SDK + duplex.** ✓ **P7.1 COMPLETE.** ✓ `@inevitable/sdk` (zero substrate deps,
+   injectable fetch, all `apps/api` routes typed) + `apps/mcp` (stdio MCP server via `@inevitable/sdk` only,
+   pure JSON-RPC 2.0 router, 4 tools, `COS_API_URL` env-var). §2 law proven mechanically: a second
+   manifestation drives the substrate with zero core changes. *Deferred within the theme:* duplex
+   WebSocket transport (ADR-0006 explicitly deferred); multi-user CRDT; auth at the SDK boundary.
 
 Nearer-term surface polish that rides alongside: visual media on the stage (Gemini image/video behind
 SRF-004; slots already designed), the spatial Living-Canvas projection (second F16 manifestation),

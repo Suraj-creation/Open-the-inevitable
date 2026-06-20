@@ -1,0 +1,20 @@
+{
+  "name": "@inevitable/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP stdio server — pure JSON-RPC 2.0 over @inevitable/sdk. Zero direct imports from substrate packages: proves the §2 substrate-independence law.",
+  "main": "./src/index.ts",
+  "scripts": {
+    "start": "node --loader ts-node/esm src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

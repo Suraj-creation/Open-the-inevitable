@@ -851,3 +851,21 @@ outcomes) that P6 self-evolution will read as its inputs.
 **Deferred to P6.2+:** applying the rolled-out configuration to the live runtime (proposal state is advisory in P6.1); durable persistence of proposals across restarts (`FileEventTransport` pattern); replay-based evaluation over real historical session events (CognitiveAnalysisEngine signals → P6.2 evaluation loop); multi-agent consensus on proposals; GOV-P04 dedicated evolution policy.
 
 **P6 closes the roadmap's core phases.** The COS now satisfies all six foundational invariants from §25.4: event sourcing, persistent memory, governed orchestration, reasoning-quality observability, self-evolution, and temporal cognition. P7 (Platform API/SDK + duplex transport) is the next frontier — hardening the substrate's public surface for a second manifestation (MCP or CLI as the first cheap proof).
+
+---
+
+## 2026-06-20 — P7.1: Platform SDK + MCP Manifestation
+
+**Goal:** Prove the §2 substrate-independence law by deploying two real artifacts — a typed HTTP client (`@inevitable/sdk`) and a stdio MCP server (`apps/mcp`) — both using zero substrate package imports, requiring zero core changes.
+
+**Spec:** `spec/cognitive-developer-platform/SDK-001-platform-sdk.md`, `spec/architecture-decisions/ADR-0022-platform-sdk-and-mcp-manifestation.md`.
+
+**The law (§2):** "manifestations depend on the substrate, the substrate on its contracts, contracts on nothing — no vendor, model, transport, or store leaks past its adapter." P7.1 makes this verifiable at the filesystem level: `grep "@inevitable" packages/sdk/src` and `grep "@inevitable" apps/mcp/src` must return empty (except the `@inevitable/sdk` import in `apps/mcp`).
+
+**`@inevitable/sdk` (`packages/sdk`):** A typed HTTP client for the COS Surface Gateway. Zero `@inevitable/*` workspace dependencies — not even `@inevitable/protocols`. All types (`CosSurface`, `CosLearner`, `CosCommand`, `CosStreamFrame`, `CosClientError`) defined inline in `src/types.ts`. `CosClient` (`src/client.ts`) maps the full `apps/api` surface: `POST /api/surface` → `createSurface`; `POST /api/surface/:id/command` (type:ask/expand/close) → `ask/expand/close`; `GET /api/surface/:id/state` → `getState`; `GET /api/learner/:id` → `getLearner`. Injectable `fetch` (ADR-0022 D2) enables hermetic unit tests with no running server. 11 tests in `packages/sdk/tests/client.test.ts` covering field mapping (snake_case → camelCase), error propagation, base-URL normalization, and the correct command shapes for each method.
+
+**`apps/mcp`:** A pure stdio MCP server. Only COS import: `@inevitable/sdk`. Zero substrate package imports; zero new external deps. `src/rpc.ts` — a minimal JSON-RPC 2.0 router (~70 lines): `register/dispatch/listenStdio`; MCP notifications (id null or absent) yield no response per spec; handler errors wrapped in `{code: -32000}` error responses; parse errors yield `{code: -32700}`. `src/tools.ts` — 4 MCP tools: `cos_create_surface`, `cos_ask`, `cos_expand`, `cos_get_state`; each wraps the matching `CosClient` method and returns `{content: [{type:"text", text: JSON.stringify(result)}]}`; errors return `{isError: true, content: [{type:"text", text: message}]}`. `src/index.ts` — wires the router with `initialize` (server capabilities) + `tools/list` + `tools/call` + `listenStdio()`; reads `COS_API_URL` env var (default `http://localhost:8787`). 8 tests in `apps/mcp/tests/rpc.test.ts` covering: dispatch → result; method-not-found (−32601); parse-error (−32700); null-id notification → null; absent-id notification → null; handler errors (−32000); params forwarding; async handlers.
+
+**Verify:** `pnpm verify` green across all 24 packages+apps+services (codegen + typecheck + test + lint + format). One typecheck fix: `handler(...)` returns `Promise<unknown> | unknown` — wrapped in `Promise.resolve()` before `.catch()`. One lint fix: `CosClient` used only as type in `tools.ts` function signature — converted to `import { type CosClient, ... }`. Prettier run on 3 files. All clean.
+
+**Deferred to P7.2+:** duplex WebSocket transport (ADR-0006 explicitly deferred); multi-user CRDT; auth at the SDK boundary; SSE streaming helper in the SDK; integration tests against a live gateway instance.
