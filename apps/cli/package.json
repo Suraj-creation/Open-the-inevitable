@@ -22,6 +22,7 @@
     "@inevitable/kernel": "workspace:*",
     "@inevitable/memory": "workspace:*",
     "@inevitable/observability": "workspace:*",
+    "@inevitable/orchestration": "workspace:*",
     "@inevitable/product-cognition": "workspace:*",
     "@inevitable/protocols": "workspace:*",
     "@inevitable/shared": "workspace:*",

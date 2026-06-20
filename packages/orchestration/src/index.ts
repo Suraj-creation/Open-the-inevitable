@@ -2,8 +2,11 @@
  * @inevitable/orchestration — orchestration foundations.
  * Spec: spec/orchestration/blackboard-protocol.md, spec/orchestration/orchestration-cells.md.
  * Phase 1C: the blackboard contract (agents coordinate via shared state, not direct calls).
+ * Phase 4.1: ProposalBlackboard — typed proposal lifecycle for multi-agent arbitration.
  * Directors, routing, cells, and consensus land in Phase 1D.
  */
+export type { ArbitrationRecord, ProposalEntry } from "./proposals";
+export { ProposalBlackboard } from "./proposals";
 export interface BlackboardEntry<T = unknown> {
   readonly key: string;
   readonly value: T;

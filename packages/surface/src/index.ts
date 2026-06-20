@@ -18,6 +18,7 @@ export {
   foldSurfaceEvents,
   type AgentPresence,
   type AgentPresenceState,
+  type DisagreementRecord,
   type FocusTargetType,
   type NarrationSegment,
   type NarrationVoice,

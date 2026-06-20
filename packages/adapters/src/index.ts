@@ -6,6 +6,8 @@
  */
 export { loadOptional, requireOptional } from "./optional";
 
+export { InMemoryToolRuntime, type InMemoryToolRuntimeOptions, type ToolSpec } from "./tools";
+
 export { InMemoryEventTransport, InMemoryVectorStore } from "./in-memory";
 
 export { FileEventTransport } from "./durable";

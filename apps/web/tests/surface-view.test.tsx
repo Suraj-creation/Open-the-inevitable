@@ -94,6 +94,7 @@ const fixture: SurfaceState = {
   narration: [],
   focus: null,
   presence: [],
+  disagreements: [],
   version: 6,
   last_hlc: "hlc-6",
 };

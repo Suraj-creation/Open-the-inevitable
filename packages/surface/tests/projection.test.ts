@@ -326,4 +326,59 @@ describe("foldSurfaceEvents", () => {
     const events = f.bus.replay({ subject: "surface.>" });
     expect(foldSurfaceEvents(events, "srf-proj")).toEqual(foldSurfaceEvents(events, "srf-proj"));
   });
+
+  test("surface.agent.disagreed is folded into disagreements[]", async () => {
+    const f = makeFixture("projection-disagreement");
+    await seedSurface(f, "srf-dis");
+
+    await f.emit("surface.agent.disagreed", {
+      surface_id: "srf-dis",
+      agent_cids: ["cog-exp-demo", "challenger"],
+      topic: "explanation:gradient-descent",
+      concept_id: "gradient-descent",
+      resolution: { winner: "explanation", reason: "primary explanation selected" },
+    });
+
+    const events = f.bus.replay({ subject: "surface.>" });
+    const state = foldSurfaceEvents(events, "srf-dis")!;
+    expect(state.disagreements).toHaveLength(1);
+    expect(state.disagreements[0]?.topic).toBe("explanation:gradient-descent");
+    expect(state.disagreements[0]?.resolution.winner).toBe("explanation");
+    expect(state.disagreements[0]?.agent_cids).toEqual(["cog-exp-demo", "challenger"]);
+  });
+
+  test("multiple disagreements accumulate in order", async () => {
+    const f = makeFixture("projection-multi-dis");
+    await seedSurface(f, "srf-mdis");
+
+    await f.emit("surface.agent.disagreed", {
+      surface_id: "srf-mdis",
+      agent_cids: ["a", "b"],
+      topic: "explanation:algebra",
+      concept_id: "algebra",
+      resolution: { winner: "a", reason: "r1" },
+    });
+    await f.emit("surface.agent.disagreed", {
+      surface_id: "srf-mdis",
+      agent_cids: ["c", "d"],
+      topic: "explanation:calculus",
+      concept_id: "calculus",
+      resolution: { winner: "c", reason: "r2" },
+    });
+
+    const events = f.bus.replay({ subject: "surface.>" });
+    const state = foldSurfaceEvents(events, "srf-mdis")!;
+    expect(state.disagreements).toHaveLength(2);
+    expect(state.disagreements[0]?.concept_id).toBe("algebra");
+    expect(state.disagreements[1]?.concept_id).toBe("calculus");
+  });
+
+  test("disagreements array starts empty on surface.created", async () => {
+    const f = makeFixture("projection-empty-dis");
+    await seedSurface(f, "srf-edis");
+
+    const events = f.bus.replay({ subject: "surface.>" });
+    const state = foldSurfaceEvents(events, "srf-edis")!;
+    expect(state.disagreements).toEqual([]);
+  });
 });

@@ -6,7 +6,7 @@
  *
  * Spec: spec/surface/cognitive-surface-runtime.md, spec/product/product-cognition-runtime.md §11.
  */
-import { InMemoryVectorStore } from "@inevitable/adapters";
+import { InMemoryToolRuntime, InMemoryVectorStore } from "@inevitable/adapters";
 import {
   ContextAssembler,
   type RetrievableMemoryItem,
@@ -54,6 +54,7 @@ import {
   type Result,
 } from "@inevitable/shared";
 import { CognitiveAnalysisEngine, InMemoryMeter } from "@inevitable/observability";
+import { ProposalBlackboard } from "@inevitable/orchestration";
 import { SurfaceSession, type SurfaceAskInput, type VoiceSynthesizer } from "@inevitable/surface";
 import {
   KnowledgeGraphEngine,
@@ -207,6 +208,19 @@ export interface DemoFixture {
    * Spec: spec/observability/DPS-007-observability-analysis.md, ADR-0017.
    */
   readonly analysis: CognitiveAnalysisEngine;
+  /**
+   * The proposal blackboard (P4.1 — multi-agent arbitration, ADR-0018): records explanation and
+   * challenger proposals per concept and the arbitration winner. Inspect via
+   * `proposals.proposals(key)` and `proposals.arbitrations()`.
+   * Spec: spec/orchestration/DPS-008-proposal-blackboard.md.
+   */
+  readonly proposals: ProposalBlackboard;
+  /**
+   * The governed tool runtime (P4.2 — ADR-0019): in-process ToolRuntime adapter with
+   * capability checks and event emission. Use `tools.discover()` and `tools.invoke(name, params)`.
+   * Spec: spec/architecture-decisions/ADR-0019-governed-tool-runtime.md.
+   */
+  readonly tools: InMemoryToolRuntime;
 }
 
 /** Capabilities the learner is granted at session setup (dispatch.<agentId> per ProductRuntimeAgentId). */
@@ -407,6 +421,16 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     });
 
   const explanationDispatcher = dispatcher("explanation", "cog-exp-demo", modelUnit("explanation"));
+  // P4.1 — multi-agent blackboard arbitration (ADR-0018): revision agent runs concurrently with
+  // the explanation agent; disagreements are emitted as surface.agent.disagreed.
+  // DeterministicMvpUnit used (ModelBackedUnit supports explanation/practice/assessment only; P7 adds revision).
+  const challengerDispatcher = dispatcher(
+    "revision",
+    "cog-rev-demo",
+    new DeterministicMvpUnit(manifest("revision"), idGenerator),
+  );
+  const proposals = new ProposalBlackboard();
+
   const loop = new FiberedLearningLoop({
     learningPaths: new LearningPathProjector(world),
     supervisorDispatcher: dispatcher(
@@ -426,6 +450,8 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
       idGenerator,
       nodeId: "demo-mastery",
     }),
+    challengerDispatcher,
+    proposals,
     world,
     bus,
     clock,
@@ -677,6 +703,28 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     analysis.handleEvent(event);
   });
 
+  // Governed tool runtime (P4.2 — ADR-0019): in-process ToolRuntime with capability checks and
+  // event emission. Tools are granted via the capability registry: grant "tool.<name>" to allow.
+  const tools = new InMemoryToolRuntime({
+    bus,
+    clock,
+    idGenerator,
+    ownerCid: session.learnerIdentity.cid,
+    checkCapability: (cid: string, cap: string) => capabilities.has(cid, cap),
+    nodeId: "demo-tools",
+  });
+  // Pre-grant tool capabilities for the demo learner.
+  capabilities.grant(session.learnerIdentity.cid, "tool.search-concepts", "kernel");
+  // Demo tool: search concept nodes in the world-state graph by type (ADR-0019 D5).
+  tools.register({ name: "search-concepts", sideEffecting: false }, async (params) => {
+    const keyword = typeof params["keyword"] === "string" ? params["keyword"].toLowerCase() : "";
+    const snapshot = world.snapshot();
+    const matches = snapshot.nodes
+      .filter((n) => n.type === "concept" && n.id.includes(keyword))
+      .map((n) => ({ id: n.id, label: n.props["label"] ?? n.id }));
+    return ok(matches);
+  });
+
   return {
     surface,
     bus,
@@ -690,6 +738,8 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     capabilities,
     kg,
     analysis,
+    proposals,
+    tools,
   };
 }
 

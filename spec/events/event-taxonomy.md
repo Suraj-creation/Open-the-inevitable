@@ -82,6 +82,7 @@ Naming grammar: `family.subdomain.action` (e.g. `memory.mutation.committed`). Al
 | `surface.*` | created, block.generated, block.modified, timeline.updated, agent.contributed, memory.attached, reasoning.recorded, narration.segment, focus.changed, presence.updated, session.closed | surface | permanent | replayable |
 | `model.*` | output.recorded, invocation.failed | runtime | permanent | replayable |
 | `gateway.*` | stream.attached, stream.detached | gateway | 1d | recorded-observation |
+| `tool.*` | invoked, completed | tool-runtime | 90d | replayable |
 
 Per-family schema registration — canonical JSON Schema for a family entry:
 

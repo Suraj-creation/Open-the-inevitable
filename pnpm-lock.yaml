@@ -112,6 +112,9 @@ importers:
       '@inevitable/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@inevitable/orchestration':
+        specifier: workspace:*
+        version: link:../../packages/orchestration
       '@inevitable/product-cognition':
         specifier: workspace:*
         version: link:../../packages/product-cognition
@@ -282,6 +285,9 @@ importers:
       '@inevitable/observability':
         specifier: workspace:*
         version: link:../observability
+      '@inevitable/orchestration':
+        specifier: workspace:*
+        version: link:../orchestration
       '@inevitable/protocols':
         specifier: workspace:*
         version: link:../protocols

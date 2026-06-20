@@ -21,6 +21,7 @@ import {
   type ExecutionJournalEntry,
   type FiberRoutine,
 } from "@inevitable/execution";
+import type { ProposalBlackboard } from "@inevitable/orchestration";
 import type { CognitiveEvent } from "@inevitable/protocols";
 import {
   CosError,
@@ -59,6 +60,17 @@ export interface FiberedLearningLoopDeps {
   /** World-state graph for phase-tracking writes after each dispatch. */
   readonly world: WorldStateGraph;
   readonly bus: EventBus;
+  /**
+   * Optional challenger dispatcher (P4.1 — multi-agent blackboard arbitration, ADR-0018). When
+   * present, the explanation phase runs a concurrent challenger dispatch (`agent.revision`) and
+   * emits `surface.agent.disagreed` when the layer_0 outputs diverge (Jaccard < 0.3).
+   */
+  readonly challengerDispatcher?: ProductRuntimeDispatcher;
+  /**
+   * Optional proposal blackboard (P4.1). When present, explanation and challenger proposals are
+   * written; arbitration is recorded after disagreement detection.
+   */
+  readonly proposals?: ProposalBlackboard;
   readonly clock?: Clock;
   readonly idGenerator?: IdGenerator;
   readonly nodeId?: string;
@@ -78,6 +90,12 @@ export interface FiberedLearningLoopInput {
    * what the learner already knows (ADR-0016). Plain {text, score} to avoid cross-package deps.
    */
   readonly assembledContextItems?: ReadonlyArray<{ readonly text: string; readonly score: number }>;
+  /**
+   * Surface ID for emitting `surface.agent.disagreed` (P4.1, ADR-0018). When present, the
+   * disagreement event payload includes `surface_id` so the surface fold picks it up. When
+   * absent (CLI demo, unit tests), the event is on the bus but matches no surface fold.
+   */
+  readonly surfaceId?: string;
 }
 
 export interface FiberedLearningLoopResult {
@@ -239,10 +257,13 @@ function makeLearningCycleRoutine(
 export class FiberedLearningLoop {
   private readonly clock: Clock;
   private readonly idGenerator: IdGenerator;
+  /** Separate HLC for bridge-layer events (emitted outside the fiber journal, P4.1 ADR-0018 D5). */
+  private orchestrationHlc: Hlc;
 
   constructor(private readonly deps: FiberedLearningLoopDeps) {
     this.clock = deps.clock ?? new SystemClock();
     this.idGenerator = deps.idGenerator ?? new CryptoIdGenerator();
+    this.orchestrationHlc = hlcInit(deps.nodeId ?? "fiber-orchestration");
   }
 
   async run(input: FiberedLearningLoopInput): Promise<Result<FiberedLearningLoopResult, CosError>> {
@@ -403,6 +424,72 @@ export class FiberedLearningLoop {
       engine.resolve(token, null);
       return;
     }
+
+    const assembledContent =
+      agentId === "explanation" && input.assembledContextItems?.length
+        ? { content: { assembled_context_items: input.assembledContextItems } }
+        : {};
+
+    // P4.1 — concurrent challenger dispatch when configured (ADR-0018 D2).
+    // The explanation result is always the authoritative output; the challenger is a probe.
+    if (agentId === "explanation" && this.deps.challengerDispatcher) {
+      const [primaryResult, challengerResult] = await Promise.all([
+        dispatcher.dispatch({
+          session: input.session,
+          targetAgentId: agentId,
+          intent,
+          conceptIds,
+          ...assembledContent,
+          priority: 3,
+        }),
+        this.deps.challengerDispatcher.dispatch({
+          session: input.session,
+          targetAgentId: "revision",
+          intent,
+          conceptIds,
+          priority: 3,
+        }),
+      ]);
+
+      // Write proposals to the blackboard for arbitration audit.
+      const proposalKey = `explanation:${conceptIds[0] ?? "unknown"}`;
+      if (this.deps.proposals) {
+        if (primaryResult.ok)
+          this.deps.proposals.propose(
+            proposalKey,
+            input.session.learnerIdentity.cid,
+            primaryResult.value,
+          );
+        if (challengerResult.ok)
+          this.deps.proposals.propose(proposalKey, "challenger", challengerResult.value);
+      }
+
+      // Detect disagreement and emit surface event (ADR-0018 D4/D5/D6).
+      if (
+        primaryResult.ok &&
+        challengerResult.ok &&
+        this.outputsDisagree(primaryResult.value, challengerResult.value)
+      ) {
+        await this.emitDisagreement(input, proposalKey, conceptIds[0] ?? "unknown");
+        if (this.deps.proposals) {
+          this.deps.proposals.arbitrate(
+            proposalKey,
+            input.session.learnerIdentity.cid,
+            "primary explanation selected",
+          );
+        }
+      }
+
+      const dispatchResult = primaryResult.ok ? primaryResult.value : null;
+      results.set(token, dispatchResult);
+      if (primaryResult.ok && conceptIds[0]) {
+        this.trackPhase(agentId, conceptIds[0], input.session.intentLease.owner_user_id);
+      }
+      engine.resolve(token, dispatchResult);
+      return;
+    }
+
+    // Standard single-agent dispatch.
     const result = await dispatcher.dispatch({
       session: input.session,
       targetAgentId: agentId,
@@ -410,9 +497,7 @@ export class FiberedLearningLoop {
       conceptIds,
       // Thread assembled context into explanation dispatch (ADR-0016): the explanation unit reads
       // assembled_context_items from packet.content to build adaptive prompts grounded in prior knowledge.
-      ...(agentId === "explanation" && input.assembledContextItems?.length
-        ? { content: { assembled_context_items: input.assembledContextItems } }
-        : {}),
+      ...assembledContent,
       priority: 3,
     });
     const dispatchResult = result.ok ? result.value : null;
@@ -424,6 +509,63 @@ export class FiberedLearningLoop {
     }
 
     engine.resolve(token, dispatchResult);
+  }
+
+  // ---------------------------------------------------------------------------
+  // P4.1 — disagreement detection helpers (ADR-0018 D4)
+  // ---------------------------------------------------------------------------
+
+  private outputsDisagree(a: ProductDispatchResult, b: ProductDispatchResult): boolean {
+    const aText = this.extractLayer0(a);
+    const bText = this.extractLayer0(b);
+    if (!aText || !bText) return false;
+    return this.jaccardSimilarity(this.wordSet(aText), this.wordSet(bText)) < 0.3;
+  }
+
+  private extractLayer0(result: ProductDispatchResult): string | undefined {
+    const content = result.responsePackets[0]?.content as Record<string, unknown> | undefined;
+    const layers = content?.["layers"] as Record<string, unknown> | undefined;
+    return layers?.["layer_0"] as string | undefined;
+  }
+
+  private wordSet(text: string): Set<string> {
+    return new Set(text.toLowerCase().split(/\W+/).filter(Boolean));
+  }
+
+  private jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+    if (a.size === 0 && b.size === 0) return 1;
+    let intersection = 0;
+    for (const word of a) {
+      if (b.has(word)) intersection += 1;
+    }
+    const union = a.size + b.size - intersection;
+    return union === 0 ? 1 : intersection / union;
+  }
+
+  private async emitDisagreement(
+    input: FiberedLearningLoopInput,
+    topic: string,
+    conceptId: string,
+  ): Promise<void> {
+    const created = createEvent(
+      {
+        eventType: "surface.agent.disagreed",
+        producerCid: input.session.learnerIdentity.cid,
+        producerType: "product.orchestration",
+        payload: {
+          ...(input.surfaceId ? { surface_id: input.surfaceId } : {}),
+          agent_cids: [input.session.learnerIdentity.cid, "challenger"],
+          topic,
+          concept_id: conceptId,
+          resolution: { winner: "explanation", reason: "primary explanation selected" },
+        },
+        topic: "cos.surface.agent.disagreed",
+        classification: "internal",
+      },
+      { clock: this.clock, hlc: this.orchestrationHlc, idGenerator: this.idGenerator },
+    );
+    this.orchestrationHlc = created.hlc;
+    await this.deps.bus.publish(created.event);
   }
 
   private async handleMasteryRecord(

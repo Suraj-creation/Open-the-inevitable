@@ -77,6 +77,15 @@ export interface AgentPresence {
   readonly hlc: string;
 }
 
+/** A recorded multi-agent disagreement: two agents produced diverging proposals (P4.1, ADR-0018). */
+export interface DisagreementRecord {
+  readonly agent_cids: readonly string[];
+  readonly topic: string;
+  readonly concept_id: string;
+  readonly resolution: { readonly winner: string; readonly reason: string };
+  readonly hlc: string;
+}
+
 export interface SurfaceState {
   readonly surface_id: string;
   readonly session_id: string;
@@ -91,6 +100,8 @@ export interface SurfaceState {
   readonly narration: readonly NarrationSegment[];
   readonly focus: SurfaceFocus | null;
   readonly presence: readonly AgentPresence[];
+  /** Multi-agent disagreements recorded on this surface (P4.1). Append-only for replay. */
+  readonly disagreements: readonly DisagreementRecord[];
   readonly version: number;
   readonly last_hlc: string | null;
 }
@@ -113,6 +124,7 @@ interface MutableSurfaceState {
   narration: NarrationSegment[];
   focus: SurfaceFocus | null;
   presence: AgentPresence[];
+  disagreements: DisagreementRecord[];
   version: number;
   last_hlc: string | null;
 }
@@ -166,6 +178,7 @@ export function foldSurfaceEvents(
         narration: [],
         focus: null,
         presence: [],
+        disagreements: [],
         version: 1,
         last_hlc: event.hlc,
       };
@@ -316,6 +329,20 @@ export function foldSurfaceEvents(
       }
       case "surface.session.closed": {
         state.status = "closed";
+        break;
+      }
+      case "surface.agent.disagreed": {
+        const resolution = payload["resolution"] as Record<string, unknown> | undefined;
+        state.disagreements.push({
+          agent_cids: (payload["agent_cids"] as string[] | undefined) ?? [],
+          topic: (payload["topic"] as string | undefined) ?? "",
+          concept_id: (payload["concept_id"] as string | undefined) ?? "",
+          resolution: {
+            winner: (resolution?.["winner"] as string | undefined) ?? "",
+            reason: (resolution?.["reason"] as string | undefined) ?? "",
+          },
+          hlc: event.hlc,
+        });
         break;
       }
       default:

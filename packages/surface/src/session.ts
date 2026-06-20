@@ -256,6 +256,8 @@ export class SurfaceSession {
       explanationPrompt: input.explanationPrompt,
       practicePrompt: input.practicePrompt,
       mastery: input.mastery,
+      // Thread surfaceId so the fiber can include it in surface.agent.disagreed (P4.1, ADR-0018 D6).
+      surfaceId,
       ...(input.assembledContextItems
         ? { assembledContextItems: input.assembledContextItems }
         : {}),

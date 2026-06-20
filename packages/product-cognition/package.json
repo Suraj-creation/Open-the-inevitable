@@ -18,6 +18,7 @@
     "@inevitable/execution": "workspace:*",
     "@inevitable/governance": "workspace:*",
     "@inevitable/kernel": "workspace:*",
+    "@inevitable/orchestration": "workspace:*",
     "@inevitable/memory": "workspace:*",
     "@inevitable/observability": "workspace:*",
     "@inevitable/protocols": "workspace:*",
