@@ -70,6 +70,12 @@ export interface ProductRuntimeDispatcherDeps {
    * Spec: spec/product/product-cognition-runtime.md §10, spec/kernel/governance-kernel.md.
    */
   readonly governance?: GovernanceEngine;
+  /**
+   * Optional capability registry (GOV-P03). When provided, the dispatching subject's active
+   * capabilities are added to the governance context so a revoked `dispatch.<agentId>` blocks the next
+   * dispatch. Structural type to avoid a kernel dependency. Spec: spec/kernel/capability-registry.md.
+   */
+  readonly capabilityRegistry?: { granted(subjectCid: string): string[] };
 }
 
 export interface ProductDispatchInput {
@@ -233,6 +239,7 @@ export class ProductRuntimeDispatcher {
   private readonly idGenerator: IdGenerator;
   private readonly agent: RuntimeAgentBinding;
   private readonly governance: GovernanceEngine | undefined;
+  private readonly capabilityRegistry: { granted(subjectCid: string): string[] } | undefined;
   private hlc: Hlc;
   private activated = false;
 
@@ -241,6 +248,7 @@ export class ProductRuntimeDispatcher {
     this.idGenerator = deps.idGenerator ?? new CryptoIdGenerator();
     this.agent = deps.agent;
     this.governance = deps.governance;
+    this.capabilityRegistry = deps.capabilityRegistry;
     this.scheduler = deps.scheduler ?? new DepthScheduler(deps.schedulerOptions);
     this.hlc = hlcInit(deps.nodeId ?? "product-runtime-dispatch");
     this.host = new CognitiveUnitHost(deps.agent.unit, deps.agent.identity, {
@@ -262,6 +270,10 @@ export class ProductRuntimeDispatcher {
         context: {
           trustLevel: input.session.learnerIdentity.trust_level,
           targetAgentId: input.targetAgentId,
+          // GOV-P03 (opt-in): the subject's active capabilities, present only when a registry is wired.
+          ...(this.capabilityRegistry
+            ? { capabilities: this.capabilityRegistry.granted(input.session.learnerIdentity.cid) }
+            : {}),
         },
         classification: input.session.capabilityEnvelope.data_classification_ceiling,
       });

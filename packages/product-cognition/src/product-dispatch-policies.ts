@@ -116,10 +116,47 @@ export const productDispatchClassificationGate: Policy = {
 };
 
 // ---------------------------------------------------------------------------
+// GOV-P03 — capability gate (dynamic grant/revoke)
+// ---------------------------------------------------------------------------
+
+/**
+ * GOV-P03: Block agent dispatch when the dispatching subject does not hold the required capability
+ * (`dispatch.<agentId>`). Opt-in by presence — it applies ONLY when the request carries a
+ * `capabilities` context (the subject's active grants, populated by a dispatcher given a
+ * `CapabilityRegistry`). With no registry wired, it is a no-op, so existing governed paths are
+ * unaffected. This is the runtime "immune system": revoking a capability blocks the next dispatch.
+ * Spec: spec/kernel/capability-registry.md.
+ */
+export const productDispatchCapabilityGate: Policy = {
+  id: "GOV-P03-DISPATCH-CAPABILITY",
+  version: "1.0.0",
+  type: "access",
+  priority: 15,
+  appliesTo(request: PolicyRequest): boolean {
+    return (
+      request.action.startsWith("dispatch.") && Array.isArray(request.context?.["capabilities"])
+    );
+  },
+  evaluate(request: PolicyRequest): PolicyOutcome {
+    const granted = (request.context?.["capabilities"] as string[] | undefined) ?? [];
+    const required = request.action; // "dispatch.<agentId>"
+    if (!granted.includes(required)) {
+      return {
+        decision: "block",
+        reason: `capability "${required}" not granted or revoked`,
+        evidence: ["GOV-P03"],
+      };
+    }
+    return { decision: "allow", reason: `capability "${required}" granted` };
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Bundled policy set
 // ---------------------------------------------------------------------------
 
 export const PRODUCT_DISPATCH_POLICIES: readonly Policy[] = [
   productDispatchTrustGate,
+  productDispatchCapabilityGate,
   productDispatchClassificationGate,
 ];

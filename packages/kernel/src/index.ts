@@ -8,6 +8,9 @@ export { IdentityService } from "./identity";
 export type { GrantEnvelopeInput, CapabilityServiceOptions } from "./capability";
 export { CapabilityService } from "./capability";
 
+export type { CapabilityGrant, CapabilityRegistryOptions } from "./capability-registry";
+export { CapabilityRegistry } from "./capability-registry";
+
 export type { RequestContextLeaseInput, ContextLeaseServiceOptions } from "./context-lease";
 export { ContextLeaseService } from "./context-lease";
 

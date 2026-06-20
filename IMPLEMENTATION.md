@@ -45,8 +45,8 @@ the workspace root (guarded dynamic import; never a substrate dependency).
 
 ## Current State
 
-**Phases 1A–1E, 2A–2D, the 2E durable-substrate milestone, and P2.1–P2.2 (live write-continuity +
-durable learner identity) are complete. `pnpm verify` is green across the whole monorepo** (21
+**Phases 1A–1E, 2A–2D, the 2E durable-substrate milestone, and all of P2 (Identity, Continuity &
+Context — P2.1 through P2.6) are complete. `pnpm verify` is green across the whole monorepo** (22
 packages/apps + 1 service: codegen, typecheck, test, lint, format).
 
 - **1A** — spec ecosystem (`spec/meta/`, `spec/indexes/`), ADRs, domain map, ownership skeleton.
@@ -145,6 +145,30 @@ packages/apps + 1 service: codegen, typecheck, test, lint, format).
   `hydrate`/`restore`); seed and `restore` are mutually exclusive (create seeds, resume restores). Proven
   in memory within one process **and** across a restart (profile loaded from disk); a fresh learner still
   starts blank. This is the substrate on-ramp to the Digital Twin (P5).
+- **P2.4 — Context-lease-bounded retrieval** — *durable knowledge made retrievable.* (DPS-005, ADR-0012.)
+  New package `@inevitable/context`: a `ContextAssembler` does VectorStore-backed semantic retrieval over
+  the learner's durable memory and assembles a bounded `WorkingMemoryContext` under the session
+  `ContextLease` — fail-closed bounds (tier `memory_layers`, `allowed_users`, `token_budget`, expiry;
+  exclusions counted). A deterministic local embedding (token-hash bag-of-words) keeps retrieval offline +
+  replay-safe. `buildDemoSession.assembleContext(query)` indexes the durable tiers, assembles, and writes
+  the admitted items into the `working` tier (distributed; session scratch, never captured/seeded); the
+  gateway calls it each ask. Boundary: it retrieves/bounds/assembles; *consuming* it in agent prompts is
+  P3 (adaptive prompt assembly).
+- **P2.5 — Intent inference** — *goal → a real intent lease.* (spec/kernel/intent-inference, ADR-0013.)
+  A governed, model-backed `IntentInferenceUnit` (`agent.intent`, deterministic fallback) interprets the
+  goal into `{interpreted_goal, scope, constraints, confidence}` and re-interprets the session intent lease
+  **in place** (stable `intent_id` = surface `session_id`), emitting `intent.received` → `intent.interpreted`.
+  Replaces the hardcoded, goal-independent lease. The gateway calls `inferIntent(goal)` best-effort (never
+  changes the untrusted-degradation path). Boundary: it interprets + binds the lease; driving
+  curriculum/retrieval from the interpreted goal/scope is a follow-up.
+- **P2.6 — Capability registry (dynamic grant/revoke)** — *the governance immune system.*
+  (spec/kernel/capability-registry, ADR-0014.) A fine-grained `CapabilityRegistry` (`@inevitable/kernel`)
+  grants/revokes individual named capabilities per subject, retained for audit. A new governance policy
+  **GOV-P03** (opt-in by presence of a `capabilities` context) blocks a dispatch whose required capability
+  (`dispatch.<agentId>`) is revoked/absent — a no-op where no registry is wired, so existing paths are
+  unaffected. `buildDemoSession` grants the learner the dispatch capabilities and threads the registry
+  through every dispatcher; revoking one blocks that agent's next dispatch (the cycle degrades gracefully).
+  In-memory (durable grants deferred). **P2 is complete.**
 
 ## Traceability Map
 
@@ -158,7 +182,7 @@ implementation even if it works locally.
 | `@inevitable/observability` | observability/cognitive-observability | trace envelope, structured logger, OTel bridge, metrics |
 | `@inevitable/events` | protocols/cognitive-event, communication/UCB | event factory, family registry, replay-safe bus, dead-letter |
 | `@inevitable/governance` | kernel/governance-kernel | policy engine, decision records, enforcement middleware |
-| `@inevitable/kernel` | kernel/\* | identity, capability envelope, context/intent leases |
+| `@inevitable/kernel` | kernel/\* (incl. capability-registry) | identity, capability envelope, **`CapabilityRegistry`** (dynamic grant/revoke, GOV-P03), context/intent leases |
 | `@inevitable/runtime` | runtime/cognitive-unit-runtime, protocols/cognitive-unit-abi | lifecycle FSM, ABI, manifest loader, unit host |
 | `@inevitable/scheduler` | kernel/cognitive-scheduler, scheduler/ | DepthScheduler: preemption, fairness, budgets, backpressure |
 | `@inevitable/memory` | protocols/memory-mutation, memory/memory-tiers | TieredMemoryStore: tiers, projections, decay, distribution |
@@ -167,11 +191,12 @@ implementation even if it works locally.
 | `@inevitable/tooling` | tooling/, developer-experience/ | schema/protocol introspection |
 | `@inevitable/execution` | execution/, replay/ | deterministic engine, cognitive fibers, execution journal |
 | `@inevitable/world-state` | world-state/world-state-graph | delta protocol, materialized graph, acyclicity, snapshots |
+| `@inevitable/context` | persistence/context-lease-bounded-retrieval (DPS-005), kernel/context-lease, memory/memory-tiers | `ContextAssembler` (VectorStore-backed, lease-bounded working-memory assembly), deterministic local embedding |
 | `@inevitable/adapters` | interop/infrastructure-adapters (ADR-0005), protocols/model-invocation, surface/multimodal-provider-abstraction, persistence/durable-cognitive-persistence (ADR-0008) | in-memory reference adapters + conformance harness; NATS/Qdrant/Neo4j/Postgres (edge-provisioned); **`FileEventTransport`** (durable JSONL event log, passes the conformance harness); Null/Gemini/Recording model runtimes (D3 seam); Null/Gemini **voice runtimes** (SRF-004, out-of-band WAV) |
-| `@inevitable/product-cognition` | product/product-cognition-runtime, agents/supervisor-agent, protocols/model-invocation, features F01–F07/F13/F14 | onboarding, path projection, manifests, governed dispatch, supervisor routing, fibered learning loop, mastery checkpoints, ModelBackedUnit (F04 layers), CurriculumUnit (goal → concept DAG, PCR §12) |
+| `@inevitable/product-cognition` | product/product-cognition-runtime, agents/supervisor-agent, protocols/model-invocation, kernel/intent-inference + capability-registry, features F01–F07/F13/F14 | onboarding, path projection, manifests, governed dispatch (GOV-P01/P02/**P03 capability gate**), supervisor routing, fibered learning loop, mastery checkpoints, ModelBackedUnit (F04 layers), CurriculumUnit (goal → concept DAG, PCR §12), **IntentInferenceUnit** (goal → intent lease) |
 | `@inevitable/surface` | surface/ (SRF-001…004), features F09/F16 | cognition blocks, surface.\* events, timeline projection, contribution runtime, fold/replay, trace capture, provider registry, SurfaceSession (+ expand), **`SurfaceChoreographer`** (narration/focus/presence choreography, ADR-0007) |
 | `@inevitable/cli` (app) | surface/, product/product-cognition-runtime, protocols/model-invocation | demo composition root: full governed substrate wired into one terminal surface (`pnpm demo`) |
-| `@inevitable/api` (app) | surface/surface-streaming-sync-protocol (SRF-005), ADR-0006/0007/0008/0009/0010/0011, product/product-cognition-runtime §12, persistence/durable-cognitive-persistence + cognitive-continuity-and-rehydration + durable-learner-identity + shared-learner-cognition | Surface Gateway: node:http SSE stream + typed command envelope, governed boundary, `gateway.*` observability, per-goal curriculum generation, `.env`/Gemini, out-of-band media route + Gemini/Null voice wiring, durable persistence + cross-process resume (`COS_PERSIST_DIR`; `ServedSurface` seam, `File{EventTransport,MediaStore}`), live rehydration (world/memory snapshots → drivable restored surface), **durable `LearnerRegistry`** (first-class learners own surfaces; resume-by-learner via `GET /api/learner/:id`; **per-learner cognition profile** seeds a returning learner's new surface with prior mastery) |
+| `@inevitable/api` (app) | surface/surface-streaming-sync-protocol (SRF-005), ADR-0006…0014, product/product-cognition-runtime §12, persistence/{durable-cognitive-persistence, cognitive-continuity-and-rehydration, durable-learner-identity, shared-learner-cognition, context-lease-bounded-retrieval}, kernel/{intent-inference, capability-registry} | Surface Gateway: node:http SSE stream + typed command envelope, governed boundary, `gateway.*` observability, per-goal curriculum generation, `.env`/Gemini, out-of-band media route + Gemini/Null voice wiring, durable persistence + cross-process resume (`COS_PERSIST_DIR`; `ServedSurface` seam, `File{EventTransport,MediaStore}`), live rehydration, **durable `LearnerRegistry`** (resume-by-learner via `GET /api/learner/:id`; per-learner cognition profile seeds prior mastery); each ask runs **intent inference** + **lease-bounded context assembly** under the **capability gate** |
 | `@inevitable/web` (app) | surface/surface-streaming-sync-protocol (SRF-005), surface/ (SRF-001), ADR-0007, F09/F16 | Vite + React **Cognitive Stage**: folds the live stream (`@inevitable/surface/client`); `useChoreographer` playback (narration/focus/presence, audio); block-renderer registry (provider-agnostic) |
 | `@inevitable/data-plane` (service) | telemetry/otel-edge, data-plane/ | OTel SDK bootstrap (edge) + bus→OTel observability sink |
 
@@ -182,13 +207,12 @@ sequencing: the substrate's cognitive path is PRODUCTION-grade, but everything w
 (durable persistence) shipped above (Phase 2E milestone)** — the floor under event sourcing, replay,
 continuity, the digital twin, and every future manifestation. Next, in dependency order:
 
-1. **P2 — Identity, Continuity & Context** *(in progress).* ✓ **P2.1 live write-continuity**,
-   ✓ **P2.2 durable learner identity + resume-by-learner**, and ✓ **P2.3 shared per-learner cognitive
-   memory** (a returning learner's new surface draws on prior mastery — the substrate on-ramp to the
-   twin) shipped above. **Next within P2:** **context-lease-bounded retrieval** (VectorStore-backed
-   working-memory assembly — make the now-present durable knowledge *retrieved on demand*); a capability
-   **registry** (dynamic grant/revoke); **intent inference** (goal → intent lease). (Auth that binds a
-   learner to a credentialed user is a separate later concern.)
+1. **P2 — Identity, Continuity & Context** ✓ **COMPLETE.** ✓ P2.1 live write-continuity, ✓ P2.2 durable
+   learner identity + resume-by-learner, ✓ P2.3 shared per-learner cognitive memory, ✓ P2.4
+   context-lease-bounded retrieval, ✓ P2.5 intent inference, ✓ P2.6 capability registry (dynamic
+   grant/revoke) — all shipped above. *Deferred within the theme (deliberate):* agent-side **consumption**
+   of the assembled context + interpreted intent in prompts (folds into P3 adaptive prompting); durable
+   capability grants; auth that binds a learner to a credentialed user.
 2. **P3 — Knowledge-graph engine, explanation depth & observability analysis (the ULI core).**
    Shape world-state into a KG (recursive prerequisite decomposition to a zero-knowledge start, layer
    indexing, cross-domain bridges); extend F04 to layers 2–6 with adaptive prompt assembly; add

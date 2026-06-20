@@ -600,3 +600,55 @@ loaded from disk). All prior tests stay green. CLAUDE.md untouched (timeless).
 (context-lease-bounded, VectorStore-backed working-memory assembly) is the next P2 increment. The profile
 a surface carries is a point-in-time snapshot taken at create; continuous cross-surface convergence and
 cross-surface consolidation/decay are deferred (naturally twin concerns).
+
+## Phase 2 — P2.4–P2.6: Context, Intent & Capabilities (P2 complete) (2026-06-20)
+
+The final three increments of P2 (Identity, Continuity & Context). Each spec-first; full `pnpm verify`
+green throughout (22 tasks, fully offline). With these, **P2 is complete**: a learner is durable
+(P2.2), their state and cognition carry across surfaces (P2.1/P2.3), their durable knowledge is
+retrievable under a lease (P2.4), their goal becomes a real intent lease (P2.5), and their capabilities
+are dynamically governable (P2.6).
+
+**P2.4 — Context-lease-bounded retrieval (DPS-005 / ADR-0012).** New package `@inevitable/context`:
+`ContextAssembler` (VectorStore-backed; the `@inevitable/contracts` adapter, `InMemoryVectorStore` by
+default) + a deterministic token-hash bag-of-words `embedText` (offline + replay-safe; model embeddings
+a future refinement). `assemble({query, lease})` ranks indexed durable-memory items by cosine and
+admits them fail-closed under the `ContextLease`: tier (`memory_layers`), user (`allowed_users`), token
+budget, expiry — reporting `excludedByLease`/`droppedForBudget`. `buildDemoSession.assembleContext(query)`
+indexes the durable tiers (semantic/procedural/reflective), assembles, and commits admitted items into
+the `working` tier (the distribution channel; working is session scratch, excluded from DPS-004 capture);
+gateway `runAsk` calls it each ask. Tests: context pkg (7) + cli integration (3). Boundary: assembles;
+agent-prompt consumption is P3.
+
+**P2.5 — Intent inference (spec/kernel/intent-inference / ADR-0013).** `IntentInferenceUnit`
+(`@inevitable/product-cognition`, `agent.intent`) — model-backed with deterministic fallback, same
+governed ABI as `CurriculumUnit`. `inferIntent(goal)` interprets → `{interpreted_goal, scope,
+constraints, confidence}` and re-interprets the session intent lease **in place** (keeps `intent_id` =
+surface `session_id` stable, so surface identity doesn't fork), emitting `intent.received` →
+`intent.interpreted` (intent family already registered). `agent.intent` added to STUDENT_AGENTS (trust≥1)
++ `ProductRuntimeAgentId`/`workTypeFor`. Gateway calls it best-effort before curriculum (untrusted
+degradation unchanged — verified by the existing gateway test still passing). Tests: unit (6) + cli
+integration (3). Boundary: interprets + binds; driving curriculum/retrieval from the interpreted
+goal/scope is a follow-up.
+
+**P2.6 — Capability registry (spec/kernel/capability-registry / ADR-0014).** `CapabilityRegistry`
+(`@inevitable/kernel`): per-subject grant/revoke/has/granted/list of individual named capabilities,
+revoked grants retained for audit; in-memory (durable grants deferred). New governance policy
+**GOV-P03-DISPATCH-CAPABILITY** — opt-in by presence of a `capabilities` context; blocks a dispatch whose
+required `dispatch.<agentId>` is revoked/absent; no-op otherwise (so existing dispatcher tests, which wire
+no registry, are unaffected). `ProductRuntimeDispatcher` gains an optional `capabilityRegistry` (structural
+type — no kernel dep) and populates `context.capabilities = registry.granted(subjectCid)`.
+`buildDemoSession` grants the learner `dispatch.<agentId>` for all agents and threads the registry through
+every dispatcher; revoking `dispatch.explanation` blocks the explanation dispatch in a live cycle (the
+cycle still produces the routing block — graceful degradation). Tests: kernel registry (6) + product
+GOV-P03 policy (3) + cli immune-system integration (3).
+
+**Design notes.** GOV-P03's opt-in-by-presence was the key to landing the capability gate without
+disrupting any existing governed path (only `buildDemoSession`-wired dispatchers carry a registry).
+Intent re-interpretation is in place (not a new lease) specifically because the surface's `session_id`
+is the lease `intent_id` — minting a new lease mid-session would fork surface identity. Both intent
+inference and context retrieval deliberately stop at "produce/bind/assemble"; consuming the interpreted
+intent + assembled context in agent prompts is adaptive prompt assembly (P3/F04 depth). Per the founder's
+doc-cadence guidance, IMPLEMENTATION.md / CHANGELOG.md / this log were refreshed once at P2 completion
+(not per sub-phase); the spec folder (DPS/ADR/kernel specs) was updated per sub-phase. CLAUDE.md
+untouched (timeless).

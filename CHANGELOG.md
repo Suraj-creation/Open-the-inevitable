@@ -9,6 +9,43 @@ paragraph or a few bullets per milestone. Implementation detail lives in the own
 
 ## [Unreleased]
 
+> **Phase 2 (Identity, Continuity & Context) is complete** — P2.1 through P2.6.
+
+### Added — Phase 2 (P2.6): Capability Registry — the governance immune system
+
+- **Capabilities can now be granted and revoked dynamically at runtime.** A fine-grained
+  `CapabilityRegistry` (`@inevitable/kernel`) tracks individual named capabilities per subject
+  (grant/revoke/has/granted/list, revoked grants retained for audit) — complementing the coarse,
+  all-or-nothing capability *envelope*. Authored **spec/kernel/capability-registry.md** + **ADR-0014**.
+- **Governance consults it on every dispatch (GOV-P03), opt-in by presence.** A new policy blocks a
+  dispatch whose required capability (`dispatch.<agentId>`) is revoked/absent — but only when the request
+  carries a `capabilities` context, so paths with no registry wired are unaffected. `buildDemoSession`
+  grants the learner the dispatch capabilities and threads the registry through every dispatcher; revoking
+  one immediately blocks that agent's next dispatch (the cycle degrades gracefully). In-memory for now
+  (durable grants deferred).
+
+### Added — Phase 2 (P2.5): Intent Inference — goal → a real intent lease
+
+- **The intent lease now reflects the learner's actual goal.** A governed, model-backed
+  `IntentInferenceUnit` (`agent.intent`, deterministic fallback) interprets the goal into
+  `{interpreted_goal, scope, constraints, confidence}` and re-interprets the session intent lease **in
+  place** (stable `intent_id` = surface `session_id`), emitting `intent.received` → `intent.interpreted`.
+  This replaces the hardcoded, goal-independent placeholder, satisfying the architecture law in substance.
+  Authored **spec/kernel/intent-inference.md** + **ADR-0013**. The gateway calls `inferIntent` best-effort
+  (never altering the untrusted-degradation path). Boundary: interprets + binds the lease; driving
+  curriculum/retrieval from the interpreted goal/scope is a follow-up.
+
+### Added — Phase 2 (P2.4): Context-Lease-Bounded Retrieval — durable knowledge made retrievable
+
+- **A learner's durable knowledge is now retrieved on demand, bounded by their context lease.** New
+  package `@inevitable/context`: a `ContextAssembler` does VectorStore-backed semantic retrieval over the
+  learner's durable memory and assembles a bounded `WorkingMemoryContext` under the session `ContextLease`
+  — fail-closed bounds (tier, user, token budget, expiry; exclusions counted). A deterministic local
+  embedding keeps retrieval offline and replay-safe. Authored **DPS-005** (`spec/persistence/`) +
+  **ADR-0012**. `buildDemoSession.assembleContext(query)` indexes the durable tiers, assembles, and writes
+  admitted items into the `working` tier (distributed; session scratch); the gateway calls it each ask.
+  Boundary: retrieves/bounds/assembles — *consuming* it in agent prompts is P3 (adaptive prompting).
+
 ### Added — Phase 2 (P2.3): Shared Per-Learner Cognitive Memory — continuity of *cognition*
 
 - **A returning learner's new surface now draws on prior mastery.** Until now each surface was

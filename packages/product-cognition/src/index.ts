@@ -29,6 +29,7 @@ export type { SupervisorRoutingDecision, SupervisorTargetAgent } from "./supervi
 export { MASTERY_CONFIDENCE_THRESHOLD, SupervisorUnit } from "./supervisor";
 export {
   PRODUCT_DISPATCH_POLICIES,
+  productDispatchCapabilityGate,
   productDispatchClassificationGate,
   productDispatchTrustGate,
 } from "./product-dispatch-policies";

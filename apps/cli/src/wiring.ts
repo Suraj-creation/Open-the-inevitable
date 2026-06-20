@@ -15,6 +15,7 @@ import {
 import type { ModelRuntime } from "@inevitable/contracts";
 import { InMemoryEventBus, createEvent, type EventBus } from "@inevitable/events";
 import { GovernanceEngine } from "@inevitable/governance";
+import { CapabilityRegistry } from "@inevitable/kernel";
 import { TieredMemoryStore, type MemoryLayer } from "@inevitable/memory";
 import {
   CurriculumUnit,
@@ -180,7 +181,25 @@ export interface DemoFixture {
    * intent agent, emitting `intent.received` then `intent.interpreted`. Spec: kernel/intent-inference.
    */
   readonly inferIntent: (goal: string) => Promise<Result<IntentLease, CosError>>;
+  /**
+   * The dynamic capability registry (GOV-P03). The learner is granted `dispatch.<agentId>` for the
+   * agents in play; revoking one blocks that agent's next dispatch (the governance immune system).
+   * Spec: spec/kernel/capability-registry.md.
+   */
+  readonly capabilities: CapabilityRegistry;
 }
+
+/** Capabilities the learner is granted at session setup (dispatch.<agentId> per ProductRuntimeAgentId). */
+const DISPATCH_CAPABILITIES = [
+  "supervisor",
+  "curriculum",
+  "explanation",
+  "practice",
+  "assessment",
+  "revision",
+  "memory",
+  "intent",
+].map((id) => `dispatch.${id}`);
 
 export interface DemoOptions {
   /** Builds the ModelRuntime for the model-backed units (recording wrapper goes here). */
@@ -333,6 +352,12 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
   };
   const session = onboarding(learner);
   const governance = new GovernanceEngine(PRODUCT_DISPATCH_POLICIES, { idGenerator });
+  // Dynamic capability registry (GOV-P03): grant the learner the dispatch capabilities up front;
+  // revoking one blocks that agent's next dispatch. Spec: spec/kernel/capability-registry.md.
+  const capabilities = new CapabilityRegistry({ clock });
+  for (const capability of DISPATCH_CAPABILITIES) {
+    capabilities.grant(session.learnerIdentity.cid, capability, "kernel");
+  }
   const model = options.modelFactory(bus, clock, idGenerator);
 
   const manifest = (id: string) => MVP_AGENT_MANIFESTS.find((m) => m.id === `agent.${id}`)!;
@@ -358,6 +383,7 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
       nodeId: `demo-${kind}`,
       agent: { identity: agentIdentity(kind, cid), unit },
       governance,
+      capabilityRegistry: capabilities,
     });
 
   const explanationDispatcher = dispatcher("explanation", "cog-exp-demo", modelUnit("explanation"));
@@ -589,6 +615,7 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     generateCurriculum,
     assembleContext,
     inferIntent,
+    capabilities,
   };
 }
 

@@ -103,6 +103,9 @@ importers:
       '@inevitable/governance':
         specifier: workspace:*
         version: link:../../packages/governance
+      '@inevitable/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
       '@inevitable/memory':
         specifier: workspace:*
         version: link:../../packages/memory
