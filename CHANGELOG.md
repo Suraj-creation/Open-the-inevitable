@@ -9,6 +9,44 @@ paragraph or a few bullets per milestone. Implementation detail lives in the own
 
 ## [Unreleased]
 
+> **Phase 3 (the ULI core) is complete** — P3.1 through P3.3.
+
+### Added — Phase 3 (P3.3): Cognitive Observability Analysis — the reasoning-quality invariant met
+
+- **The system now measures its own reasoning quality.** `CognitiveAnalysisEngine`
+  (`@inevitable/observability`, DPS-007, ADR-0017) subscribes to `mastery.checkpoint.created` and
+  `learning.loop.completed` events and produces three analysis signals: **drift detection** (sliding-window
+  confidence drop > 0.15 from baseline emits `observability.drift.detected`), **confidence calibration**
+  (five equal-width bins track whether model-reported confidence matches actual pass rates; divergence > 0.25
+  emits `observability.confidence.calibration_warning`), and **learning-outcome aggregation** (per-concept
+  attempts/pass-rate/mean-confidence emitted as `observability.learning_outcome.summary`). Three new metrics:
+  `cos.drift.estimate`, `cos.confidence.calibration_error`, `cos.learning.outcome_rate`. The `publish`
+  callback is injected at the composition root — the engine has no bus dependency (testable in isolation,
+  safe in metrics-only mode). Satisfies the §25.4 architectural invariant (*observability tracks reasoning
+  quality, drift, confidence, and learning outcomes*) and provides P6 (self-evolution) with its signal inputs.
+
+### Added — Phase 3 (P3.2): F04 Layers 2–6 + Adaptive Prompt Assembly
+
+- **Explanation depth is now universal — layers 0 through 6.** `ModelBackedUnit` output schema extended to
+  the full seven-layer F04 model (0: Intuition, 1: Visual, 2: Conceptual, 3: Mathematical, 4: Applied,
+  5: Advanced, 6: Research). **Depth is adaptive:** target layer = `max(requestedLayer, concept.naturalLayer)`
+  — the KG's concept layer annotation (P3.1) drives how deep an explanation goes automatically. **Assembled
+  context is now consumed in prompts** (closing the deferred P2.4 boundary): items from `assembleContext()`
+  thread via `SurfaceAskInput.assembledContextItems` → `FiberedLearningLoopInput` → `dispatch.content` →
+  `buildRequest` as "Prior learner knowledge" in the system prompt. Token budget scales with depth:
+  `max(1024, 512 × (targetLayer + 1))`. Practice and assessment remain at layer 0 (ADR-0016).
+
+### Added — Phase 3 (P3.1): Knowledge-Graph Engine — world-state shaped for the ULI
+
+- **World-state is now a queryable knowledge graph.** `KnowledgeGraphEngine` (`@inevitable/world-state`,
+  DPS-006, ADR-0015) wraps `WorldStateGraph` as a domain query layer — no separate store. Concept nodes
+  carry a `layer` (0–6: ConceptLayer) and a `domain`. Prerequisite edges (`prerequisite_of`) are DAG-enforced
+  by the existing graph acyclicity; bridge edges (`bridges_to`) are informational. Core API: `seedConcepts`
+  (idempotent upsert), `decompose(goalConceptId)` (topological sort to a zero-knowledge start),
+  `learnerState(userId)` (mastery + phase tracking from world-state), `nextConcept(userId, goal?)` (first
+  unmastered in topo order), `addBridge(from, to)` (cross-domain bridges). `DemoFixture.kg` pre-seeded with
+  a 4-concept ML graph that drives adaptive depth in the explanation unit.
+
 > **Phase 2 (Identity, Continuity & Context) is complete** — P2.1 through P2.6.
 
 ### Added — Phase 2 (P2.6): Capability Registry — the governance immune system

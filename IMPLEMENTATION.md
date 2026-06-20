@@ -45,9 +45,10 @@ the workspace root (guarded dynamic import; never a substrate dependency).
 
 ## Current State
 
-**Phases 1A–1E, 2A–2D, the 2E durable-substrate milestone, and all of P2 (Identity, Continuity &
-Context — P2.1 through P2.6) are complete. `pnpm verify` is green across the whole monorepo** (22
-packages/apps + 1 service: codegen, typecheck, test, lint, format).
+**Phases 1A–1E, 2A–2D, the 2E durable-substrate milestone, all of P2 (Identity, Continuity &
+Context — P2.1 through P2.6), and all of P3 (the ULI core — P3.1 through P3.3) are complete.
+`pnpm verify` is green across the whole monorepo** (22 packages/apps + 1 service: codegen,
+typecheck, test, lint, format).
 
 - **1A** — spec ecosystem (`spec/meta/`, `spec/indexes/`), ADRs, domain map, ownership skeleton.
 - **1B** — kernel / protocol / event / runtime foundational specs; ADR-0003 (tech stack).
@@ -169,6 +170,32 @@ packages/apps + 1 service: codegen, typecheck, test, lint, format).
   unaffected. `buildDemoSession` grants the learner the dispatch capabilities and threads the registry
   through every dispatcher; revoking one blocks that agent's next dispatch (the cycle degrades gracefully).
   In-memory (durable grants deferred). **P2 is complete.**
+- **P3.1 — Knowledge-graph engine** — *world-state shaped into a domain query layer for ULI.*
+  (spec/world-state/knowledge-graph-engine, DPS-006, ADR-0015.) `KnowledgeGraphEngine` wraps
+  `WorldStateGraph` as a domain query layer — not a separate store. Concept nodes use `concept:<id>`,
+  prerequisite edges are `prerequisite_of` (DAG-enforced via the graph's existing acyclicity), bridge edges
+  are `bridges_to` (informational; no acyclicity requirement). `seedConcepts` is idempotent (upsert). Core
+  API: `decompose(goalConceptId)` (topological sort to zero-knowledge start), `learnerState(userId)` (reads
+  mastery checkpoints + phase-tracking props), `nextConcept(userId, goal?)` (first unmastered in topo order),
+  `addBridge(from, to)` (cross-domain bridge). `DemoFixture.kg` pre-seeded with a 4-concept ML graph
+  (linear-algebra → perceptron, gradient-descent → neural-networks).
+- **P3.2 — Explanation depth (F04 layers 2–6) + adaptive prompt assembly** — *the seven-layer model consumed
+  in adaptive prompts.* (ADR-0016.) `ModelBackedUnit` output schema extended to all seven layers (0: Intuition,
+  1: Visual, 2: Conceptual, 3: Mathematical, 4: Applied, 5: Advanced, 6: Research). Target depth =
+  `max(requestedLayer, concept.naturalLayer)` — the KG layer annotation drives adaptive depth. Assembled
+  context (P2.4) threaded via `SurfaceAskInput.assembledContextItems` → `FiberedLearningLoopInput` →
+  `dispatch.content.assembled_context_items` → `ModelBackedUnit.buildRequest` as a "Prior learner knowledge"
+  block in the system prompt. Token budget scales: `max(1024, 512 × (targetLayer + 1))`. Practice and
+  assessment stay at layer 0. Closes the deferred P2.4/P2.5 prompt-consumption boundary.
+- **P3.3 — Cognitive observability analysis** — *drift detection, confidence calibration, learning outcomes.*
+  (spec/observability/DPS-007, ADR-0017.) `CognitiveAnalysisEngine` (`@inevitable/observability`): event-driven
+  subscriber to `mastery.checkpoint.created` and `learning.loop.completed`; emits `observability.drift.detected`
+  (sliding-window confidence drop > 0.15 from baseline), `observability.confidence.calibration_warning`
+  (|bin_center − pass_rate| > 0.25 with ≥ 5 samples), and `observability.learning_outcome.summary` (per-concept
+  attempts/pass-rate/mean-confidence). Records `cos.drift.estimate`, `cos.confidence.calibration_error`, and
+  `cos.learning.outcome_rate` metrics. `publish` callback injected at the composition root — engine has no
+  bus dependency. Satisfies the §25.4 reasoning-quality observability invariant. `DemoFixture.analysis` exposes
+  the inspection API. **P3 is complete.**
 
 ## Traceability Map
 
@@ -179,7 +206,7 @@ implementation even if it works locally.
 |---|---|---|
 | `@inevitable/shared` | kernel/cognitive-identity, replay | branded ids, Result, HLC, Clock, errors |
 | `@inevitable/protocols` | protocols/\*, events/event-taxonomy | 16 JSON Schemas, registry, ajv validator, codegen |
-| `@inevitable/observability` | observability/cognitive-observability | trace envelope, structured logger, OTel bridge, metrics |
+| `@inevitable/observability` | observability/cognitive-observability, DPS-007 | trace envelope, structured logger, OTel bridge, metrics, **`CognitiveAnalysisEngine`** (drift/calibration/outcome signals, ADR-0017) |
 | `@inevitable/events` | protocols/cognitive-event, communication/UCB | event factory, family registry, replay-safe bus, dead-letter |
 | `@inevitable/governance` | kernel/governance-kernel | policy engine, decision records, enforcement middleware |
 | `@inevitable/kernel` | kernel/\* (incl. capability-registry) | identity, capability envelope, **`CapabilityRegistry`** (dynamic grant/revoke, GOV-P03), context/intent leases |
@@ -190,10 +217,10 @@ implementation even if it works locally.
 | `@inevitable/contracts` | interop (ADR-0003) | transport/graph/vector/model/tool adapter interfaces |
 | `@inevitable/tooling` | tooling/, developer-experience/ | schema/protocol introspection |
 | `@inevitable/execution` | execution/, replay/ | deterministic engine, cognitive fibers, execution journal |
-| `@inevitable/world-state` | world-state/world-state-graph | delta protocol, materialized graph, acyclicity, snapshots |
+| `@inevitable/world-state` | world-state/world-state-graph, DPS-006 | delta protocol, materialized graph, acyclicity, snapshots, **`KnowledgeGraphEngine`** (concept seeding, prereq decomposition, learner-state queries, cross-domain bridges, ADR-0015) |
 | `@inevitable/context` | persistence/context-lease-bounded-retrieval (DPS-005), kernel/context-lease, memory/memory-tiers | `ContextAssembler` (VectorStore-backed, lease-bounded working-memory assembly), deterministic local embedding |
 | `@inevitable/adapters` | interop/infrastructure-adapters (ADR-0005), protocols/model-invocation, surface/multimodal-provider-abstraction, persistence/durable-cognitive-persistence (ADR-0008) | in-memory reference adapters + conformance harness; NATS/Qdrant/Neo4j/Postgres (edge-provisioned); **`FileEventTransport`** (durable JSONL event log, passes the conformance harness); Null/Gemini/Recording model runtimes (D3 seam); Null/Gemini **voice runtimes** (SRF-004, out-of-band WAV) |
-| `@inevitable/product-cognition` | product/product-cognition-runtime, agents/supervisor-agent, protocols/model-invocation, kernel/intent-inference + capability-registry, features F01–F07/F13/F14 | onboarding, path projection, manifests, governed dispatch (GOV-P01/P02/**P03 capability gate**), supervisor routing, fibered learning loop, mastery checkpoints, ModelBackedUnit (F04 layers), CurriculumUnit (goal → concept DAG, PCR §12), **IntentInferenceUnit** (goal → intent lease) |
+| `@inevitable/product-cognition` | product/product-cognition-runtime, agents/supervisor-agent, protocols/model-invocation, kernel/intent-inference + capability-registry, features F01–F07/F13/F14, ADR-0016 | onboarding, path projection, manifests, governed dispatch (GOV-P01/P02/**P03 capability gate**), supervisor routing, fibered learning loop, mastery checkpoints, **ModelBackedUnit (F04 all 7 layers 0–6; adaptive depth from KG; assembled context in prompts)**, CurriculumUnit (goal → concept DAG, PCR §12), **IntentInferenceUnit** (goal → intent lease) |
 | `@inevitable/surface` | surface/ (SRF-001…004), features F09/F16 | cognition blocks, surface.\* events, timeline projection, contribution runtime, fold/replay, trace capture, provider registry, SurfaceSession (+ expand), **`SurfaceChoreographer`** (narration/focus/presence choreography, ADR-0007) |
 | `@inevitable/cli` (app) | surface/, product/product-cognition-runtime, protocols/model-invocation | demo composition root: full governed substrate wired into one terminal surface (`pnpm demo`) |
 | `@inevitable/api` (app) | surface/surface-streaming-sync-protocol (SRF-005), ADR-0006…0014, product/product-cognition-runtime §12, persistence/{durable-cognitive-persistence, cognitive-continuity-and-rehydration, durable-learner-identity, shared-learner-cognition, context-lease-bounded-retrieval}, kernel/{intent-inference, capability-registry} | Surface Gateway: node:http SSE stream + typed command envelope, governed boundary, `gateway.*` observability, per-goal curriculum generation, `.env`/Gemini, out-of-band media route + Gemini/Null voice wiring, durable persistence + cross-process resume (`COS_PERSIST_DIR`; `ServedSurface` seam, `File{EventTransport,MediaStore}`), live rehydration, **durable `LearnerRegistry`** (resume-by-learner via `GET /api/learner/:id`; per-learner cognition profile seeds prior mastery); each ask runs **intent inference** + **lease-bounded context assembly** under the **capability gate** |
@@ -210,13 +237,13 @@ continuity, the digital twin, and every future manifestation. Next, in dependenc
 1. **P2 — Identity, Continuity & Context** ✓ **COMPLETE.** ✓ P2.1 live write-continuity, ✓ P2.2 durable
    learner identity + resume-by-learner, ✓ P2.3 shared per-learner cognitive memory, ✓ P2.4
    context-lease-bounded retrieval, ✓ P2.5 intent inference, ✓ P2.6 capability registry (dynamic
-   grant/revoke) — all shipped above. *Deferred within the theme (deliberate):* agent-side **consumption**
-   of the assembled context + interpreted intent in prompts (folds into P3 adaptive prompting); durable
-   capability grants; auth that binds a learner to a credentialed user.
-2. **P3 — Knowledge-graph engine, explanation depth & observability analysis (the ULI core).**
-   Shape world-state into a KG (recursive prerequisite decomposition to a zero-knowledge start, layer
-   indexing, cross-domain bridges); extend F04 to layers 2–6 with adaptive prompt assembly; add
-   observability *analysis* (drift, confidence calibration, learning-outcome signals).
+   grant/revoke) — all shipped above. *Deferred within the theme (deliberate):* durable capability grants;
+   auth that binds a learner to a credentialed user.
+2. **P3 — Knowledge-graph engine, explanation depth & observability analysis (the ULI core).** ✓ **COMPLETE.**
+   ✓ P3.1 KG engine (DPS-006, ADR-0015): `KnowledgeGraphEngine` over `WorldStateGraph`, prereq DAG,
+   learner-state queries. ✓ P3.2 F04 layers 2–6 + adaptive prompt assembly (ADR-0016): target depth from KG,
+   assembled context consumed in explanation prompts. ✓ P3.3 Cognitive observability analysis (DPS-007,
+   ADR-0017): `CognitiveAnalysisEngine` — drift detection, confidence calibration, learning-outcome signals.
 3. **P4 — Multi-agent cognition.** Real blackboard arbitration + `surface.agent.disagreed` (F07);
    wire the (built but unwired) DepthScheduler for concurrent dispatch; governed tool runtime (MCP).
 4. **P5 — Digital Twin / Personal Cognitive Companion** (consent-scoped twin-state over durable

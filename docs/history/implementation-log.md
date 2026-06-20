@@ -652,3 +652,89 @@ intent + assembled context in agent prompts is adaptive prompt assembly (P3/F04 
 doc-cadence guidance, IMPLEMENTATION.md / CHANGELOG.md / this log were refreshed once at P2 completion
 (not per sub-phase); the spec folder (DPS/ADR/kernel specs) was updated per sub-phase. CLAUDE.md
 untouched (timeless).
+
+---
+
+## Phase 3 (P3.1–P3.3) — The ULI Core: Knowledge Graph, Explanation Depth, Observability Analysis
+**Date: 2026-06-20**
+
+All three sub-phases delivered spec-first (ADR + DPS authored before code; domain-index updated per
+sub-phase). `pnpm verify` green across all 22 tasks throughout. Per doc-cadence guidance:
+IMPLEMENTATION.md / CHANGELOG.md / this log refreshed once at P3 completion; spec folder updated
+per sub-phase. Three commits on master:
+
+### P3.1 — Knowledge-Graph Engine (`commit 25442b8`)
+
+**Rationale:** World-state was a generic delta-sourced graph. The ULI requires recursive prerequisite
+decomposition to a zero-knowledge start, which demands KG semantics layered on top of it — but as a
+domain query layer, not a second store (the substrate stays singular). ADR-0015 resolves the design.
+
+**Delivered:**
+- `KnowledgeGraphEngine` (`packages/world-state/src/kg-engine.ts`): wraps `WorldStateGraph` as a
+  query layer. Concept nodes → `concept:<id>` (matching the mastery recorder's convention). Prereq
+  edges → `prerequisite_of` (DAG-enforced by graph's existing acyclicity). Bridge edges →
+  `bridges_to` (informational; no acyclicity). `seedConcepts` is idempotent. Internal `Map` is a
+  non-authoritative fast path for registry queries; the graph is the truth.
+- API: `decompose(goalConceptId)` (DFS topo sort — leaves first), `learnerState(userId)` (reads
+  mastery checkpoints + phase props from world-state), `nextConcept(userId, goal?)` (first unmastered
+  in topo order), `addBridge(from, to)` (cross-domain bridge).
+- `ConceptLayer` (0–6), `ConceptSpec`, `LearnerConceptState` exported from the package index.
+- 13 unit tests + 4 integration tests in the CLI fixture.
+- `DemoFixture.kg` pre-seeded with 4 ML concepts (linear-algebra → perceptron, gradient-descent →
+  neural-networks) that feed adaptive depth in P3.2.
+- Spec: `spec/world-state/knowledge-graph-engine.md` (DPS-006), `spec/architecture-decisions/ADR-0015`.
+
+### P3.2 — F04 Layers 2–6 + Adaptive Prompt Assembly (`commit 1c8d0bb`)
+
+**Rationale:** Explanation depth was layers 0–1 (Intuition + Visual). Layers 2–6 (Conceptual,
+Mathematical, Applied, Advanced, Research) complete the F04 seven-layer model and make the system
+a genuine Universal Learning Intelligence. ADR-0016 governs adaptive depth and assembled-context
+threading, closing the P2.4/P2.5 prompt-consumption boundary that was deferred.
+
+**Delivered:**
+- `ModelLayeredOutput` extended to optional layers 2–6. `parseModelLayeredOutput` reads all seven.
+  `LAYER_NAMES` constant maps each layer to a prompt instruction.
+- `buildRequest` reads `packet.content.layer` (requested depth) and `world.getNode("concept:<id>")`
+  `.props.layer` (natural depth); target = `max(requested, natural)`. System prompt includes layer
+  instructions up to targetLayer; token budget = `max(1024, 512 × (targetLayer + 1))`.
+- Assembled context threading: `SurfaceAskInput.assembledContextItems` → `FiberedLearningLoopInput.
+  assembledContextItems` → `handleDispatch` content injection → `packet.content.assembled_context_items`
+  → "Prior learner knowledge" block in `buildRequest` system prompt. Plain `{text, score}` objects;
+  no cross-package type deps.
+- Practice and assessment roles stay at layer 0 regardless of concept natural layer.
+- 3 new spy-model tests in `model-backed-unit.test.ts`; 2 new parse tests.
+- Spec: `spec/architecture-decisions/ADR-0016`.
+
+### P3.3 — Cognitive Observability Analysis (`commit 8c4e1f9`)
+
+**Rationale:** The §25.4 invariant ("observability tracks reasoning quality, drift, confidence,
+learning outcomes") was unmet — traces and mastery events were captured but never analyzed.
+Self-evolution (P6) needs drift and calibration signals as inputs. ADR-0017 makes the analysis
+engine a pure event-driven subscriber so it never touches the production call path.
+
+**Delivered:**
+- `CognitiveAnalysisEngine` (`packages/observability/src/cognitive-analysis.ts`): 
+  - **Drift detector**: sliding window of N confidence values (default: 20). Baseline = long-term
+    mean. Drift score = `max(0, baseline - rolling_mean)`. Emits `observability.drift.detected`
+    with severity when score > driftThreshold (default 0.15). Records `cos.drift.estimate` histogram.
+  - **Confidence calibrator**: 5 equal-width bins over [0, 1]. Per-bin: tracks pass/fail counts,
+    computes `|bin_center - pass_rate|`. Emits `observability.confidence.calibration_warning` when
+    calibration error > threshold (default 0.25) with ≥ minSamples (default 5). Records
+    `cos.confidence.calibration_error` histogram.
+  - **Learning-outcome tracker**: per-concept `{attempts, passes, confidenceSum}`. Emits
+    `observability.learning_outcome.summary` after each `learning.loop.completed`. Records
+    `cos.learning.outcome_rate` counter.
+  - `publish` callback injected at composition root (wiring.ts wraps `createEvent + bus.publish`).
+    Engine has zero dependency on `@inevitable/events` — operates in metrics-only mode without a
+    callback (safe for isolated tests).
+  - Inspection API: `driftStats()`, `calibrationStats()`, `outcomeStats(conceptId)`.
+  - `DemoFixture.analysis` exposes the engine; bus subscribes to `mastery.checkpoint.created` and
+    `learning.loop.completed` at session build time.
+  - 15 unit tests covering all three analysis dimensions + edge cases (missing fields, unknown events,
+    below-threshold no-emit, well-calibrated bin no-emit).
+- Spec: `spec/observability/DPS-007-observability-analysis.md`, `spec/architecture-decisions/ADR-0017`.
+
+**P3 closes the ULI core.** The system now has a traversable knowledge graph with recursive
+prerequisite decomposition, universal explanation depth (all seven F04 layers), adaptive prompts that
+consume real context and KG-derived depth, and a cognitive quality signal loop (drift + calibration +
+outcomes) that P6 self-evolution will read as its inputs.
