@@ -83,6 +83,9 @@ agent, or infrastructure work:
 - `spec/spec-folder-ecosystem.md` — the spec domain map.
 - Owning domain specs: `spec/kernel/`, `spec/protocols/`, `spec/events/`, `spec/runtime/`,
   `spec/memory/`, `spec/world-state/`, `spec/execution/`, `spec/orchestration/`, `spec/scheduler/`.
+- `spec/architecture/` — two companion docs: `Tech-Stack.md` (how the COS *runs* — technology doctrine,
+  the eight-contract adapter seam, per-domain *why/where*) and `Cognitive-Architecture.md` (how it
+  *thinks/learns/researches/improves* — the five emergent cognitive layers; ADR-0023).
 
 **Product law** (subordinate to architecture law) — read before any product, feature, pedagogy,
 agent-behaviour, memory-policy, UX, or mode/persona work, in this order:

@@ -47,6 +47,7 @@ function boot(): Promise<string> {
 
 interface StateShape {
   blocks: { block_type: string }[];
+  frames: { status: string }[];
   narration: { voice: { content_ref: string } | null }[];
   timeline: unknown;
 }
@@ -77,7 +78,8 @@ describe("Durable persistence — cross-process surface recovery (P1)", () => {
 
     const before = await getState(base1, id);
     expect(before).not.toBeNull();
-    expect(before!.blocks.some((b) => b.block_type === "explanation")).toBe(true);
+    // The product surface teaches via a composed Cognitive Frame (UCS, ADR-0030).
+    expect(before!.frames.some((f) => f.status === "composed")).toBe(true);
 
     // A narration segment with out-of-band audio (NullVoiceRuntime → deterministic silent WAV).
     const voiced = before!.narration.find((seg) => seg.voice !== null);

@@ -24,6 +24,12 @@ const STUDENT_AGENTS = new Set([
   "revision",
   // Interpreting a learner's own goal is fundamental to asking and low-risk (DPS intent inference).
   "intent",
+  // UCS (ADR-0030): presenting the learner's OWN session — distilling the MCCR, planning/sequencing
+  // their frames, and deciding an illustration — is core student-facing cognition, not a privileged
+  // shared-state mutation (unlike curriculum, which reshapes the global KG). Trust ≥ 1.
+  "composer",
+  "frameplanner",
+  "imageplanner",
 ]);
 
 /** Agents that require elevated trust (trust_level >= 3). */

@@ -32,6 +32,15 @@ export function geminiApiKey(): string | undefined {
 }
 
 /**
+ * True when the gateway must reject startup if no real model is available.
+ * Set `COS_STRICT_MODEL=1` (or run with `NODE_ENV=production`) to enable.
+ * Prevents NullModelRuntime from silently masquerading as cognition in deployed environments.
+ */
+export function strictModel(): boolean {
+  return process.env["COS_STRICT_MODEL"] === "1" || process.env["NODE_ENV"] === "production";
+}
+
+/**
  * The durable-persistence directory, if set. When present, the gateway durably persists every
  * surface's event log and media to disk and can reconstruct a surface after a restart (ADR-0008).
  * Absent ⇒ in-memory only (the default; tests stay hermetic). Spec: persistence/durable-cognitive-persistence.

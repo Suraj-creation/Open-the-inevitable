@@ -52,9 +52,9 @@ const OUTPUT_CONTRACT_SCHEMA: Record<string, unknown> = {
   type: "object",
   required: ["interpreted_goal"],
   properties: {
-    interpreted_goal: { type: "string" },
-    scope: { type: "array", items: { type: "string" } },
-    constraints: { type: "array", items: { type: "string" } },
+    interpreted_goal: { type: "string", maxLength: 200 },
+    scope: { type: "array", items: { type: "string", maxLength: 60 }, maxItems: 5 },
+    constraints: { type: "array", items: { type: "string", maxLength: 100 }, maxItems: 3 },
     confidence: { type: "number", minimum: 0, maximum: 1 },
   },
 };
@@ -103,10 +103,16 @@ export function parseIntentOutput(text: string): InferredIntent {
     throw intentError("E_MODEL_OUTPUT_MALFORMED", "intent output missing interpreted_goal");
   }
   const scope = Array.isArray(obj.scope)
-    ? obj.scope.filter((s): s is string => typeof s === "string")
+    ? obj.scope
+        .filter((s): s is string => typeof s === "string")
+        .map((s) => s.slice(0, 80))
+        .slice(0, 5)
     : [];
   const constraints = Array.isArray(obj.constraints)
-    ? obj.constraints.filter((s): s is string => typeof s === "string")
+    ? obj.constraints
+        .filter((s): s is string => typeof s === "string")
+        .map((s) => s.slice(0, 120))
+        .slice(0, 3)
     : [];
   const confidence = typeof obj.confidence === "number" ? clamp01(obj.confidence) : 0.7;
   return { interpretedGoal, scope, constraints, confidence };
@@ -167,6 +173,13 @@ export class IntentInferenceUnit implements CognitiveUnit {
           invocation_key: request.invocation_key,
         });
       }
+      if (result.finishReason === "max_tokens") {
+        throw intentError(
+          "E_MODEL_OUTPUT_TRUNCATED",
+          "intent output cut off at token budget; JSON is incomplete",
+          { invocation_key: request.invocation_key, text_length: result.text.length },
+        );
+      }
       const intent = parseIntentOutput(result.text);
       return {
         packets: [
@@ -199,11 +212,12 @@ export class IntentInferenceUnit implements CognitiveUnit {
       "Respond with JSON only (no markdown fences) matching:",
       `{"interpreted_goal":"<clear restatement>","scope":["domain-or-topic"],"constraints":["constraint"],"confidence":0.0}`,
       "confidence is your 0..1 certainty that this interpretation matches the learner's actual intent.",
+      "Keep scope to at most 5 items. Keep the entire response under 200 tokens.",
     ].join("\n");
     return {
       prompt: `Goal: ${goal}`,
       system,
-      maxTokens: 512,
+      maxTokens: 2048,
       responseSchema: OUTPUT_CONTRACT_SCHEMA,
       invocation_key: `${this.manifest.id}:${packet.packet_id}:intent`,
     };

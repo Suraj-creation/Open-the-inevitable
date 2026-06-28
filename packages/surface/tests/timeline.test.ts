@@ -247,3 +247,86 @@ describe("SurfaceTimelineBuilder.refresh() — the timeline is alive", () => {
     expect((completedEvents[0]?.payload as Record<string, unknown>)?.["mastered_count"]).toBe(6);
   });
 });
+
+describe("SurfaceTimelineBuilder — cognitive graph (S1.1)", () => {
+  test("projects the prerequisite spine as typed edges + depth layers + null confidence", async () => {
+    const { builder } = makeFixture("timeline-graph");
+    const result = await builder.build(neuralNetworksInput());
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw result.error;
+    const tl = result.value;
+
+    // Prerequisite spine surfaces as typed edges (from prereq → dependent).
+    expect(tl.edges).toContainEqual({
+      from: "backpropagation",
+      to: "neural-networks",
+      edge_type: "prerequisite_of",
+    });
+    expect(tl.edges.filter((e) => e.edge_type === "prerequisite_of")).toHaveLength(5);
+
+    // Layer falls back to prerequisite-chain depth when the concept node carries no KG layer.
+    const layer = new Map(tl.nodes.map((n) => [n.concept_id, n.layer]));
+    expect(layer.get("linear-algebra")).toBe(0);
+    expect(layer.get("gradient-descent")).toBe(1);
+    expect(layer.get("neural-networks")).toBe(3);
+
+    // No mastery yet → confidence is null; default entry point is "beginner".
+    expect(tl.nodes.every((n) => n.confidence === null)).toBe(true);
+    expect(tl.entry_point).toBe("beginner");
+  });
+
+  test("captures mastery confidence on the node after a checkpoint", async () => {
+    const { builder, world } = makeFixture("timeline-graph-conf");
+    await builder.build(neuralNetworksInput());
+    recordMastery(world, "user-nn", "linear-algebra", 0.82);
+    const refreshed = await builder.refresh();
+    expect(refreshed.ok).toBe(true);
+    if (!refreshed.ok) throw refreshed.error;
+    const la = refreshed.value.nodes.find((n) => n.concept_id === "linear-algebra");
+    expect(la?.confidence).toBe(0.82);
+    expect(la?.status).toBe("mastered");
+  });
+
+  test("surfaces informational typed edges seeded in world-state", async () => {
+    const { builder, world } = makeFixture("timeline-graph-edges");
+    await builder.build(neuralNetworksInput());
+    world.apply({
+      kind: "upsert_edge",
+      id: "edge:applies_to:neural-networks:perceptron",
+      from: "concept:neural-networks",
+      to: "concept:perceptron",
+      type: "applies_to",
+      props: {},
+    });
+    const refreshed = await builder.refresh("edge-added");
+    expect(refreshed.ok).toBe(true);
+    if (!refreshed.ok) throw refreshed.error;
+    expect(refreshed.value.edges).toContainEqual({
+      from: "neural-networks",
+      to: "perceptron",
+      edge_type: "applies_to",
+    });
+  });
+
+  test("reproject changes entry point, bumps version, emits graph.entrypoint.changed; idempotent", async () => {
+    const { builder, bus } = makeFixture("timeline-graph-entry");
+    const built = await builder.build(neuralNetworksInput());
+    expect(built.ok).toBe(true);
+    if (!built.ok) throw built.error;
+    const v0 = built.value.version;
+
+    const re = await builder.reproject("research");
+    expect(re.ok).toBe(true);
+    if (!re.ok) throw re.error;
+    expect(re.value.entry_point).toBe("research");
+    expect(re.value.version).toBe(v0 + 1);
+    expect(bus.replay({ subject: "surface.graph.entrypoint.changed" })).toHaveLength(1);
+
+    // Re-projecting to the same entry point is a silent no-op.
+    const again = await builder.reproject("research");
+    expect(again.ok).toBe(true);
+    if (!again.ok) throw again.error;
+    expect(again.value.version).toBe(v0 + 1);
+    expect(bus.replay({ subject: "surface.graph.entrypoint.changed" })).toHaveLength(1);
+  });
+});

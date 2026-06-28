@@ -11,6 +11,7 @@ import { useSurfaceStream } from "./useSurfaceStream";
 export function App() {
   const [surfaceId, setSurfaceId] = useState<string | null>(null);
   const [goal, setGoal] = useState("Teach me Neural Networks");
+  const [mode, setMode] = useState<"student" | "educator">("student");
   const [entering, setEntering] = useState(false);
   const stream = useSurfaceStream(surfaceId);
 
@@ -19,7 +20,7 @@ export function App() {
     if (!trimmed) return;
     setEntering(true);
     try {
-      const id = await enterSurface(trimmed);
+      const id = await enterSurface(trimmed, mode);
       setSurfaceId(id);
       // Enter the environment, then begin thinking — effects arrive live over the stream.
       await sendCommand(id, { type: "ask", goal: trimmed });
@@ -53,6 +54,19 @@ export function App() {
               placeholder="What do you want to understand?"
               aria-label="What do you want to understand?"
             />
+            <div className="enter-mode-row" role="group" aria-label="Surface mode">
+              {(["student", "educator"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`enter-mode-chip${mode === m ? " enter-mode-chip--active" : ""}`}
+                  onClick={() => setMode(m)}
+                  aria-pressed={mode === m}
+                >
+                  {m === "student" ? "Student" : "Educator"}
+                </button>
+              ))}
+            </div>
             <button type="submit" className="enter-go" disabled={entering}>
               {entering ? "Entering…" : "Enter"}
               <span className="enter-go-icon" aria-hidden>
@@ -73,6 +87,13 @@ export function App() {
       onAsk={(g) => void sendCommand(surfaceId, { type: "ask", goal: g })}
       onExpand={(blockId, layer) =>
         void sendCommand(surfaceId, { type: "expand", block_id: blockId, layer })
+      }
+      onInteract={(kind, targetId) =>
+        void sendCommand(surfaceId, {
+          type: "interact",
+          kind,
+          ...(targetId ? { target_id: targetId } : {}),
+        })
       }
     />
   );

@@ -29,11 +29,28 @@ export interface DeterministicLearningLoopDeps {
   readonly nodeId?: string;
 }
 
+/** The five dimensions of depth verification (F14, S2.2). */
+export type DepthTestKind = "explanation" | "application" | "connection" | "teaching" | "edge_case";
+
+/** One outcome from the five-test depth gate. */
+export interface DepthTestResult {
+  readonly kind: DepthTestKind;
+  readonly passed: boolean;
+  readonly confidence: number;
+  /** Short evidence note (what the learner did/said that produced this result). */
+  readonly evidence: string;
+}
+
 export interface LearningLoopMasteryInput {
   readonly assessorCid: string;
   readonly passed: boolean;
   readonly confidence: number;
   readonly evidence: readonly Record<string, unknown>[];
+  /**
+   * Five-test depth verification results (S2.2, F14). When present, the gate overrides `passed`:
+   * the checkpoint is recorded as passed iff ≥ 4/5 tests pass.
+   */
+  readonly depthTests?: readonly DepthTestResult[];
 }
 
 export interface DeterministicLearningLoopInput {

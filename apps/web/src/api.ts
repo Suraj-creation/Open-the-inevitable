@@ -5,21 +5,31 @@
 const BASE = "/api";
 
 /** Enter a new cognitive environment; returns the surface id to stream from. */
-export async function enterSurface(goal: string): Promise<string> {
+export async function enterSurface(goal: string, mode?: string): Promise<string> {
   const res = await fetch(`${BASE}/surface`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ goal }),
+    body: JSON.stringify({ goal, ...(mode ? { mode } : {}) }),
   });
   const json = (await res.json()) as { ok: boolean; surface_id?: string };
   if (!json.ok || !json.surface_id) throw new Error("gateway: failed to enter surface");
   return json.surface_id;
 }
 
+export type SurfaceInteractionKind =
+  | "interrupt"
+  | "jump"
+  | "branch"
+  | "challenge"
+  | "request_depth"
+  | "request_simplify"
+  | "request_example";
+
 export type SurfaceCommand =
   | { type: "ask"; goal?: string }
   | { type: "expand"; block_id: string; layer: number }
-  | { type: "close"; reason?: string };
+  | { type: "close"; reason?: string }
+  | { type: "interact"; kind: SurfaceInteractionKind; target_id?: string; note?: string };
 
 /** Send a typed command into a living surface. Effects return over the stream, not here. */
 export async function sendCommand(surfaceId: string, command: SurfaceCommand): Promise<void> {

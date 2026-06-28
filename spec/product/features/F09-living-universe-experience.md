@@ -84,6 +84,49 @@ the clearest representation, not because animation is impressive.
 The surface is cinematic only when the cognition demands it. Otherwise it is quiet, navigable, and
 deep.
 
+### 4.1 Immersive composition law (S-UCS)
+
+The production manifestation of this experience is a **single living cognitive environment**, not a
+dashboard of panels. The composition law:
+
+- **The whiteboard is the product.** The Cognitive Stage (the focused, evolving cognition) occupies
+  essentially the entire viewport. Every other affordance is an **overlay, floating HUD, contextual
+  panel, or transient launcher** layered over it — never a permanent region competing for space.
+- **The board holds only the MCCR (UCS, ADR-0030).** The board is the learner's *visual memory*, not a
+  document: it carries only the **Minimal Complete Cognitive Representation** — distilled anchors (core
+  concept, definition, key formula, diagram, relationship, mental model, table, key example, memory
+  cue, image) that deserve persistent attention. The teaching prose moves entirely to the voice. The
+  board exists to *preserve* understanding; the narration *constructs* it.
+- **Progressive Cognitive Frames, never an infinite document.** Learning unfolds as a sequence of
+  **Cognitive Frames** (SRF-001 §4.7), each a viewport-complete cognitive state that fits one screen
+  with **no manual scrolling**; when a frame's narration completes, the surface transitions naturally to
+  the next. A planner prepares likely next frames ahead as discardable speculation (governed, budgeted,
+  re-planned on every learner signal — never static pre-generation, ADR-0030).
+- **The Agent Observatory.** The agent ensemble is inspectable on demand, not permanently docked: a
+  compact **AGENTS** control with live status pills (generating/routing/waiting/synthesizing/
+  evaluating) opens an overlay exposing, per cognitive unit, its responsibility, current task,
+  contribution, reasoning summary, decision trace, confidence, latency, routing, dependencies, and
+  completion state. Nothing important about the reasoning stays hidden (powered by
+  `surface.agent.reasoning.summary` + `surface.agent.work.timing`, SRF-002).
+- **Synchronized narration.** Voice and board are one experience: as the narration script plays, the
+  *specific MCCR element* being discussed becomes visually active — a subtle marker moving under the
+  current idea like a teacher's pointer, not a paragraph highlight (a client projection over segment
+  audio `currentTime` mapping `anchor_ref` → `focus.target_type:"element"`, ADR-0007/0030).
+- **Streaming cognition.** A frame *materializes* progressively — layout reserved, then anchors, then
+  streaming text, then images — so the learner watches understanding form rather than reading a finished
+  document (`surface.block.delta` / `surface.frame.element.delta`, SRF-002/SRF-005).
+- **Inline multimodal.** Illustrations appear *beside the concept they explain* (a render projection
+  over `image`/`video`/`simulation` blocks sharing `concept_ids`), never as detached assets.
+- **Navigation as launchers.** PATH/timeline and the concept graph remain fully accessible via a
+  floating launcher → dismissible overlay, preserving capability without consuming the board.
+- **Transport as a HUD.** Playback/interaction controls float and auto-hide on idle, returning on
+  intent — full function, maximal immersion.
+
+Every capability already implemented (Timeline/Scene, PATH, orchestration, assessment, practice, image,
+concept, routing, TTS, transport, interrupt, Go-Deeper/Simpler/Example/Challenge/Ask, observability,
+agent contribution tracking) is **preserved** — this law governs *presentation*, not feature set. The
+UI is a projection (F16, SRF-001); this composition adds no canonical state.
+
 ## 5. ULI / UALRCI Hooks
 
 - ULI's seven layers are represented as progressively richer surfaces, not as labels.

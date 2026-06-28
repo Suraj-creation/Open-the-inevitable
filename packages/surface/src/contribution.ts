@@ -165,6 +165,82 @@ export class AgentContributionRuntime {
     return ok(block);
   }
 
+  /**
+   * Stream a contribution as it is revealed (S-UCS, ADR-0028): pre-create the block (so deltas and
+   * the whole block share a block_id), emit ordered `surface.block.delta` chunks — optionally paced so
+   * the learner watches cognition unfold — then the canonical whole block. The fold accumulates deltas
+   * into a transient buffer that the whole block clears, so the settled state is identical to a plain
+   * `contribute()` (replay equivalence). `paceMs > 0` adds a live delay between chunks (live only).
+   */
+  async contributeStreaming(
+    contribution: AgentContribution,
+    chunks: readonly string[],
+    paceMs = 0,
+  ): Promise<Result<CognitionBlock, CosError>> {
+    this.hlc = hlcTick(this.hlc, this.clock);
+    const blockResult = createCognitionBlock(
+      {
+        surface_id: contribution.surface_id,
+        block_type: contribution.block_type,
+        title: contribution.title,
+        content: contribution.content,
+        concept_ids: contribution.concept_ids,
+        classification: contribution.classification ?? "internal",
+        confidence: contribution.confidence ?? 1,
+        provenance: {
+          packet_id: contribution.packet_id ?? null,
+          producer_cid: contribution.agent_cid,
+          agent_id: contribution.agent_id,
+          world_state_nodes: contribution.world_state_nodes ?? [],
+          memory_mutation_id: contribution.memory_mutation_id ?? null,
+          trace_id: contribution.trace_id ?? null,
+          reason: contribution.reason,
+        },
+      },
+      { clock: this.clock, idGenerator: this.idGenerator, hlc: hlcToString(this.hlc) },
+    );
+    if (!blockResult.ok) return blockResult;
+    const block = blockResult.value;
+
+    if (!this.joined.has(contribution.agent_cid)) {
+      this.joined.add(contribution.agent_cid);
+      await this.emit("surface.agent.joined", contribution.agent_cid, {
+        surface_id: contribution.surface_id,
+        agent_cid: contribution.agent_cid,
+        agent_id: contribution.agent_id,
+      });
+    }
+
+    // Progressive reveal: ordered deltas before the canonical whole block (ADR-0028).
+    let seq = 0;
+    for (const chunk of chunks) {
+      if (!chunk) continue;
+      await this.emit("surface.block.delta", contribution.agent_cid, {
+        surface_id: contribution.surface_id,
+        block_id: block.block_id,
+        seq,
+        text_delta: chunk,
+      });
+      seq += 1;
+      if (paceMs > 0) await new Promise((resolve) => setTimeout(resolve, paceMs));
+    }
+
+    await this.emit("surface.block.generated", contribution.agent_cid, {
+      surface_id: contribution.surface_id,
+      block,
+    });
+
+    await this.emit("surface.agent.contributed", contribution.agent_cid, {
+      surface_id: contribution.surface_id,
+      agent_cid: contribution.agent_cid,
+      agent_id: contribution.agent_id,
+      block_ids: [block.block_id],
+      packet_id: contribution.packet_id ?? null,
+    });
+
+    return ok(block);
+  }
+
   private async emit(
     eventType: string,
     producerCid: string,

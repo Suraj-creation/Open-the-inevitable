@@ -79,11 +79,12 @@ Naming grammar: `family.subdomain.action` (e.g. `memory.mutation.committed`). Al
 | `evolution.*` | proposal.created, experiment.started, shadow_result.recorded, rollout.completed, rollback.completed | evolution | permanent | replayable |
 | `kernel.*` | syscall.invoked, trap.raised, panic | kernel | 1y-archive (audit) | recorded-observation |
 | `system.*` | resource.threshold, deadlock.detected, topology.changed | kernel | 90d | non-replayable |
-| `surface.*` | created, block.generated, block.modified, timeline.updated, agent.contributed, memory.attached, reasoning.recorded, narration.segment, focus.changed, presence.updated, session.closed | surface | permanent | replayable |
+| `surface.*` | created, block.generated, block.modified, timeline.updated, graph.expanded, graph.entrypoint.changed, agent.contributed, agent.disagreed, proposal.proposed, synthesis.recorded, interaction.received, interaction.applied, memory.attached, reasoning.recorded, narration.segment, focus.changed, presence.updated, session.closed; **research subfamilies:** `surface.research.frontier.detected`, `surface.research.frontier.surfaced`, `surface.research.frontier.deferred`; **motivation subfamily:** `surface.motivation.surfaced`; **evaluation subfamily:** `surface.evaluation.recorded`; **mode subfamily:** `surface.mode.set`; **scene subfamily:** `surface.scene.block.placed` (observational, D5: layout non-canonical); **projection subfamily:** `surface.projection.switched`; **streaming subfamily (S-UCS):** `surface.block.delta` (transient buffer, cleared by `block.generated`; ADR-0028); **agent-observability subfamily (S-UCS):** `surface.agent.reasoning.summary`, `surface.agent.work.timing` (ADR-0029) | surface | permanent | replayable |
 | `model.*` | output.recorded, invocation.failed | runtime | permanent | replayable |
 | `gateway.*` | stream.attached, stream.detached | gateway | 1d | recorded-observation |
 | `tool.*` | invoked, completed | tool-runtime | 90d | replayable |
 | `twin.*` | created, branched, exported, terminated | twin-registry | 1y-archive | replayable |
+| `evaluation.*` | reasoning.completed, benchmark.run | evaluation | permanent | replayable |
 
 Per-family schema registration — canonical JSON Schema for a family entry:
 

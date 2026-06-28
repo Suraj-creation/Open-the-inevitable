@@ -9,6 +9,118 @@ paragraph or a few bullets per milestone. Implementation detail lives in the own
 
 ## [Unreleased]
 
+> **The board became the learner's visual memory, not the system's notepad.** The Universal Cognitive
+> Surface now holds only the **Minimal Complete Cognitive Representation (MCCR)** — distilled anchors —
+> while a **separate narration script** carries the teaching, and learning unfolds as viewport-complete
+> **Cognitive Frames** instead of a scrolling document.
+
+### Added — UCS: Cognitive Frames, MCCR & the narration-script split (ADR-0030)
+
+- **The duplication is gone.** Previously the explanation agent's prose was both shown on the board and
+  spoken verbatim; now a single Surface Composer distills the *shown* (MCCR: concept, definition, formula,
+  diagram, relationship, mental model, table, example, memory cue, image) from the *spoken* (a paced
+  narration script), in one coherent reasoning pass. The board preserves understanding; the voice
+  constructs it; as narration plays, the exact MCCR element being discussed lights up.
+- **Cognitive Frames** are a new top-level, folded, replay-equivalent primitive (`SurfaceState.frames`),
+  with diagram/table rendered as deterministic client projections (no provider) and the active frame chosen
+  by the choreographer cursor (a client projection — never logged). Eight additive `surface.frame.*` events
+  (schema 1.4.0) carry planning, composition, the narration script, the image decision, element streaming,
+  and governed look-ahead (speculative frames recorded but never surfaced until promoted).
+- **One concept now unfolds as a sequence of frames, not one slide.** A **Frame Planner** decomposes each
+  concept into a progressive series of viewport-complete frames (intuition → definition → worked example →
+  connection); the composer distills each one's MCCR + narration, steered by the frame's teaching angle.
+  Practice and the mastery checkpoint become their own anchored frames, so the whole lesson is frame-based.
+  On screen, frames **cross-dissolve** as the narration crosses each boundary, and the next frame is buffered
+  off-stage (its illustration pre-warmed) so the transition is instant. The Agent Observatory gained a
+  **Composition panel** exposing the frame queue, each frame's anchors, its density against the one-screen
+  budget, and the image decision behind it.
+- **Scope shipped:** Phase 0 (spec law: ADR-0030 + SRF-001/002/004/005 + F16/F09), Phase 1 (vertical slice:
+  substrate + `SurfaceComposerUnit` + session frame path with element-targeted narration + frontend
+  `FrameStage`/`MccrElement`/`HighlightLayer`, no-scroll, deterministic replay, graceful legacy fallback),
+  the **gateway cutover** (the live product renders the frame path), and **Phase 2** (`FramePlannerUnit` +
+  multi-frame decomposition + practice/assessment frames + `FrameDeck` transitions/N+1 buffering + Observatory
+  Composition panel). `pnpm verify` green (25/25). Phase 3 (governed look-ahead) and Phase 4 (image agent) are
+  the active frontier.
+
+> **The Universal Cognitive Surface (S-UCS) became an immersive, observable, agent-driven environment** —
+> the whiteboard is now the product; everything else is overlay, HUD, and launcher.
+
+### Added — S-UCS: immersive Cognitive Surface redesign (presentation + observability plumbing)
+
+- **The interface stopped being a dashboard and became one living cognitive environment.** The 3‑pane
+  grid (timeline rail · stage · agents rail · footer) gave way to a **fullscreen Cognitive Stage** with
+  everything else floating over it (F09 §4.1): a slim top bar with an **Agents** control + live status
+  pills, a floating **Path launcher → center overlay** (concept graph + timeline/scene toggle), the
+  **Agent Observatory** as an on-demand right-docked inspector, and a floating **transport HUD** that
+  auto-hides on idle. Every prior capability is preserved — re-homed, not removed.
+- **Agent reasoning and work became observable** (ADR-0029): model-backed units' `ReasoningTrace` is now
+  published (`reasoning.completed`) and surfaced as `surface.agent.reasoning.summary` (task
+  interpretation, strategy, decision, self-critique, confidence, determinism) + `surface.agent.work.timing`
+  (real latency, upserted by `work_id`), folded into `SurfaceState` and rendered in the Observatory.
+- **Narration became synchronized** (ADR-0007 client projection): the spoken sentence streams as living
+  text with **word-level highlighting** driven by audio `currentTime`, in a teleprompter HUD.
+- **Cognition now streams** (ADR-0028): the explanation reveals progressively via `surface.block.delta`
+  events folded into a **transient buffer cleared by the whole block** — so `fold([delta…, generated]) ≡
+  fold([generated])` and replay equivalence (SRF-005 §6.2) holds; deterministic/replay runs emit the whole
+  block unchanged. Illustrations now render **inline beside the concept** (shared `concept_ids`), and the
+  workflow chips became a compact, clickable **cognitive-pipeline** activity timeline.
+- Spec-first throughout: **ADR-0028**, **ADR-0029**, **SRF-001/002/004/005 → schema 1.3.0**,
+  cognitive-unit-ABI, **F09 §4.1**, event taxonomy. `pnpm verify` green across all packages + apps;
+  the gateway replay-equivalence test passes with live streaming enabled.
+
+> **Phase S1 (Cognitive Surface maturity) is complete** — the surface became a living cognitive environment.
+
+### Added — Phase S1: Cognitive Surface maturity — static viewer → living environment
+
+- **The Cognitive Surface now shows understanding *unfolding*, not a pre-determined playback.** A
+  forward-looking review found the surface was a deterministic, single-agent-per-phase playback over a flat
+  prerequisite spine. Phase S1 (roadmap `spec/implementation-roadmaps/cognitive-surface-maturity.md`) closed
+  the gap in four increments, each a **composition over the existing substrate** — no new infrastructure, the
+  `foldSurfaceEvents` fold stays pure, record→replay stays byte-identical (D3), governance preserved.
+  - **The concept timeline became an interactive cognitive graph** (S1.1, **SRF-003**): `KnowledgeGraphEngine`
+    gained typed edges (`depends_on`/`applies_to`/`research_adjacent`/`frontier_of`/`bridges_to`); the timeline
+    projection now carries typed `edges[]`, per-node depth `layer` + mastery `confidence`, and a learner-
+    selectable `entry_point` — still a pure projection of world-state.
+  - **The learning loop became a visible multi-agent ensemble** (S1.2, **ADR-0025**): explanation + a genuine
+    challenger/Socratic peer run concurrently, each publishing a proposal to the live `ProposalBlackboard`; an
+    arbiter records a synthesis and surfaces disagreement; parallel agent presence is shown. The primary
+    explanation stays authoritative, so determinism is unchanged. New `surface.proposal.*`/`synthesis.recorded`.
+  - **The learner can now act on cognition** (S1.3, **ADR-0024**): a Surface Interaction Protocol adds
+    `interrupt | jump | branch | challenge | request_depth | request_simplify | request_example` as governed,
+    recorded, replayable `surface.interaction.*` events; interrupt is cooperative cancellation at fiber yield
+    points; reshaping intents re-frame the active cognition through the same governed path.
+  - **The experience layer makes it all visible** (S1.4, `apps/web`): an interactive `TimelineGraph`
+    (depth-layered, typed edges, clickable jump/branch, entry-point selector, confidence rings + focus glow)
+    replaced the flat spine; an `EnsemblePanel` surfaces live proposals + confidence + disagreement + synthesis;
+    in-stream controls (interrupt / go-deeper / simpler / example / challenge) wire to the gateway.
+  - Spec-first throughout: **ADR-0024**, **ADR-0025**, **SRF-002 → schema 1.2.0**, **SRF-003**, event taxonomy.
+    `pnpm verify` green across all 24 packages + apps at every sub-phase boundary (codegen + typecheck + test +
+    lint + format).
+
+> **Phase S3 (Research mode + ensemble expansion) is complete** — research-readiness gating, ResearchUnit, motivation block, research/motivation renderers.
+
+### Added — Phase S3: Research mode + ensemble expansion
+
+- **The surface now detects when a learner has earned the right to explore the research frontier.** A
+  confidence-gated readiness check (ADR-0026, S3.0–S3.1) fires post-mastery: depth gate passed + ≥ 0.75
+  confidence triggers `surface.research.frontier.detected` (D3, before any agent dispatch); below threshold
+  but mastery passed emits `surface.research.frontier.deferred`. The fold (`ResearchFrontierRecord`,
+  `motivation_surfaced`) is a pure extension of `foldSurfaceEvents`; every event is replayable and the
+  fold is unchanged.
+- **`ResearchUnit`** (S3.2, F10): a model-backed `CognitiveUnit` (same ABI as `CurriculumUnit`) that maps
+  the active research frontier, an open gap, a seed hypothesis, and a source note for a mastered concept.
+  Deterministic offline fallback (D2); model path recorded for replay (D3). Wired as `researchDispatcher`
+  in `apps/cli/src/wiring.ts`; emits `surface.research.frontier.surfaced` and contributes a `research` block
+  with a `frontier_of` KG edge seeded into world-state.
+- **Motivation pass** (S3.3): a motivation check fires when mastery passed but confidence is in `[0.6, 0.75)`.
+  Emits `surface.motivation.surfaced` (D3 before any dispatch); optional `motivationDispatcher` contributes
+  a `motivation` block to sustain learner momentum.
+- **UI** (S3.4): `research` and `motivation` block renderers added to `apps/web/src/blocks.tsx` (frontier/
+  gap/hypothesis/source-note structured rows; motivation message with confidence display). `frontier_of` and
+  `research_adjacent` edges now render in the research accent colour (`--agent-research`) distinct from the
+  generic dashed group. `"research"/"motivation"/"reflection"/"debate"` added to `ProductRuntimeAgentId` and
+  the MVP agent catalog. `pnpm verify` green across all packages after every sub-phase.
+
 > **Phase 7.1 (Platform SDK + MCP Manifestation) is complete** — §2 substrate-independence law proven.
 
 ### Added — Phase 7 (P7.1): Platform SDK + MCP manifestation — §2 law proven

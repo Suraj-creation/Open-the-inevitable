@@ -46,4 +46,6 @@ export interface OnboardingSession {
   readonly learnerNodeId: string;
   readonly intentNodeId: string;
   readonly seedMemoryMutationId: string;
+  /** The product mode this session operates under (S4.3). Absent ⇒ "student". */
+  readonly mode?: ProductMode;
 }

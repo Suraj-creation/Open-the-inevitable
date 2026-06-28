@@ -19,5 +19,10 @@ export type {
 export type { WorldStateGraphOptions, ApplyOptions, ChangeListener } from "./graph";
 export { WorldStateGraph } from "./graph";
 
-export type { ConceptLayer, ConceptSpec, LearnerConceptState } from "./kg-engine";
+export type {
+  ConceptLayer,
+  ConceptSpec,
+  KnowledgeEdgeType,
+  LearnerConceptState,
+} from "./kg-engine";
 export { KnowledgeGraphEngine } from "./kg-engine";

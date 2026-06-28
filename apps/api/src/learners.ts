@@ -7,8 +7,9 @@
  * Routing minting through the kernel `IdentityService` as the single issuing authority is a future
  * refinement (ADR-0010); for now identity is minted via the shared id authority (`newCid`).
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { randomBytes } from "node:crypto";
 import type { LearnerCognitionSeed } from "@inevitable/cli";
 import {
   CryptoIdGenerator,
@@ -30,6 +31,8 @@ export interface LearnerRecord {
   readonly trustLevel: number;
   readonly displayName: string | null;
   readonly createdAt: string;
+  /** Auto-generated bearer token. Sent to the caller on mint; required for learner-scoped routes. */
+  readonly apiKey: string;
   surfaces: LearnerSurfaceRef[];
 }
 
@@ -43,6 +46,8 @@ const EMPTY_COGNITION: LearnerCognitionSeed = {
 
 export class LearnerRegistry {
   private readonly mem = new Map<string, LearnerRecord>();
+  /** API key → learnerId index (rebuilt from disk on boot). */
+  private readonly byApiKey = new Map<string, string>();
   /** Per-learner cross-surface cognition profile (DPS-004); in memory always, on disk when persisting. */
   private readonly cognition = new Map<string, LearnerCognitionSeed>();
   private readonly idGenerator: IdGenerator;
@@ -53,6 +58,25 @@ export class LearnerRegistry {
     this.persistDir = deps.persistDir;
     this.idGenerator = deps.idGenerator ?? new CryptoIdGenerator();
     this.clock = deps.clock ?? new SystemClock();
+    if (this.persistDir) this.rebuildApiKeyIndex();
+  }
+
+  private rebuildApiKeyIndex(): void {
+    const dir = this.dir();
+    if (!existsSync(dir)) return;
+    try {
+      for (const file of readdirSync(dir)) {
+        if (!file.endsWith(".json") || file.endsWith(".cognition.json")) continue;
+        try {
+          const r = JSON.parse(readFileSync(join(dir, file), "utf8")) as LearnerRecord;
+          if (r.apiKey) this.byApiKey.set(r.apiKey, r.learnerId);
+        } catch {
+          // skip corrupt
+        }
+      }
+    } catch {
+      // unreadable dir
+    }
   }
 
   private dir(): string {
@@ -81,15 +105,18 @@ export class LearnerRegistry {
       const existing = this.get(input.learnerId);
       if (existing) return existing;
     }
+    const apiKey = randomBytes(24).toString("hex");
     const record: LearnerRecord = {
       learnerId: `lnr-${this.idGenerator.hex(12)}`,
       cid: newCid(this.idGenerator),
       trustLevel: input.trustLevel ?? DEFAULT_TRUST,
       displayName: input.displayName ?? null,
       createdAt: this.now(),
+      apiKey,
       surfaces: [],
     };
     this.mem.set(record.learnerId, record);
+    this.byApiKey.set(apiKey, record.learnerId);
     this.persist(record);
     return record;
   }
@@ -101,12 +128,20 @@ export class LearnerRegistry {
       try {
         const record = JSON.parse(readFileSync(this.file(learnerId), "utf8")) as LearnerRecord;
         this.mem.set(learnerId, record);
+        if (record.apiKey) this.byApiKey.set(record.apiKey, record.learnerId);
         return record;
       } catch {
         return undefined; // corrupt record
       }
     }
     return undefined;
+  }
+
+  /** Resolve a learner by API key (the bearer credential). Returns undefined for unknown keys. */
+  getByApiKey(apiKey: string): LearnerRecord | undefined {
+    const learnerId = this.byApiKey.get(apiKey);
+    if (!learnerId) return undefined;
+    return this.get(learnerId);
   }
 
   /** Associate a surface with its owning learner (idempotent). */

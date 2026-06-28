@@ -6,6 +6,7 @@
  * Lifecycle: propose → evaluate (shadow tests) → approve (governance gate) → rollout | rollback.
  * Shadow testing is deterministic (no model calls). Governance injected as a callback.
  */
+import type { ModelRuntime } from "@inevitable/contracts";
 import { CosError, CryptoIdGenerator, SystemClock } from "@inevitable/shared";
 import type { Clock, IdGenerator } from "@inevitable/shared";
 
@@ -69,6 +70,25 @@ export interface EvolutionEngineOptions {
   readonly idGenerator?: IdGenerator;
   readonly publish?: (eventType: string, payload: Record<string, unknown>) => void;
   readonly guard?: (action: string) => boolean;
+  /**
+   * Optional cognitive quality gate for `approve()` (S4.2, ADR-0027). When present, called with
+   * the evaluated proposal; if it returns false the approval is blocked with E_EVALUATION_GATE.
+   * Use to enforce a minimum cognitive evaluation pass rate before evolution rolls out.
+   */
+  readonly evaluationGuard?: (proposal: EvolutionProposal) => boolean;
+  /** Model runtime for model-backed shadow evaluation. Absent ⇒ arithmetic fallback only. */
+  readonly model?: ModelRuntime;
+  /**
+   * Called synchronously after `rollout()` completes (P5.2). The composition root uses this to apply
+   * the proposal's configuration to the live-config slice so all subsequent model-backed units pick up
+   * the change without a restart. Spec: DPS-010 §5.
+   */
+  readonly onRollout?: (proposal: EvolutionProposal) => void;
+  /**
+   * Called synchronously after `rollback()` completes (P5.2). The composition root uses this to
+   * revert the proposal's configuration from the live-config slice. Spec: DPS-010 §5.
+   */
+  readonly onRollback?: (proposal: EvolutionProposal) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,10 +114,10 @@ function freeze(r: MutableProposalRecord): EvolutionProposal {
 }
 
 // ---------------------------------------------------------------------------
-// Shadow evaluator — deterministic projection (ADR-0021 D2)
+// Shadow evaluator — arithmetic fallback (ADR-0021 D2) + model-backed path (D3)
 // ---------------------------------------------------------------------------
 
-function simulateLearner(
+function simulateLearnerArithmetic(
   seed: SyntheticLearnerSeed,
   kind: ProposalKind,
   config: ProposalConfiguration,
@@ -129,6 +149,56 @@ function simulateLearner(
   };
 }
 
+async function simulateLearnerWithModel(
+  model: ModelRuntime,
+  seed: SyntheticLearnerSeed,
+  kind: ProposalKind,
+  config: ProposalConfiguration,
+  description: string,
+): Promise<ShadowResult | null> {
+  const masteryJson = JSON.stringify(seed.masteryMap, null, 0).slice(0, 800);
+  const prompt = [
+    "You are a cognitive learning outcome predictor. Estimate the effect of an evolution proposal",
+    "on a synthetic learner. Respond ONLY with valid JSON — no markdown, no prose.",
+    "",
+    `Schema: { "simulatedPassRate": number (0-1), "confidenceDelta": number (-1 to 1), "driftDetected": boolean }`,
+    "",
+    `Proposal kind: ${kind}`,
+    `Description: ${description}`,
+    `Configuration: ${JSON.stringify(config)}`,
+    `Learner mastery: ${masteryJson}`,
+    `Goals: ${seed.goals.slice(0, 3).join(", ")}`,
+  ].join("\n");
+
+  try {
+    const result = await model.generate({
+      system: "Return only valid JSON. No markdown. No explanation.",
+      prompt,
+      maxTokens: 128,
+    });
+
+    const raw = result.text
+      .trim()
+      .replace(/^```json\s*/i, "")
+      .replace(/```\s*$/, "");
+    const parsed = JSON.parse(raw) as {
+      simulatedPassRate: number;
+      confidenceDelta: number;
+      driftDetected: boolean;
+    };
+    if (typeof parsed.simulatedPassRate !== "number") return null;
+
+    return {
+      learnerId: seed.learnerId,
+      simulatedPassRate: Math.max(0, Math.min(1, parsed.simulatedPassRate)),
+      confidenceDelta: Math.max(-1, Math.min(1, Number(parsed.confidenceDelta) || 0)),
+      driftDetected: Boolean(parsed.driftDetected),
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // EvolutionEngine
 // ---------------------------------------------------------------------------
@@ -138,6 +208,10 @@ export class EvolutionEngine {
   private readonly idGenerator: IdGenerator;
   private readonly publish: (eventType: string, payload: Record<string, unknown>) => void;
   private readonly guard: (action: string) => boolean;
+  private readonly evaluationGuard: ((proposal: EvolutionProposal) => boolean) | undefined;
+  private readonly model: ModelRuntime | undefined;
+  private readonly onRollout: ((proposal: EvolutionProposal) => void) | undefined;
+  private readonly onRollback: ((proposal: EvolutionProposal) => void) | undefined;
   private readonly proposals = new Map<string, MutableProposalRecord>();
 
   constructor(opts: EvolutionEngineOptions = {}) {
@@ -145,6 +219,10 @@ export class EvolutionEngine {
     this.idGenerator = opts.idGenerator ?? new CryptoIdGenerator();
     this.publish = opts.publish ?? (() => undefined);
     this.guard = opts.guard ?? (() => true);
+    this.evaluationGuard = opts.evaluationGuard;
+    this.model = opts.model;
+    this.onRollout = opts.onRollout;
+    this.onRollback = opts.onRollback;
   }
 
   propose(params: ProposeParams): EvolutionProposal {
@@ -168,7 +246,7 @@ export class EvolutionEngine {
     return freeze(record);
   }
 
-  evaluate(proposalId: string): EvaluationResult {
+  async evaluate(proposalId: string): Promise<EvaluationResult> {
     const record = this.requireProposal(proposalId);
     if (record.status !== "proposed") {
       throw new CosError(
@@ -180,9 +258,21 @@ export class EvolutionEngine {
       proposal_id: proposalId,
       synthetic_learner_count: record.syntheticLearners.length,
     });
-    const shadowResults = record.syntheticLearners.map((seed) =>
-      simulateLearner(seed, record.kind, record.configuration),
-    );
+    const shadowResults: ShadowResult[] = [];
+    for (const seed of record.syntheticLearners) {
+      const modelResult = this.model
+        ? await simulateLearnerWithModel(
+            this.model,
+            seed,
+            record.kind,
+            record.configuration,
+            record.description,
+          )
+        : null;
+      shadowResults.push(
+        modelResult ?? simulateLearnerArithmetic(seed, record.kind, record.configuration),
+      );
+    }
     for (const result of shadowResults) {
       this.publish("evolution.shadow_result.recorded", {
         proposal_id: proposalId,
@@ -229,6 +319,12 @@ export class EvolutionEngine {
         `evolution approve blocked by governance for proposal "${proposalId}"`,
       );
     }
+    if (this.evaluationGuard && !this.evaluationGuard(freeze(record))) {
+      throw new CosError(
+        "E_EVALUATION_GATE",
+        `evolution approve blocked by cognitive evaluation gate for proposal "${proposalId}"`,
+      );
+    }
     record.status = "approved";
     record.approvedAt = this.clock.nowMs();
     return freeze(record);
@@ -248,7 +344,9 @@ export class EvolutionEngine {
       proposal_id: proposalId,
       status: "rolled_out",
     });
-    return freeze(record);
+    const frozen = freeze(record);
+    this.onRollout?.(frozen);
+    return frozen;
   }
 
   rollback(proposalId: string): EvolutionProposal {
@@ -268,7 +366,9 @@ export class EvolutionEngine {
       proposal_id: proposalId,
       status: "rolled_back",
     });
-    return freeze(record);
+    const frozen = freeze(record);
+    this.onRollback?.(frozen);
+    return frozen;
   }
 
   get(proposalId: string): EvolutionProposal | undefined {

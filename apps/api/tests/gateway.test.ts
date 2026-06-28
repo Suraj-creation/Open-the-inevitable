@@ -109,9 +109,12 @@ describe("Surface Gateway — the visible-surface boundary (SRF-005)", () => {
     const { state: serverState } = (await stateRes.json()) as { state: unknown };
     expect(clientState).toEqual(serverState);
 
-    // Cognition is visible: agent blocks were produced and the timeline exists.
+    // Cognition is visible: a Cognitive Frame was composed (UCS, ADR-0030) and the timeline exists.
     expect(clientState?.timeline).not.toBeNull();
-    expect(clientState?.blocks.some((b) => b.block_type === "explanation")).toBe(true);
+    expect(clientState?.frames.some((f) => f.status === "composed")).toBe(true);
+    // The teaching is a SEPARATE narration script, not prose on the board.
+    expect(clientState?.narration_scripts.length ?? 0).toBeGreaterThan(0);
+    expect(clientState?.blocks.some((b) => b.block_type === "explanation")).toBe(false);
   });
 
   test("SSE frames arrive in strict bus-sequence order", async () => {
@@ -149,31 +152,20 @@ describe("Surface Gateway — the visible-surface boundary (SRF-005)", () => {
   test("a live command's effects arrive as ordinary frames after the snapshot", async () => {
     const base = await start();
     const id = await createSurface(base, { goal: "Teach me Neural Networks", seed: "test-live" });
-    await command(base, id, { type: "ask", goal: "Teach me Neural Networks" });
 
-    // Find an explanation block to expand.
-    const stateRes = await fetch(`${base}/api/surface/${id}/state`);
-    const { state } = (await stateRes.json()) as {
-      state: { blocks: { block_id: string; block_type: string }[] };
-    };
-    const explanation = state.blocks.find((b) => b.block_type === "explanation");
-    expect(explanation).toBeDefined();
-
-    // Open the stream, then issue expand; the expansion frame must arrive live.
+    // Open the stream first, then issue the ask; its effects — including the composed Cognitive
+    // Frame and its narration — must arrive live as ordinary frames after the snapshot (UCS).
     const streamPromise = readStream(`${base}/api/surface/${id}/stream`, {}, (events) =>
-      events.some((e) => e.event_type === "surface.explanation.expanded"),
+      events.some((e) => e.event_type === "surface.frame.composed"),
     );
-    // Give the snapshot a tick, then mutate.
+    // Give the snapshot a tick, then drive cognition.
     await new Promise((r) => setTimeout(r, 25));
-    const expanded = await command(base, id, {
-      type: "expand",
-      block_id: explanation!.block_id,
-      layer: 1,
-    });
-    expect(expanded.status).toBe(200);
+    const asked = await command(base, id, { type: "ask", goal: "Teach me Neural Networks" });
+    expect(asked.status).toBe(200);
 
     const events = await streamPromise;
-    expect(events.some((e) => e.event_type === "surface.explanation.expanded")).toBe(true);
+    expect(events.some((e) => e.event_type === "surface.frame.composed")).toBe(true);
+    expect(events.some((e) => e.event_type === "surface.narration.script.produced")).toBe(true);
   });
 
   test("the boundary is governed: an untrusted session produces zero agent blocks", async () => {

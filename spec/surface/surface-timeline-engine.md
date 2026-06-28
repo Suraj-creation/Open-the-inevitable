@@ -16,7 +16,8 @@ spec:
   downstream_dependencies:
     - packages/surface
   related_protocols: [cognitive-event-protocol]
-  related_events: [surface.timeline.generated, surface.timeline.updated, surface.timeline.completed]
+  related_events:
+    [surface.timeline.generated, surface.timeline.updated, surface.timeline.completed, surface.graph.expanded, surface.graph.entrypoint.changed]
   related_runtime_systems: [world-state-graph, universal-cognitive-bus]
   related_governance_systems: [governance-kernel]
   related_observability_systems: [cognitive-observability]
@@ -76,8 +77,10 @@ interface SurfaceTimelineNode {
   readonly node_id: string;               // world-state node id ("concept:<id>")
   readonly title: string;
   readonly order: number;                  // deterministic topological order
-  readonly prerequisites: readonly string[];   // concept ids
+  readonly prerequisites: readonly string[];   // concept ids (prerequisite_of edges, kept for compat)
+  readonly layer: number;                  // 0–6 natural depth (KG concept layer)
   readonly status: TimelineNodeStatus;
+  readonly confidence: number | null;      // mastery confidence (0..1) when a checkpoint exists
   readonly milestone: boolean;             // terminal nodes & convergence points
   readonly mastery_target: { readonly min_confidence: number };  // default 0.6 (supervisor threshold)
 }
@@ -88,16 +91,41 @@ type TimelineNodeStatus =
   | "in_progress"   // explanation/practice phase props present for the learner
   | "mastered";     // passing mastery checkpoint with confidence ≥ target
 
+// The timeline is a cognitive multi-graph, not a single prerequisite chain (S1.1, ADR-0015).
+type TimelineEdgeType =
+  | "prerequisite_of"  // must learn `from` before `to` (acyclic; the spine)
+  | "depends_on"       // structural dependency (acyclic)
+  | "applies_to"       // concept → application/use (informational)
+  | "research_adjacent"// concept → research frontier neighbour (informational)
+  | "frontier_of";     // marks an open/edge-of-knowledge node (informational)
+
+interface SurfaceTimelineEdge {
+  readonly from: string;                   // concept_id
+  readonly to: string;                     // concept_id
+  readonly edge_type: TimelineEdgeType;
+}
+
+type TimelineEntryPoint = "beginner" | "intermediate" | "advanced" | "research";
+
 interface TimelineProjection {
   readonly timeline_id: string;
   readonly surface_id: string;
   readonly goal: string;
   readonly path_node_id: string;          // world-state learning_path node
   readonly nodes: readonly SurfaceTimelineNode[];  // topological order
+  readonly edges: readonly SurfaceTimelineEdge[];  // typed cognitive-graph edges
+  readonly entry_point: TimelineEntryPoint;        // re-projection parameter (default "beginner")
   readonly completed: boolean;            // all nodes mastered
   readonly version: number;               // increments per re-projection
 }
 ```
+
+The `edges[]` are derived from the world-state graph's typed edges (`KnowledgeGraphEngine`); only
+`prerequisite_of`/`depends_on` participate in topological ordering and locking. `applies_to`,
+`research_adjacent`, and `frontier_of` are **informational** (no acyclicity constraint) and surface as
+distinct links — they let the learner branch into applications and the research frontier (F02/F03/F10).
+The graph remains a **pure projection of world-state**; adding edges is a world-state mutation re-read
+on `refresh()`, emitting `surface.graph.expanded`.
 
 **TimelineMutation** is not a type — it is the act of re-projection after a world-state
 change, observable as `surface.timeline.updated` (with `reason`).
@@ -120,7 +148,16 @@ interface SurfaceTimelineInput {
 }
 build(input): Result<TimelineProjection, CosError>
 refresh(): Result<TimelineProjection, CosError>  // re-project from current world-state
+reproject(entry_point): Result<TimelineProjection, CosError>  // re-project at a different entry layer
 ```
+
+**Entry points (S1.1).** A learner may begin from any node: `reproject(entry_point)` re-projects the
+same graph emphasizing a starting layer — `beginner`→layer 0, `intermediate`→layer 2, `advanced`→layer 4,
+`research`→layer 6 — by adjusting which nodes are surfaced as `available` entry candidates (nodes at or
+below the entry layer whose prerequisites are met). Entry point is a **projection parameter**, never new
+canonical state; a change emits `surface.graph.entrypoint.changed`. Status derivation is unchanged —
+entry point only affects which available nodes are highlighted as suggested starting points, never
+mastery truth.
 
 Status derivation rules (deterministic, in precedence order per node):
 
@@ -183,6 +220,9 @@ update carries a human-readable `reason`.
 
 ## 12. Evolution Strategy
 
+- **Cognitive multi-graph (S1.1, ADR-0015/0025):** typed edges (`depends_on`, `applies_to`,
+  `research_adjacent`, `frontier_of`) and entry points (`reproject`) ship in Phase S1; the projection
+  stays pure and the linear `nodes[]` order is retained for backward compatibility.
 - **Open Mode foldback (F02):** side-quest decompositions merge into or fork from the active
   timeline.
 - **Parallel rails:** independent prerequisite branches rendered as parallel tracks.

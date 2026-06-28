@@ -53,6 +53,8 @@ export interface ContextAssemblerDeps {
   readonly vectors: VectorStore;
   readonly collection?: string;
   readonly dim?: number;
+  /** Real semantic embed fn (e.g. Gemini text-embeddings). Absent ⇒ local FNV-1a fallback. */
+  readonly embedFn?: (text: string) => Promise<number[]>;
 }
 
 export interface AssembleInput {
@@ -75,12 +77,25 @@ export class ContextAssembler {
   private readonly vectors: VectorStore;
   private readonly collection: string;
   private readonly dim: number;
+  private readonly embedFn: ((text: string) => Promise<number[]>) | undefined;
   private readonly items = new Map<string, RetrievableMemoryItem>();
 
   constructor(deps: ContextAssemblerDeps) {
     this.vectors = deps.vectors;
     this.collection = deps.collection ?? "context";
     this.dim = deps.dim ?? DEFAULT_EMBED_DIM;
+    this.embedFn = deps.embedFn;
+  }
+
+  private async embed(text: string): Promise<number[]> {
+    if (this.embedFn) {
+      try {
+        return await this.embedFn(text);
+      } catch {
+        // Fall back to local heuristic on model failure.
+      }
+    }
+    return embedText(text, this.dim);
   }
 
   /** Index (or re-index) eligible memory items. Idempotent by id; items without text are skipped. */
@@ -88,7 +103,7 @@ export class ContextAssembler {
     for (const item of items) {
       if (!item.text || !item.text.trim()) continue;
       this.items.set(item.id, item);
-      await this.vectors.upsert(this.collection, item.id, embedText(item.text, this.dim));
+      await this.vectors.upsert(this.collection, item.id, await this.embed(item.text));
     }
   }
 
@@ -126,7 +141,7 @@ export class ContextAssembler {
     // Rank every indexed item by similarity (search returns id+score; we hold the payloads).
     const ranked = await this.vectors.search(
       this.collection,
-      embedText(query, this.dim),
+      await this.embed(query),
       this.items.size,
     );
 

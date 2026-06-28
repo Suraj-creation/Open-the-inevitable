@@ -1,0 +1,468 @@
+/**
+ * FramePlannerUnit — the Frame Planner agent (UCS, ADR-0030; Phase 2).
+ *
+ * Decomposes one concept into a SEQUENCE of progressive Cognitive Frames — each a viewport-complete
+ * cognitive *state* that teaches one slice (intuition → definition → worked example → connection)
+ * and transitions to the next. The planner only decides the *shape* of the lesson: per-frame title,
+ * teaching angle (`sub_focus`), layout archetype, and which MCCR slots the frame will fill. The
+ * Surface Composer then distills each frame's actual MCCR + narration (one composer call per frame).
+ *
+ * Implements the same `CognitiveUnit` ABI as `SurfaceComposerUnit`/`ModelBackedUnit`, so the
+ * governance gate, scheduler admission, OTel span, and D3 recording all apply unchanged. Model-backed
+ * with a deterministic single-frame fallback so offline/seeded runs still yield a real, deterministic
+ * plan (reproducing the Phase 1 single-frame behaviour).
+ *
+ * Spec: spec/surface/cognitive-surface-runtime.md §4.7; SRF-002 §4 (`surface.frame.planned`); ADR-0030.
+ */
+import type {
+  ModelGenerationRequest,
+  ModelGenerationResult,
+  ModelRuntime,
+} from "@inevitable/contracts";
+import type {
+  AgentManifest,
+  CognitionPacket,
+  ContextLease,
+  ReasoningTrace,
+  UnitDescriptor,
+  UnitLifecycleState,
+} from "@inevitable/protocols";
+import { SCHEMA_IDS } from "@inevitable/protocols";
+import type {
+  CognitiveHealth,
+  CognitionFrame,
+  CognitiveUnit,
+  Emissions,
+} from "@inevitable/runtime";
+import { CosError, CryptoIdGenerator, newPacketId, type IdGenerator } from "@inevitable/shared";
+
+const SPEC_REF = "protocols/model-invocation-protocol";
+
+// ---------------------------------------------------------------------------
+// Output contract (plain shapes — the surface session turns these into surface.frame.planned events)
+// ---------------------------------------------------------------------------
+
+/** The MCCR slots a frame may reserve in its layout (image is decided by the composer's image_plan). */
+export const PLANNABLE_SLOTS = [
+  "core_concept",
+  "definition",
+  "key_formula",
+  "diagram",
+  "relationship",
+  "mental_model",
+  "table",
+  "key_example",
+  "memory_cue",
+] as const;
+
+export type PlannableSlot = (typeof PLANNABLE_SLOTS)[number];
+
+export const FRAME_ARCHETYPES = [
+  "concept-first",
+  "image-led",
+  "compare",
+  "formal",
+  "example-led",
+] as const;
+
+export type FrameArchetype = (typeof FRAME_ARCHETYPES)[number];
+
+export const PLANNER_FRAME_INTENTS = [
+  "introduce",
+  "build",
+  "illustrate",
+  "connect",
+  "deepen",
+  "summarize",
+] as const;
+
+export type PlannerFrameIntent = (typeof PLANNER_FRAME_INTENTS)[number];
+
+/** One planned Cognitive Frame: its title, teaching angle, layout archetype, and reserved slots. */
+export interface PlannerFrameEntry {
+  readonly title: string;
+  /** The slice of the concept this frame teaches — threaded into the composer so frames differ. */
+  readonly sub_focus: string;
+  readonly archetype: FrameArchetype;
+  readonly slots: readonly PlannableSlot[];
+  readonly intent: PlannerFrameIntent;
+}
+
+export interface FramePlan {
+  readonly frames: readonly PlannerFrameEntry[];
+  readonly pacing: { readonly strategy: string; readonly notes: string };
+}
+
+export interface FramePlannerUnitDeps {
+  readonly manifest: AgentManifest;
+  readonly model: ModelRuntime;
+  readonly timeoutMs?: number;
+  readonly idGenerator?: IdGenerator;
+  /** Live depth bias (P5.2): >0 favors more, deeper frames; <0 favors a tighter, shorter sequence. */
+  readonly getDepthBias?: () => number;
+  /** Hard cap on frames per concept (density / no-overwhelm). Default 5. */
+  readonly maxFrames?: number;
+}
+
+const DEFAULT_MAX_FRAMES = 5;
+const DEFAULT_SLOTS: readonly PlannableSlot[] = ["core_concept", "definition"];
+
+const VALID_SLOTS: ReadonlySet<string> = new Set(PLANNABLE_SLOTS);
+const VALID_ARCHETYPES: ReadonlySet<string> = new Set(FRAME_ARCHETYPES);
+const VALID_INTENTS: ReadonlySet<string> = new Set(PLANNER_FRAME_INTENTS);
+
+const OUTPUT_CONTRACT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  required: ["frames"],
+  properties: {
+    frames: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["title"],
+        properties: {
+          title: { type: "string" },
+          sub_focus: { type: "string" },
+          archetype: { type: "string" },
+          slots: { type: "array", items: { type: "string" } },
+          intent: { type: "string" },
+        },
+      },
+    },
+    pacing: {
+      type: "object",
+      properties: { strategy: { type: "string" }, notes: { type: "string" } },
+    },
+  },
+};
+
+function plannerError(code: string, message: string, details?: Record<string, unknown>): CosError {
+  return new CosError(code, message, { specRef: SPEC_REF, details });
+}
+
+function conceptTitleOf(packet: CognitionPacket): string {
+  const content = (packet.content ?? {}) as Record<string, unknown>;
+  for (const key of ["concept_title", "title", "goal"]) {
+    const v = content[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return packet.intent ?? "the concept";
+}
+
+function goalOf(packet: CognitionPacket): string {
+  const content = (packet.content ?? {}) as Record<string, unknown>;
+  if (typeof content["goal"] === "string" && content["goal"].trim()) return content["goal"];
+  return packet.intent ?? conceptTitleOf(packet);
+}
+
+/** Normalize + validate a raw slot list into ordered, deduped plannable slots (core_concept first). */
+function sanitizeSlots(raw: unknown): PlannableSlot[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const seen = new Set<string>();
+  const slots: PlannableSlot[] = [];
+  for (const entry of list) {
+    if (typeof entry !== "string") continue;
+    const slot = entry.trim();
+    if (VALID_SLOTS.has(slot) && !seen.has(slot)) {
+      seen.add(slot);
+      slots.push(slot as PlannableSlot);
+    }
+  }
+  if (slots.length === 0) return [...DEFAULT_SLOTS];
+  // The board must always anchor on a core concept (appended so the model's intended order is kept).
+  if (!seen.has("core_concept")) slots.push("core_concept");
+  return slots;
+}
+
+/** A deterministic, honest single-frame plan (the fallback) — reproduces Phase 1 behaviour. */
+export function deterministicPlan(packet: CognitionPacket): FramePlan {
+  return {
+    frames: [
+      {
+        title: conceptTitleOf(packet),
+        sub_focus: "",
+        archetype: "concept-first",
+        slots: [...DEFAULT_SLOTS],
+        intent: "introduce",
+      },
+    ],
+    pacing: { strategy: "single-frame", notes: "deterministic fallback — one frame per concept" },
+  };
+}
+
+/** Parse + validate the frame-plan output contract. Throws E_MODEL_OUTPUT_MALFORMED on bad shape. */
+export function parseFramePlan(text: string, conceptTitle: string, maxFrames: number): FramePlan {
+  const trimmed = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+  let raw: unknown;
+  try {
+    raw = JSON.parse(trimmed);
+  } catch {
+    throw plannerError("E_MODEL_OUTPUT_MALFORMED", "frame plan is not valid JSON", {
+      sample: trimmed.slice(0, 200),
+    });
+  }
+  const obj = raw as { frames?: unknown; pacing?: unknown };
+  const framesRaw = Array.isArray(obj.frames) ? obj.frames : [];
+  const frames: PlannerFrameEntry[] = [];
+  for (const entry of framesRaw) {
+    const e = (entry ?? {}) as Record<string, unknown>;
+    const title = typeof e["title"] === "string" ? e["title"].trim() : "";
+    if (!title) continue;
+    const archetypeRaw = typeof e["archetype"] === "string" ? e["archetype"].trim() : "";
+    const archetype = (
+      VALID_ARCHETYPES.has(archetypeRaw) ? archetypeRaw : "concept-first"
+    ) as FrameArchetype;
+    const intentRaw = typeof e["intent"] === "string" ? e["intent"].trim() : "";
+    const intent = (VALID_INTENTS.has(intentRaw) ? intentRaw : "build") as PlannerFrameIntent;
+    frames.push({
+      title,
+      sub_focus: typeof e["sub_focus"] === "string" ? e["sub_focus"].trim() : "",
+      archetype,
+      slots: sanitizeSlots(e["slots"]),
+      intent,
+    });
+    if (frames.length >= maxFrames) break;
+  }
+  if (frames.length === 0) {
+    // A plan with no parseable frames is invalid — let the unit degrade to its deterministic
+    // single-frame fallback (observable via `fallback_reason`), mirroring the composer.
+    throw plannerError("E_MODEL_OUTPUT_MALFORMED", "frame plan produced no frames", {
+      concept: conceptTitle,
+    });
+  }
+  const pacingRaw = (obj.pacing ?? {}) as Record<string, unknown>;
+  return {
+    frames,
+    pacing: {
+      strategy: typeof pacingRaw["strategy"] === "string" ? pacingRaw["strategy"] : "progressive",
+      notes: typeof pacingRaw["notes"] === "string" ? pacingRaw["notes"] : "",
+    },
+  };
+}
+
+function descriptorFromManifest(manifest: AgentManifest): UnitDescriptor {
+  const memory = manifest.memory_access;
+  return {
+    unit_id: manifest.id,
+    unit_type: manifest.id,
+    version: manifest.version,
+    abi_version: manifest.abi_version,
+    capabilities: manifest.capabilities,
+    input_schemas: [SCHEMA_IDS.cognitionPacket],
+    output_schemas: [SCHEMA_IDS.cognitionPacket],
+    policy_needs: manifest.policies,
+    memory_scope_needs: [...(memory.read ?? []), ...(memory.write ?? [])],
+    observability_contract: manifest.observability.required_events ?? [],
+    resource_budget: manifest.resources,
+    evolution_policy: "frozen",
+  };
+}
+
+export class FramePlannerUnit implements CognitiveUnit {
+  private readonly manifest: AgentManifest;
+  private readonly model: ModelRuntime;
+  private readonly timeoutMs: number;
+  private readonly idGenerator: IdGenerator;
+  private readonly getDepthBias: () => number;
+  private readonly maxFrames: number;
+  private preparedLeaseId: string | null = null;
+
+  constructor(deps: FramePlannerUnitDeps) {
+    this.manifest = deps.manifest;
+    this.model = deps.model;
+    this.timeoutMs = deps.timeoutMs ?? 20_000;
+    this.idGenerator = deps.idGenerator ?? new CryptoIdGenerator();
+    this.getDepthBias = deps.getDepthBias ?? (() => 0);
+    this.maxFrames = Math.max(1, deps.maxFrames ?? DEFAULT_MAX_FRAMES);
+  }
+
+  describe(): UnitDescriptor {
+    return descriptorFromManifest(this.manifest);
+  }
+
+  prepare(lease: ContextLease): void {
+    this.preparedLeaseId = lease.lease_id;
+  }
+
+  async execute(packet: CognitionPacket): Promise<Emissions> {
+    try {
+      return await this.executeWithModel(packet);
+    } catch (cause) {
+      const code = cause instanceof CosError ? cause.code : "E_MODEL_UNAVAILABLE";
+      const plan = deterministicPlan(packet);
+      const response = this.buildResponsePacket(packet, plan, {
+        kind: "deterministic-plan",
+        model: "deterministic",
+        confidence: 0.5,
+        fallbackReason: code,
+      });
+      return { packets: [response], trace: this.buildTrace(packet, plan, "deterministic") };
+    }
+  }
+
+  private async executeWithModel(packet: CognitionPacket): Promise<Emissions> {
+    const request = this.buildRequest(packet);
+    const result = await this.withTimeout(this.model.generate(request));
+    if (result.finishReason === "refusal" || result.finishReason === "safety") {
+      throw plannerError("E_MODEL_REFUSAL", `model refused generation (${result.finishReason})`, {
+        invocation_key: request.invocation_key,
+      });
+    }
+    const plan = parseFramePlan(result.text, conceptTitleOf(packet), this.maxFrames);
+    const response = this.buildResponsePacket(packet, plan, {
+      kind: "model-plan",
+      model: result.model,
+      confidence: 0.82,
+    });
+    return { packets: [response], trace: this.buildTrace(packet, plan, result.model) };
+  }
+
+  private buildRequest(packet: CognitionPacket): ModelGenerationRequest {
+    const title = conceptTitleOf(packet);
+    const goal = goalOf(packet);
+    const bias = this.getDepthBias();
+    const depthGuidance =
+      bias > 0.15
+        ? `Decompose generously: ${Math.min(this.maxFrames, 4)}–${this.maxFrames} frames, each a distinct slice, building to formal depth.`
+        : bias < -0.15
+          ? "Keep it tight: 1–2 frames, intuition-first, only the essentials."
+          : `Use 2–${Math.min(this.maxFrames, 4)} progressive frames.`;
+    const system = [
+      `You are "${this.manifest.id}". ${this.manifest.role}`,
+      "Decompose ONE concept into a SEQUENCE of progressive Cognitive Frames. Each frame is a",
+      "viewport-complete cognitive STATE that teaches one slice and transitions to the next — never a",
+      "scrolling document. A good sequence moves from intuition → precise definition → worked example",
+      "→ connection/edge-cases, but adapt to the concept. Each frame names a `sub_focus` (the exact",
+      "slice it teaches) so a downstream composer can distill DIFFERENT anchors for each.",
+      "Respond with JSON only (no markdown fences) matching:",
+      '{"frames":[{"title":"short frame title","sub_focus":"the precise slice this frame teaches","archetype":"concept-first|image-led|compare|formal|example-led","slots":["core_concept","definition","key_formula","diagram","relationship","mental_model","table","key_example","memory_cue"],"intent":"introduce|build|illustrate|connect|deepen|summarize"}],"pacing":{"strategy":"progressive","notes":"why this sequence"}}',
+      `Rules: 1–${this.maxFrames} frames (fewer is better — never pad). Each frame's \`slots\` lists ONLY`,
+      "the MCCR anchors that frame will actually fill (≤ 5 per frame so it fits one screen); always",
+      "include core_concept. Order frames so understanding compounds. The FIRST frame introduces; the",
+      "LAST consolidates. Distinct sub_focus per frame — no two frames teach the same slice.",
+      depthGuidance,
+    ].join("\n");
+    return {
+      prompt: `Concept to decompose into frames: ${title}\nLearner goal: ${goal}`,
+      system,
+      maxTokens: 2048,
+      responseSchema: OUTPUT_CONTRACT_SCHEMA,
+      invocation_key: `${this.manifest.id}:${packet.packet_id}:plan`,
+    };
+  }
+
+  private buildResponsePacket(
+    packet: CognitionPacket,
+    plan: FramePlan,
+    meta: { kind: string; model: string; confidence: number; fallbackReason?: string },
+  ): CognitionPacket {
+    return {
+      packet_id: newPacketId(this.idGenerator),
+      schema_version: packet.schema_version,
+      source_cid: packet.target_cid ?? this.manifest.id,
+      target_cid: packet.source_cid,
+      tenant_id: packet.tenant_id ?? null,
+      session_id: packet.session_id ?? null,
+      causation_id: packet.packet_id,
+      correlation_id: packet.correlation_id ?? packet.packet_id,
+      timestamp: packet.timestamp,
+      hlc: packet.hlc,
+      sequence_number: (packet.sequence_number ?? 0) + 1,
+      packet_type: "response",
+      intent: packet.intent ?? null,
+      concept_ids: packet.concept_ids ?? [],
+      domain_ids: packet.domain_ids ?? [],
+      content: {
+        handled_by: this.manifest.id,
+        response_kind: meta.kind,
+        frame_plan: plan,
+        model: meta.model,
+        ...(meta.fallbackReason ? { fallback_reason: meta.fallbackReason } : {}),
+        prepared_lease_id: this.preparedLeaseId,
+      },
+      evidence: [{ kind: "frame-plan", source_packet_id: packet.packet_id, model: meta.model }],
+      confidence: meta.confidence,
+      uncertainty_estimate: 1 - meta.confidence,
+      reasoning_depth: (packet.reasoning_depth ?? 0) + 1,
+      classification: packet.classification ?? "internal",
+      policy_tags: packet.policy_tags ?? [],
+      requires_human_review: false,
+      priority: packet.priority,
+      expiry: packet.expiry ?? null,
+      trace_id: packet.trace_id,
+      span_id: packet.span_id,
+    };
+  }
+
+  private buildTrace(packet: CognitionPacket, plan: FramePlan, model: string): ReasoningTrace {
+    const frameCount = plan.frames.length;
+    return {
+      trace_id: packet.trace_id ?? "",
+      producer_cid: this.manifest.id,
+      session_id: packet.session_id ?? null,
+      task_interpretation: `decompose "${conceptTitleOf(packet)}" into progressive Cognitive Frames`,
+      strategy: "progressive-frame-decomposition",
+      claims: [
+        {
+          claim_id: `${packet.packet_id}-claim-0`,
+          statement: `${frameCount} frame(s): ${plan.frames.map((f) => f.title).join(" → ")}`,
+          confidence: model === "deterministic" ? 0.5 : 0.82,
+        },
+      ],
+      decision: `planned a ${frameCount}-frame sequence via ${model}`,
+      uncertainty_estimate: model === "deterministic" ? 0.5 : 0.18,
+      self_critique:
+        model === "deterministic"
+          ? "deterministic fallback — a single frame; no decomposition; degradation is visible"
+          : null,
+      determinism_level: model === "deterministic" ? "D2" : "D3",
+    };
+  }
+
+  private async withTimeout(work: Promise<ModelGenerationResult>): Promise<ModelGenerationResult> {
+    const timers = globalThis as {
+      setTimeout?: (fn: () => void, ms: number) => unknown;
+      clearTimeout?: (handle: unknown) => void;
+    };
+    if (!timers.setTimeout) return work;
+    let handle: unknown;
+    const timeout = new Promise<never>((_, reject) => {
+      handle = timers.setTimeout!(() => {
+        reject(plannerError("E_MODEL_TIMEOUT", `model call exceeded ${this.timeoutMs}ms`));
+      }, this.timeoutMs);
+    });
+    try {
+      return await Promise.race([work, timeout]);
+    } finally {
+      timers.clearTimeout?.(handle);
+    }
+  }
+
+  reflect(): string | null {
+    return null;
+  }
+
+  checkpoint(): CognitionFrame {
+    return {
+      unitId: this.manifest.id,
+      state: "Ready" as UnitLifecycleState,
+      data: { preparedLeaseId: this.preparedLeaseId },
+    };
+  }
+
+  restore(frame: CognitionFrame): void {
+    this.preparedLeaseId =
+      typeof frame.data["preparedLeaseId"] === "string" ? frame.data["preparedLeaseId"] : null;
+  }
+
+  shutdown(): void {
+    this.preparedLeaseId = null;
+  }
+
+  health(): CognitiveHealth {
+    return { runtime: "ok", drift: 0, confidence: 1, loadFactor: 0 };
+  }
+}

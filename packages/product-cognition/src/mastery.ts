@@ -10,6 +10,7 @@ import {
   newMutationId,
 } from "@inevitable/shared";
 import type { WorldStateGraph } from "@inevitable/world-state";
+import type { DepthTestResult } from "./learning-loop";
 import { assertWorldStateOk } from "./types";
 
 export interface MasteryCheckpointInput {
@@ -19,13 +20,28 @@ export interface MasteryCheckpointInput {
   readonly passed: boolean;
   readonly confidence: number;
   readonly evidence: readonly Record<string, unknown>[];
+  /** Five-test depth verification results (S2.2, F14). */
+  readonly depthTests?: readonly DepthTestResult[];
+}
+
+/** The depth-gate outcome recorded alongside a mastery checkpoint (S2.2, F14). */
+export interface DepthGateOutcome {
+  readonly passed: boolean;
+  readonly passedCount: number;
+  readonly totalCount: number;
+  readonly tests: readonly DepthTestResult[];
 }
 
 export interface MasteryCheckpoint {
   readonly checkpointNodeId: string;
   readonly conceptNodeId: string;
   readonly mutationId: string;
+  /** Present when depth tests were evaluated (S2.2, F14). */
+  readonly depthGate?: DepthGateOutcome;
 }
+
+/** Minimum tests that must pass to clear the depth gate (4 of 5). */
+const DEPTH_GATE_THRESHOLD = 4;
 
 export interface MasteryCheckpointRecorderDeps {
   readonly world: WorldStateGraph;
@@ -59,6 +75,21 @@ export class MasteryCheckpointRecorder {
       8,
     )}`;
 
+    // Evaluate the five-test depth gate when tests are provided (S2.2, F14).
+    // The gate overrides the caller's `passed` flag: ≥ DEPTH_GATE_THRESHOLD tests must pass.
+    let depthGate: DepthGateOutcome | undefined;
+    let gatePassed = input.passed;
+    if (input.depthTests && input.depthTests.length > 0) {
+      const passedCount = input.depthTests.filter((t) => t.passed).length;
+      gatePassed = passedCount >= DEPTH_GATE_THRESHOLD;
+      depthGate = {
+        passed: gatePassed,
+        passedCount,
+        totalCount: input.depthTests.length,
+        tests: input.depthTests,
+      };
+    }
+
     assertWorldStateOk(
       this.world.apply(
         {
@@ -80,9 +111,16 @@ export class MasteryCheckpointRecorder {
             ownerUserId: input.ownerUserId,
             conceptId: input.conceptId,
             assessorCid: input.assessorCid,
-            passed: input.passed,
+            passed: gatePassed,
             confidence: input.confidence,
             evidence: input.evidence,
+            ...(depthGate
+              ? {
+                  depthGatePassed: depthGate.passed,
+                  depthGatePassedCount: depthGate.passedCount,
+                  depthGateTotalCount: depthGate.totalCount,
+                }
+              : {}),
           },
         },
         { proposerCid: input.assessorCid },
@@ -95,7 +133,7 @@ export class MasteryCheckpointRecorder {
           id: `edge:${checkpointNodeId}:assesses:${conceptNodeId}`,
           from: checkpointNodeId,
           to: conceptNodeId,
-          type: input.passed ? "verifies_mastery_of" : "rejects_mastery_of",
+          type: gatePassed ? "verifies_mastery_of" : "rejects_mastery_of",
           props: { confidence: input.confidence },
         },
         { proposerCid: input.assessorCid },
@@ -106,12 +144,12 @@ export class MasteryCheckpointRecorder {
       mutation_id: newMutationId(this.idGenerator),
       proposer_cid: input.assessorCid,
       memory_layer: "semantic",
-      mutation_type: input.passed ? "reinforce_concept" : "revise_fact",
+      mutation_type: gatePassed ? "reinforce_concept" : "revise_fact",
       target: { id: checkpointNodeId, conceptId: input.conceptId },
       payload: {
         ownerUserId: input.ownerUserId,
         conceptId: input.conceptId,
-        passed: input.passed,
+        passed: gatePassed,
         confidence: input.confidence,
       },
       evidence: [...input.evidence],
@@ -124,17 +162,38 @@ export class MasteryCheckpointRecorder {
     await this.emit("mastery.checkpoint.created", input.assessorCid, {
       checkpoint_node_id: checkpointNodeId,
       concept_id: input.conceptId,
-      passed: input.passed,
+      passed: gatePassed,
       confidence: input.confidence,
       mutation_id: mutationId,
     });
-    await this.emit(input.passed ? "mastery.verified" : "mastery.rejected", input.assessorCid, {
+    await this.emit(gatePassed ? "mastery.verified" : "mastery.rejected", input.assessorCid, {
       checkpoint_node_id: checkpointNodeId,
       concept_id: input.conceptId,
       confidence: input.confidence,
     });
 
-    return { checkpointNodeId, conceptNodeId, mutationId };
+    // Emit depth gate events when tests were evaluated (S2.2, F14).
+    if (depthGate) {
+      await this.emit(
+        depthGate.passed ? "depth.gate.passed" : "depth.gate.failed",
+        input.assessorCid,
+        {
+          concept_id: input.conceptId,
+          checkpoint_node_id: checkpointNodeId,
+          passed_count: depthGate.passedCount,
+          total_count: depthGate.totalCount,
+          threshold: DEPTH_GATE_THRESHOLD,
+          tests: depthGate.tests.map((t) => ({
+            kind: t.kind,
+            passed: t.passed,
+            confidence: t.confidence,
+            evidence: t.evidence,
+          })),
+        },
+      );
+    }
+
+    return { checkpointNodeId, conceptNodeId, mutationId, ...(depthGate ? { depthGate } : {}) };
   }
 
   private async emit(

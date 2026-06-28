@@ -9,6 +9,13 @@ const MVP_AGENT_IDS = [
   "revision",
   "memory",
   "intent",
+  "research",
+  "motivation",
+  "reflection",
+  "debate",
+  "composer",
+  "frameplanner",
+  "imageplanner",
 ] as const;
 
 type MvpAgentId = (typeof MVP_AGENT_IDS)[number];
@@ -87,6 +94,76 @@ const SEEDS: readonly ManifestSeed[] = [
     memoryWrite: [],
     requiredEvents: ["intent.received", "intent.interpreted"],
   },
+  {
+    id: "research",
+    role: "Research Agent: maps active frontiers, knowledge gaps, and seed hypotheses for mastered concepts.",
+    capabilities: ["research.frontier.map", "research.gap.identify", "research.hypothesis.seed"],
+    memoryRead: ["semantic", "reflective"],
+    memoryWrite: [],
+    requiredEvents: ["surface.research.frontier.detected", "surface.research.frontier.surfaced"],
+  },
+  {
+    id: "motivation",
+    role: "Surfaces a motivating message when mastery was barely achieved, sustaining learner momentum.",
+    capabilities: ["motivation.surface", "confidence.narrate"],
+    memoryRead: ["working", "semantic"],
+    memoryWrite: [],
+    requiredEvents: ["surface.motivation.surfaced"],
+  },
+  {
+    id: "reflection",
+    role: "Guides post-mastery reflection: what connected, what surprised, what to revisit.",
+    capabilities: ["reflection.prompt", "metacognition.surface"],
+    memoryRead: ["semantic", "episodic", "reflective"],
+    memoryWrite: ["reflective"],
+    requiredEvents: ["reflection.prompted"],
+  },
+  {
+    id: "debate",
+    role: "Challenges a learner's explanation from an adversarial perspective to deepen understanding.",
+    capabilities: ["debate.challenge", "explanation.stress_test"],
+    memoryRead: ["semantic", "procedural"],
+    memoryWrite: [],
+    requiredEvents: ["debate.challenge.issued"],
+  },
+  {
+    id: "composer",
+    role: "Surface Composer: distills teaching content into the Minimal Complete Cognitive Representation (MCCR) shown on the board, plus a SEPARATE paced narration script and an image decision (UCS, ADR-0030).",
+    capabilities: ["mccr.distill", "narration.script", "image.decide", "layout.arrange"],
+    memoryRead: ["working", "semantic", "reflective"],
+    memoryWrite: [],
+    requiredEvents: [
+      "surface.frame.composed",
+      "surface.narration.script.produced",
+      "surface.image.decided",
+    ],
+  },
+  {
+    id: "frameplanner",
+    role: "Frame Planner: decomposes a concept into progressive Cognitive Frames, sequences and paces them, and prepares discardable look-ahead frames that re-plan on every learner signal (UCS, ADR-0030).",
+    capabilities: [
+      "frame.decompose",
+      "frame.sequence",
+      "frame.pace",
+      "frame.lookahead",
+      "media.plan",
+    ],
+    memoryRead: ["working", "semantic", "reflective", "procedural"],
+    memoryWrite: [],
+    requiredEvents: [
+      "surface.frame.planned",
+      "surface.frame.speculation.prepared",
+      "surface.frame.speculation.invalidated",
+    ],
+  },
+  {
+    id: "imageplanner",
+    role: "Image Agent: decides whether an image benefits a frame, constructs the prompt, and refines it (UCS, ADR-0030).",
+    capabilities: ["image.decide", "image.prompt", "image.refine"],
+    memoryRead: ["working", "semantic"],
+    memoryWrite: [],
+    requiredEvents: ["surface.image.decided"],
+  },
 ];
 
 function manifestFrom(seed: ManifestSeed): AgentManifest {
@@ -104,7 +181,8 @@ function manifestFrom(seed: ManifestSeed): AgentManifest {
     policies: ["product-spec-first", "governance-precheck", "reasoning-trace-required"],
     resources: {
       maxConcurrency: 1,
-      schedulerPriority: seed.id === "supervisor" ? 1 : 5,
+      schedulerPriority:
+        seed.id === "supervisor" ? 1 : seed.id === "research" || seed.id === "frameplanner" ? 4 : 5,
     },
     observability: {
       required_events: [...seed.requiredEvents],

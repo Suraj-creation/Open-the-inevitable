@@ -46,6 +46,8 @@ function boot(): Promise<string> {
 interface Created {
   surface_id: string;
   learner_id: string;
+  /** Returned on first mint (no bearer sent). Use as Authorization: Bearer for learner routes. */
+  api_key?: string;
 }
 async function create(base: string, body: Record<string, unknown>): Promise<Created> {
   const res = await fetch(`${base}/api/surface`, {
@@ -61,8 +63,10 @@ interface LearnerView {
   learner: { learner_id: string; cid: string; trust_level: number };
   surfaces: { surfaceId: string; goal: string }[];
 }
-async function getLearner(base: string, learnerId: string): Promise<LearnerView> {
-  const res = await fetch(`${base}/api/learner/${learnerId}`);
+async function getLearner(base: string, learnerId: string, apiKey: string): Promise<LearnerView> {
+  const res = await fetch(`${base}/api/learner/${learnerId}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
   return (await res.json()) as LearnerView;
 }
 
@@ -74,9 +78,12 @@ describe("Durable learner identity & resume-by-learner (P2.2)", () => {
 
     expect(a.learner_id).toBeTruthy();
     expect(a.learner_id).not.toBe(b.learner_id); // distinct learners
+    // Fresh mints return api_key once so the caller can authenticate future learner-scoped requests.
+    expect(a.api_key).toBeTruthy();
+    expect(b.api_key).toBeTruthy();
 
-    const la = await getLearner(base, a.learner_id);
-    const lb = await getLearner(base, b.learner_id);
+    const la = await getLearner(base, a.learner_id, a.api_key!);
+    const lb = await getLearner(base, b.learner_id, b.api_key!);
     expect(la.learner.cid).not.toBe(lb.learner.cid); // distinct cognitive identities
     expect(la.surfaces.map((s) => s.surfaceId)).toEqual([a.surface_id]);
     expect(lb.surfaces.map((s) => s.surfaceId)).toEqual([b.surface_id]);
@@ -85,7 +92,7 @@ describe("Durable learner identity & resume-by-learner (P2.2)", () => {
   test("a known learnerId reuses the same identity across a restart and accrues surfaces", async () => {
     const base1 = await boot();
     const first = await create(base1, { goal: "Teach me Neural Networks", seed: "li-b1" });
-    const before = await getLearner(base1, first.learner_id);
+    const before = await getLearner(base1, first.learner_id, first.api_key!);
     const cid = before.learner.cid;
     const trust = before.learner.trust_level;
 
@@ -100,8 +107,10 @@ describe("Durable learner identity & resume-by-learner (P2.2)", () => {
       learnerId: first.learner_id,
     });
     expect(second.learner_id).toBe(first.learner_id); // same durable learner across processes
+    // POST without a bearer still echoes the api_key so the caller can authenticate after restart.
+    expect(second.api_key).toBe(first.api_key);
 
-    const after = await getLearner(base2, first.learner_id);
+    const after = await getLearner(base2, first.learner_id, second.api_key!);
     expect(after.learner.cid).toBe(cid); // same cognitive identity
     expect(after.learner.trust_level).toBe(trust); // trust is durable, not re-negotiated
     // The learner now owns BOTH surfaces (resume-by-learner lists them).
@@ -126,9 +135,16 @@ describe("Durable learner identity & resume-by-learner (P2.2)", () => {
       learnerId: "lnr-does-not-exist",
     });
     expect(created.learner_id).not.toBe("lnr-does-not-exist");
-    // The bogus id resolves to nothing; the minted one resolves to a real learner.
-    expect((await fetch(`${base}/api/learner/lnr-does-not-exist`)).status).toBe(404);
-    const minted = await getLearner(base, created.learner_id);
+    // Accessing a different learner's id with the minted key → 403 (wrong owner, not just unknown).
+    expect(
+      (
+        await fetch(`${base}/api/learner/lnr-does-not-exist`, {
+          headers: { Authorization: `Bearer ${created.api_key}` },
+        })
+      ).status,
+    ).toBe(403);
+    // The minted learner resolves correctly with their own key.
+    const minted = await getLearner(base, created.learner_id, created.api_key!);
     expect(minted.ok).toBe(true);
   });
 });

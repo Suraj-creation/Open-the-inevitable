@@ -32,6 +32,19 @@ export interface ConceptSpec {
   readonly prerequisites?: readonly string[];
 }
 
+/**
+ * Typed cognitive-graph edge kinds (SRF-003, ADR-0025). `prerequisite_of`/`depends_on` are
+ * structural (acyclic, drive ordering/locking); `applies_to`/`research_adjacent`/`frontier_of`/
+ * `bridges_to` are informational links the surface renders as distinct graph edges.
+ */
+export type KnowledgeEdgeType =
+  | "prerequisite_of"
+  | "depends_on"
+  | "applies_to"
+  | "research_adjacent"
+  | "bridges_to"
+  | "frontier_of";
+
 /** Per-concept learning state for one learner, derived from world-state mastery + phase props. */
 export interface LearnerConceptState {
   readonly conceptId: string;
@@ -196,6 +209,22 @@ export class KnowledgeGraphEngine {
       from: `concept:${fromId}`,
       to: `concept:${toId}`,
       type: "bridges_to",
+      props: label ? { label } : {},
+    });
+  }
+
+  /**
+   * Add a typed cognitive-graph edge between two concepts (SRF-003, ADR-0025). Informational edge
+   * types carry no acyclicity constraint; `prerequisite_of`/`depends_on` are structural and must
+   * stay acyclic (enforced by the projector/timeline that consumes them). Idempotent upsert.
+   */
+  addEdge(fromId: string, toId: string, edgeType: KnowledgeEdgeType, label?: string): void {
+    this.world.apply({
+      kind: "upsert_edge",
+      id: `edge:${edgeType}:${fromId}:${toId}`,
+      from: `concept:${fromId}`,
+      to: `concept:${toId}`,
+      type: edgeType,
       props: label ? { label } : {},
     });
   }

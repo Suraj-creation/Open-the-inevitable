@@ -143,6 +143,26 @@ export interface NarrateInput {
   readonly texts: readonly string[];
 }
 
+/** One spoken segment of a Cognitive Frame's narration script (UCS, ADR-0030). */
+export interface NarrateScriptSegmentInput {
+  readonly text: string;
+  /** The MCCR slot this segment discusses (a render hint). */
+  readonly anchor_ref: string | null;
+  /** The resolved MCCR element id to spotlight while speaking, or null for a whole-frame remark. */
+  readonly element_id: string | null;
+  readonly intent: string;
+}
+
+export interface NarrateScriptInput {
+  readonly surface_id: string;
+  readonly frame_id: string;
+  readonly agent_cid: string;
+  readonly agent_id: string;
+  readonly role: string;
+  readonly concept_id: string | null;
+  readonly segments: readonly NarrateScriptSegmentInput[];
+}
+
 export class SurfaceChoreographer {
   private readonly bus: EventBus;
   private readonly clock: Clock;
@@ -249,6 +269,84 @@ export class SurfaceChoreographer {
       role: input.role,
       state: "contributing",
       block_id: input.block_id,
+    });
+  }
+
+  /**
+   * Voice a Cognitive Frame's narration script (UCS, ADR-0030): one narration segment per script
+   * segment, each spotlighting the MCCR element it discusses (`focus.target_type:"element"`), or the
+   * whole frame when it has no anchor. The script is the SEPARATE spoken teaching — never the board's
+   * MCCR text. Unlike `narrate()`, segments are not re-chunked: the composer already paced them, and
+   * re-chunking would break the 1:1 anchor↔segment alignment. Emits nothing when there is no script.
+   */
+  async narrateScript(input: NarrateScriptInput): Promise<void> {
+    const segments = input.segments.filter((s) => s.text.trim().length > 0);
+    if (segments.length === 0) return;
+
+    await this.presence({
+      surface_id: input.surface_id,
+      agent_cid: input.agent_cid,
+      agent_id: input.agent_id,
+      role: input.role,
+      state: "speaking",
+      block_id: null,
+    });
+
+    for (const seg of segments) {
+      const segmentId = `seg-${this.idGenerator.hex(8)}`;
+      const voice = this.voice
+        ? await this.voice.synthesize({
+            surface_id: input.surface_id,
+            segment_id: segmentId,
+            text: seg.text,
+            concept_id: input.concept_id,
+          })
+        : null;
+      const focus = seg.element_id
+        ? {
+            target_type: "element",
+            target_id: seg.element_id,
+            reason: `narration discusses ${seg.anchor_ref ?? "this element"}`,
+            spotlight: true,
+          }
+        : {
+            target_type: "frame",
+            target_id: input.frame_id,
+            reason: "frame overview",
+            spotlight: true,
+          };
+      await this.emit("surface.narration.segment", input.agent_cid, {
+        surface_id: input.surface_id,
+        segment_id: segmentId,
+        block_id: null,
+        frame_id: input.frame_id,
+        anchor_ref: seg.anchor_ref,
+        intent: seg.intent,
+        concept_id: input.concept_id,
+        sequence: this.nextSeq(),
+        text: seg.text,
+        focus,
+        reveal_ids: seg.element_id ? [seg.element_id] : [],
+        voice,
+      });
+      if (voice) {
+        await this.emit("surface.visual.generated", input.agent_cid, {
+          surface_id: input.surface_id,
+          block_id: null,
+          artifact_id: voice.artifact_id,
+          modality: "voice",
+          provider_id: voice.provider_id,
+        });
+      }
+    }
+
+    await this.presence({
+      surface_id: input.surface_id,
+      agent_cid: input.agent_cid,
+      agent_id: input.agent_id,
+      role: input.role,
+      state: "contributing",
+      block_id: null,
     });
   }
 

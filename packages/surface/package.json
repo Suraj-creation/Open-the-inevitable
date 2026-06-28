@@ -14,6 +14,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@inevitable/evaluation": "workspace:*",
     "@inevitable/events": "workspace:*",
     "@inevitable/governance": "workspace:*",
     "@inevitable/memory": "workspace:*",

@@ -40,7 +40,11 @@ import type { WorldStateGraph } from "@inevitable/world-state";
 import type { ConceptSeed, LearningPathProjection, LearningPathProjector } from "./learning-path";
 import type { LearningLoopMasteryInput } from "./learning-loop";
 import type { MasteryCheckpoint, MasteryCheckpointRecorder } from "./mastery";
-import type { ProductDispatchResult, ProductRuntimeDispatcher } from "./runtime-dispatch";
+import type {
+  ProductDispatchResult,
+  ProductRuntimeAgentId,
+  ProductRuntimeDispatcher,
+} from "./runtime-dispatch";
 import type { SupervisorRoutingDecision } from "./supervisor";
 import type { OnboardingSession } from "./types";
 
@@ -96,6 +100,12 @@ export interface FiberedLearningLoopInput {
    * absent (CLI demo, unit tests), the event is on the bus but matches no surface fold.
    */
   readonly surfaceId?: string;
+  /**
+   * Cooperative interrupt (S1.3, ADR-0024). Checked at each phase boundary; when it returns true
+   * the cycle early-exits (recorded as `phase:interrupted`). Live-only — replay re-folds the
+   * recorded surface events and never re-runs the loop, so determinism is preserved.
+   */
+  readonly isInterrupted?: () => boolean;
 }
 
 export interface FiberedLearningLoopResult {
@@ -206,6 +216,12 @@ function makeLearningCycleRoutine(
       return;
     }
 
+    // Cooperative interrupt (S1.3, ADR-0024): the learner cancelled before explanation.
+    if (input.isInterrupted?.()) {
+      yield* ctx.reason("phase:interrupted", "explanation");
+      return;
+    }
+
     // --- Phase 2: explanation dispatch ---
     yield* ctx.reason("phase:explanation-dispatch", input.focusConceptId);
     const explanationToken = `explanation:${ctx.fiberId}`;
@@ -219,6 +235,12 @@ function makeLearningCycleRoutine(
     );
     yield* ctx.awaitValue<ProductDispatchResult | null>(explanationToken);
     yield* ctx.reason("phase:explanation-done");
+
+    // Cooperative interrupt (S1.3): the learner cancelled before practice.
+    if (input.isInterrupted?.()) {
+      yield* ctx.reason("phase:interrupted", "practice");
+      return;
+    }
 
     // --- Phase 3: practice dispatch ---
     yield* ctx.reason("phase:practice-dispatch", input.focusConceptId);
@@ -430,59 +452,105 @@ export class FiberedLearningLoop {
         ? { content: { assembled_context_items: input.assembledContextItems } }
         : {};
 
-    // P4.1 — concurrent challenger dispatch when configured (ADR-0018 D2).
-    // The explanation result is always the authoritative output; the challenger is a probe.
+    // S1.2 — Cognitive Ensemble (ADR-0025). Explanation + a genuine challenger/Socratic peer run
+    // concurrently as a *visible* ensemble: each publishes a proposal (surface.proposal.proposed),
+    // presence reflects parallel thinking, and the arbiter records a synthesis
+    // (surface.synthesis.recorded). The primary explanation remains the authoritative surfaced
+    // result, so determinism and replay are unchanged; the challenger is now a surfaced peer, not a
+    // discarded probe. Members iterate in a fixed order so id/HLC advance deterministically.
     if (agentId === "explanation" && this.deps.challengerDispatcher) {
-      const [primaryResult, challengerResult] = await Promise.all([
-        dispatcher.dispatch({
-          session: input.session,
-          targetAgentId: agentId,
-          intent,
-          conceptIds,
-          ...assembledContent,
-          priority: 3,
-        }),
-        this.deps.challengerDispatcher.dispatch({
-          session: input.session,
-          targetAgentId: "revision",
-          intent,
-          conceptIds,
-          priority: 3,
-        }),
-      ]);
-
-      // Write proposals to the blackboard for arbitration audit.
+      const learnerCid = input.session.learnerIdentity.cid;
       const proposalKey = `explanation:${conceptIds[0] ?? "unknown"}`;
-      if (this.deps.proposals) {
-        if (primaryResult.ok)
-          this.deps.proposals.propose(
-            proposalKey,
-            input.session.learnerIdentity.cid,
-            primaryResult.value,
-          );
-        if (challengerResult.ok)
-          this.deps.proposals.propose(proposalKey, "challenger", challengerResult.value);
+      const members: ReadonlyArray<{
+        readonly agentId: ProductRuntimeAgentId;
+        readonly agentCid: string;
+        readonly role: string;
+        readonly dispatcher: ProductRuntimeDispatcher;
+        readonly extra: Record<string, unknown>;
+      }> = [
+        {
+          agentId: "explanation",
+          agentCid: learnerCid,
+          role: "explainer",
+          dispatcher,
+          extra: assembledContent,
+        },
+        {
+          agentId: "revision",
+          agentCid: "challenger",
+          role: "challenger",
+          dispatcher: this.deps.challengerDispatcher,
+          extra: {},
+        },
+      ];
+
+      // Presence: every member is thinking in parallel — visible parallel cognition.
+      for (const m of members) {
+        await this.emitPresence(input, m.agentCid, m.agentId, m.role, "thinking");
       }
 
-      // Detect disagreement and emit surface event (ADR-0018 D4/D5/D6).
-      if (
-        primaryResult.ok &&
-        challengerResult.ok &&
-        this.outputsDisagree(primaryResult.value, challengerResult.value)
-      ) {
-        await this.emitDisagreement(input, proposalKey, conceptIds[0] ?? "unknown");
-        if (this.deps.proposals) {
-          this.deps.proposals.arbitrate(
-            proposalKey,
-            input.session.learnerIdentity.cid,
-            "primary explanation selected",
-          );
+      const startedMs = this.clock.nowMs();
+      const settled = await Promise.all(
+        members.map((m) =>
+          m.dispatcher.dispatch({
+            session: input.session,
+            targetAgentId: m.agentId,
+            intent,
+            conceptIds,
+            ...m.extra,
+            priority: 3,
+          }),
+        ),
+      );
+      const completedMs = this.clock.nowMs();
+
+      // Publish each proposal + presence in fixed member order (deterministic id/HLC advance).
+      const chosenProposalIds: string[] = [];
+      for (let i = 0; i < members.length; i += 1) {
+        const m = members[i];
+        const r = settled[i];
+        if (!m || !r) continue;
+        if (r.ok) {
+          if (this.deps.proposals) this.deps.proposals.propose(proposalKey, m.agentCid, r.value);
+          const proposalId = await this.emitProposal(input, proposalKey, m, r.value);
+          if (m.agentId === "explanation") chosenProposalIds.unshift(proposalId);
+          await this.emitPresence(input, m.agentCid, m.agentId, m.role, "contributing");
+          // S-UCS: surface each ensemble member's latency + reasoning summary (ADR-0029).
+          await this.emitAgentWork(input, m.agentId, r.value, startedMs, completedMs, m.agentCid);
+        } else {
+          await this.emitPresence(input, m.agentCid, m.agentId, m.role, "idle");
         }
       }
 
-      const dispatchResult = primaryResult.ok ? primaryResult.value : null;
+      const primaryResult = settled[0];
+      const challengerResult = settled[1];
+      const disagree = Boolean(
+        primaryResult?.ok &&
+        challengerResult?.ok &&
+        this.outputsDisagree(primaryResult.value, challengerResult.value),
+      );
+      if (disagree) {
+        await this.emitDisagreement(input, proposalKey, conceptIds[0] ?? "unknown");
+        if (this.deps.proposals) {
+          this.deps.proposals.arbitrate(proposalKey, learnerCid, "primary explanation selected");
+        }
+      }
+
+      // Arbiter synthesis: the primary explanation is the surfaced result; record the rationale.
+      if (primaryResult?.ok) {
+        await this.emitSynthesis(
+          input,
+          proposalKey,
+          chosenProposalIds,
+          disagree
+            ? "primary explanation selected over divergent challenger"
+            : "primary explanation selected; challenger concurred",
+        );
+      }
+
+      const dispatchResult = primaryResult?.ok ? primaryResult.value : null;
       results.set(token, dispatchResult);
-      if (primaryResult.ok && conceptIds[0]) {
+      if (primaryResult?.ok && conceptIds[0]) {
         this.trackPhase(agentId, conceptIds[0], input.session.intentLease.owner_user_id);
       }
       engine.resolve(token, dispatchResult);
@@ -490,6 +558,7 @@ export class FiberedLearningLoop {
     }
 
     // Standard single-agent dispatch.
+    const startedMs = this.clock.nowMs();
     const result = await dispatcher.dispatch({
       session: input.session,
       targetAgentId: agentId,
@@ -500,12 +569,17 @@ export class FiberedLearningLoop {
       ...assembledContent,
       priority: 3,
     });
+    const completedMs = this.clock.nowMs();
     const dispatchResult = result.ok ? result.value : null;
     results.set(token, dispatchResult);
 
     // Write phase-tracking prop to world-state so the supervisor can see it on future routing requests.
     if (result.ok && conceptIds[0]) {
       this.trackPhase(agentId, conceptIds[0], input.session.intentLease.owner_user_id);
+    }
+    // S-UCS: surface this agent's latency + reasoning summary for the Observatory (ADR-0029).
+    if (result.ok) {
+      await this.emitAgentWork(input, agentId, result.value, startedMs, completedMs);
     }
 
     engine.resolve(token, dispatchResult);
@@ -542,30 +616,146 @@ export class FiberedLearningLoop {
     return union === 0 ? 1 : intersection / union;
   }
 
-  private async emitDisagreement(
+  /** Publish a `surface.*` orchestration event stamped with the surface_id (when present). */
+  private async emitSurface(
     input: FiberedLearningLoopInput,
-    topic: string,
-    conceptId: string,
+    eventType: string,
+    payload: Record<string, unknown>,
   ): Promise<void> {
     const created = createEvent(
       {
-        eventType: "surface.agent.disagreed",
+        eventType,
         producerCid: input.session.learnerIdentity.cid,
         producerType: "product.orchestration",
-        payload: {
-          ...(input.surfaceId ? { surface_id: input.surfaceId } : {}),
-          agent_cids: [input.session.learnerIdentity.cid, "challenger"],
-          topic,
-          concept_id: conceptId,
-          resolution: { winner: "explanation", reason: "primary explanation selected" },
-        },
-        topic: "cos.surface.agent.disagreed",
+        payload: { ...(input.surfaceId ? { surface_id: input.surfaceId } : {}), ...payload },
+        topic: `cos.${eventType}`,
         classification: "internal",
       },
       { clock: this.clock, hlc: this.orchestrationHlc, idGenerator: this.idGenerator },
     );
     this.orchestrationHlc = created.hlc;
     await this.deps.bus.publish(created.event);
+  }
+
+  private async emitDisagreement(
+    input: FiberedLearningLoopInput,
+    topic: string,
+    conceptId: string,
+  ): Promise<void> {
+    await this.emitSurface(input, "surface.agent.disagreed", {
+      agent_cids: [input.session.learnerIdentity.cid, "challenger"],
+      topic,
+      concept_id: conceptId,
+      resolution: { winner: "explanation", reason: "primary explanation selected" },
+    });
+  }
+
+  /** Surface an ensemble agent's presence transition (thinking/contributing/idle). */
+  private async emitPresence(
+    input: FiberedLearningLoopInput,
+    agentCid: string,
+    agentId: string,
+    role: string,
+    state: "idle" | "thinking" | "contributing" | "speaking",
+  ): Promise<void> {
+    await this.emitSurface(input, "surface.presence.updated", {
+      agent_cid: agentCid,
+      agent_id: agentId,
+      role,
+      state,
+    });
+  }
+
+  /** Surface an ensemble proposal (competing cognition made visible). Returns the proposal id. */
+  private async emitProposal(
+    input: FiberedLearningLoopInput,
+    topic: string,
+    member: { readonly agentId: string; readonly agentCid: string },
+    result: ProductDispatchResult,
+  ): Promise<string> {
+    const proposalId = `pr-${this.idGenerator.hex(8)}`;
+    await this.emitSurface(input, "surface.proposal.proposed", {
+      proposal_id: proposalId,
+      agent_cid: member.agentCid,
+      agent_id: member.agentId,
+      topic,
+      summary: this.summarize(result),
+      confidence: this.confidenceOf(result),
+    });
+    return proposalId;
+  }
+
+  /** Surface the arbiter's synthesis over the topic's proposals. */
+  private async emitSynthesis(
+    input: FiberedLearningLoopInput,
+    topic: string,
+    chosenProposalIds: readonly string[],
+    rationale: string,
+  ): Promise<void> {
+    await this.emitSurface(input, "surface.synthesis.recorded", {
+      topic,
+      chosen_proposal_ids: chosenProposalIds,
+      block_ids: [],
+      rationale,
+      producer_cid: input.session.learnerIdentity.cid,
+    });
+  }
+
+  /**
+   * Surface an agent's work timing (real latency) and reasoning summary for the Agent Observatory
+   * (S-UCS, ADR-0029). Latency is real-clock — deterministic per event log, excluded from canonical
+   * block content. The reasoning summary is a structured projection of the unit's ReasoningTrace
+   * (task interpretation, strategy, decision, self-critique — never raw private memory).
+   */
+  private async emitAgentWork(
+    input: FiberedLearningLoopInput,
+    agentId: string,
+    result: ProductDispatchResult,
+    startedMs: number,
+    completedMs: number,
+    agentCid?: string,
+  ): Promise<void> {
+    const cid =
+      agentCid ?? result.responsePackets[0]?.source_cid ?? input.session.learnerIdentity.cid;
+    await this.emitSurface(input, "surface.agent.work.timing", {
+      agent_cid: cid,
+      agent_id: agentId,
+      work_id: result.workItem.work_id,
+      packet_id: result.packet.packet_id,
+      work_type: result.workItem.work_type,
+      status: "completed",
+      queue_wait_ms: 0,
+      execution_ms: Math.max(0, completedMs - startedMs),
+    });
+    const trace = result.emissions.trace;
+    if (trace) {
+      await this.emitSurface(input, "surface.agent.reasoning.summary", {
+        agent_cid: cid,
+        agent_id: agentId,
+        packet_id: result.packet.packet_id,
+        work_id: result.workItem.work_id,
+        task_interpretation: trace.task_interpretation,
+        strategy: trace.strategy,
+        decision: trace.decision,
+        self_critique: trace.self_critique ?? null,
+        confidence: trace.claims?.[0]?.confidence ?? this.confidenceOf(result),
+        determinism_level: trace.determinism_level ?? "D3",
+      });
+    }
+  }
+
+  /** A short human-readable summary of a proposal (layer_0 text, else content.summary). */
+  private summarize(result: ProductDispatchResult): string {
+    const layer0 = this.extractLayer0(result);
+    if (layer0) return layer0.slice(0, 280);
+    const content = result.responsePackets[0]?.content as Record<string, unknown> | undefined;
+    const summary = content?.["summary"];
+    return typeof summary === "string" ? summary.slice(0, 280) : "";
+  }
+
+  private confidenceOf(result: ProductDispatchResult): number {
+    const pkt = result.responsePackets[0];
+    return pkt && typeof pkt.confidence === "number" ? pkt.confidence : 0.5;
   }
 
   private async handleMasteryRecord(
@@ -583,6 +773,7 @@ export class FiberedLearningLoop {
         passed: masteryInput.passed,
         confidence: masteryInput.confidence,
         evidence: masteryInput.evidence,
+        ...(masteryInput.depthTests ? { depthTests: masteryInput.depthTests } : {}),
       });
       results.set(token, checkpoint);
       engine.resolve(token, checkpoint);

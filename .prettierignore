@@ -12,3 +12,4 @@ hermes-agent/
 paperclip/
 pi/
 *.md
+tmp-events/

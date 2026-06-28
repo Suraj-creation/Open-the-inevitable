@@ -92,12 +92,16 @@ interface GenAiResponseLike {
   candidates?: Array<{ finishReason?: string }>;
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
 }
+interface GenAiEmbedResponseLike {
+  embeddings?: Array<{ values?: number[] }>;
+}
 interface GenAiModelsLike {
   generateContent(args: {
     model: string;
     contents: string;
     config?: Record<string, unknown>;
   }): Promise<GenAiResponseLike>;
+  embedContent(args: { model: string; contents: string }): Promise<GenAiEmbedResponseLike>;
 }
 /** Minimal local narrowing of the Gemini client — no vendor type crosses this boundary. */
 export interface GenAiClientLike {
@@ -170,28 +174,56 @@ export class GeminiModelRuntime implements ModelRuntime {
       config["responseSchema"] = input.responseSchema;
     }
     const model = input.model ?? this.defaultModel;
-    const response = await this.client.models.generateContent({
-      model,
-      contents: input.prompt,
-      config,
-    });
-    const usage = response.usageMetadata;
-    return {
-      text: response.text ?? "",
-      model,
-      finishReason: mapFinishReason(response.candidates?.[0]?.finishReason),
-      usage:
-        usage === undefined
-          ? undefined
-          : { inputTokens: usage.promptTokenCount, outputTokens: usage.candidatesTokenCount },
-    };
+    const RETRY_DELAYS_MS = [1000, 2000, 4000];
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      try {
+        const response = await this.client.models.generateContent({
+          model,
+          contents: input.prompt,
+          config,
+        });
+        const usage = response.usageMetadata;
+        return {
+          text: response.text ?? "",
+          model,
+          finishReason: mapFinishReason(response.candidates?.[0]?.finishReason),
+          usage:
+            usage === undefined
+              ? undefined
+              : {
+                  inputTokens: usage.promptTokenCount,
+                  outputTokens: usage.candidatesTokenCount,
+                },
+        };
+      } catch (error) {
+        lastError = error;
+        const msg = error instanceof Error ? error.message : String(error);
+        // Retry only on transient network/rate-limit errors; bail immediately on auth errors.
+        const isTransient =
+          msg.includes("fetch failed") ||
+          msg.includes("network") ||
+          msg.includes("ECONNRESET") ||
+          msg.includes("429") ||
+          msg.includes("503") ||
+          msg.includes("overloaded");
+        if (!isTransient || attempt >= RETRY_DELAYS_MS.length) break;
+        await new Promise((res) => setTimeout(res, RETRY_DELAYS_MS[attempt]));
+      }
+    }
+    throw lastError;
   }
 
-  async embed(_text: string): Promise<number[]> {
-    throw modelError(
-      "E_MODEL_UNAVAILABLE",
-      "embed() is not implemented by the Gemini adapter in Phase 2B",
-    );
+  async embed(text: string): Promise<number[]> {
+    const result = await this.client.models.embedContent({
+      model: "gemini-embedding-exp-03-07",
+      contents: text,
+    });
+    const values = result.embeddings?.[0]?.values;
+    if (!values || values.length === 0) {
+      throw modelError("E_EMBED_EMPTY", "Gemini embedContent returned no embedding values");
+    }
+    return values;
   }
 }
 

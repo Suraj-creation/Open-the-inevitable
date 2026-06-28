@@ -8,6 +8,8 @@
  * Snapshot semantics: the caller (composition root) builds the `TwinSnapshot` from the learner's
  * cross-surface cognition (DPS-004, LearnerCognitionSeed) and passes it to `create()`.
  */
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   CosError,
   CryptoIdGenerator,
@@ -79,6 +81,11 @@ export interface TwinRegistryOptions {
    * `bus.publish` and manages the HLC — same pattern as `CognitiveAnalysisEngine` (ADR-0017 D1).
    */
   readonly publish?: (eventType: string, payload: Record<string, unknown>) => void;
+  /**
+   * When set, twin snapshots are written to `<persistDir>/twins/<twinId>.json` on every lifecycle
+   * transition and reloaded on boot. Absent ⇒ in-memory only (tests stay hermetic).
+   */
+  readonly persistDir?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,10 +114,68 @@ export class TwinRegistry {
   private readonly byLearner = new Map<string, string[]>();
   private readonly clock: Clock;
   private readonly idGenerator: IdGenerator;
+  private readonly persistDir: string | undefined;
 
   constructor(private readonly options: TwinRegistryOptions = {}) {
     this.clock = options.clock ?? new SystemClock();
     this.idGenerator = options.idGenerator ?? new CryptoIdGenerator();
+    this.persistDir = options.persistDir;
+    if (this.persistDir) this.loadAll();
+  }
+
+  private twinDir(): string {
+    return join(this.persistDir!, "twins");
+  }
+
+  private twinFile(twinId: string): string {
+    return join(this.twinDir(), `${twinId}.json`);
+  }
+
+  private loadAll(): void {
+    const dir = this.twinDir();
+    if (!existsSync(dir)) return;
+    try {
+      for (const file of readdirSync(dir)) {
+        if (!file.endsWith(".json")) continue;
+        try {
+          const r = JSON.parse(readFileSync(join(dir, file), "utf8")) as MutableTwinRecord;
+          this.records.set(r.twinId, r);
+          const ids = this.byLearner.get(r.learnerId) ?? [];
+          if (!ids.includes(r.twinId)) ids.push(r.twinId);
+          this.byLearner.set(r.learnerId, ids);
+        } catch {
+          // skip corrupt file
+        }
+      }
+    } catch {
+      // unreadable dir
+    }
+  }
+
+  private persist(r: MutableTwinRecord): void {
+    if (!this.persistDir) return;
+    mkdirSync(this.twinDir(), { recursive: true });
+    writeFileSync(this.twinFile(r.twinId), JSON.stringify(r), "utf8");
+  }
+
+  /**
+   * Verify that a twin's consent permits the given surface and agent to access it.
+   * Returns false if the twin is not found, is terminated, or consent is expired/scoped out.
+   */
+  verifyConsent(twinId: string, surfaceId?: string, agentCid?: string): boolean {
+    const r = this.records.get(twinId);
+    if (!r || r.status === "terminated") return false;
+    const c = r.consent;
+    if (c.expiresAt !== undefined && c.expiresAt <= this.clock.nowMs()) return false;
+    if (surfaceId) {
+      const ok = c.allowedSurfaces.includes("*") || c.allowedSurfaces.includes(surfaceId);
+      if (!ok) return false;
+    }
+    if (agentCid) {
+      const ok = c.allowedAgents.includes("*") || c.allowedAgents.includes(agentCid);
+      if (!ok) return false;
+    }
+    return true;
   }
 
   /**
@@ -132,6 +197,7 @@ export class TwinRegistry {
     const ids = this.byLearner.get(params.learnerId) ?? [];
     ids.push(twinId);
     this.byLearner.set(params.learnerId, ids);
+    this.persist(record);
     this.emit("twin.created", {
       twin_id: twinId,
       learner_id: params.learnerId,
@@ -190,6 +256,7 @@ export class TwinRegistry {
     const ids = this.byLearner.get(parent.learnerId) ?? [];
     ids.push(newId);
     this.byLearner.set(parent.learnerId, ids);
+    this.persist(branched);
     this.emit("twin.branched", {
       twin_id: newId,
       branched_from: twinId,
@@ -222,6 +289,7 @@ export class TwinRegistry {
     const now = this.clock.nowMs();
     r.status = "exported";
     r.exportedAt = now;
+    this.persist(r);
     this.emit("twin.exported", { twin_id: twinId, exported_at: now });
     return this.freeze(r);
   }
@@ -242,6 +310,7 @@ export class TwinRegistry {
     const now = this.clock.nowMs();
     r.status = "terminated";
     r.terminatedAt = now;
+    this.persist(r);
     this.emit("twin.terminated", { twin_id: twinId, terminated_at: now });
     return this.freeze(r);
   }

@@ -71,6 +71,13 @@ async function blocks(
   return json.state.blocks;
 }
 
+/** Count composed Cognitive Frames (UCS, ADR-0030) — the unit of teaching on the product surface. */
+async function composedFrameCount(base: string, id: string): Promise<number> {
+  const res = await fetch(`${base}/api/surface/${id}/state`);
+  const json = (await res.json()) as { state: { frames: { status: string }[] } };
+  return json.state.frames.filter((f) => f.status === "composed").length;
+}
+
 describe("Cognitive continuity — live rehydration after restart (P2.1)", () => {
   test("a new ask on a restored surface appends fresh cognition; prior state intact; ids unique", async () => {
     // --- Process 1: drive a surface, then crash. ---
@@ -80,7 +87,8 @@ describe("Cognitive continuity — live rehydration after restart (P2.1)", () =>
       (await command(base1, id, { type: "ask", goal: "Teach me Neural Networks" })).status,
     ).toBe(200);
     const before = await blocks(base1, id);
-    expect(before.some((b) => b.block_type === "explanation")).toBe(true);
+    // The product surface teaches via a composed Cognitive Frame (UCS), not a prose explanation block.
+    expect(await composedFrameCount(base1, id)).toBeGreaterThan(0);
     await new Promise<void>((resolve) => active!.close(() => resolve()));
     active = null;
 
@@ -101,23 +109,20 @@ describe("Cognitive continuity — live rehydration after restart (P2.1)", () =>
     expect(after.filter((b) => beforeIds.has(b.block_id)).length).toBe(before.length);
   });
 
-  test("expand also works live on a restored surface", async () => {
+  test("a new ask on a restored surface composes a fresh frame live (UCS)", async () => {
     const base1 = await boot();
     const id = await createSurface(base1, "Teach me Photosynthesis", "cont-2");
     await command(base1, id, { type: "ask", goal: "Teach me Photosynthesis" });
-    const before = await blocks(base1, id);
-    const explanation = before.find((b) => b.block_type === "explanation");
-    expect(explanation).toBeDefined();
+    const before = await composedFrameCount(base1, id);
+    expect(before).toBeGreaterThan(0);
     await new Promise<void>((resolve) => active!.close(() => resolve()));
     active = null;
 
+    // The restored surface is LIVE: a fresh ask composes another Cognitive Frame.
     const base2 = await boot();
-    const expanded = await command(base2, id, {
-      type: "expand",
-      block_id: explanation!.block_id,
-      layer: 1,
-    });
-    expect(expanded.status).toBe(200);
-    expect(((await expanded.json()) as { ok: boolean }).ok).toBe(true);
+    const reask = await command(base2, id, { type: "ask", goal: "Teach me Photosynthesis" });
+    expect(reask.status).toBe(200);
+    expect(((await reask.json()) as { ok: boolean }).ok).toBe(true);
+    expect(await composedFrameCount(base2, id)).toBeGreaterThan(before);
   });
 });

@@ -84,6 +84,38 @@ export function surfaceProviderError(message: string, details?: Record<string, u
 }
 
 // ---------------------------------------------------------------------------
+// MediaGenerator — the generated-media seam (S2.1b, SRF-006)
+// ---------------------------------------------------------------------------
+
+/**
+ * The surface-side seam for generated media (image/video/simulation), mirroring `VoiceSynthesizer`.
+ * The gateway bridges a provider runtime + media store to this interface: it stores the bytes
+ * out-of-band and returns only a reference (`content_ref`) the fold records. `null` ⇒ generation
+ * unavailable; the surface degrades to text/structured content (never a crash).
+ */
+export interface MediaGenerationRequest {
+  readonly request_id: string;
+  readonly surface_id: string;
+  readonly block_id: string | null;
+  readonly modality: "image" | "video" | "simulation";
+  readonly prompt: string;
+  readonly concept_ids: readonly string[];
+}
+
+export interface MediaGenerationRef {
+  readonly artifact_id: string;
+  readonly modality: string;
+  readonly content_ref: string;
+  readonly mime_type: string;
+  readonly provider_id: string;
+  readonly deterministic: boolean;
+}
+
+export interface MediaGenerator {
+  generate(request: MediaGenerationRequest): Promise<MediaGenerationRef | null>;
+}
+
+// ---------------------------------------------------------------------------
 // ProviderRegistry
 // ---------------------------------------------------------------------------
 

@@ -1,0 +1,29 @@
+{
+  "name": "@inevitable/evaluation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cognitive Evaluation Layer (Layer 2): reasoning scorecards, CognitiveEvaluationEngine, BenchmarkRunner. Spec: spec/evaluation/cognitive-evaluation-architecture.md, ADR-0027.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/contracts": "workspace:*",
+    "@inevitable/events": "workspace:*",
+    "@inevitable/protocols": "workspace:*",
+    "@inevitable/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

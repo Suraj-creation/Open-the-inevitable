@@ -86,6 +86,16 @@ export class CognitiveUnitHost {
       await this.bus.publish(event);
     }
 
+    // Publish the unit's reasoning trace as the `outcome` of its observability contract
+    // (reasoning.* family, recorded-observation). Only when the unit produced one — deterministic
+    // stub units emit none. Spec: spec/protocols/cognitive-unit-abi.md (Event and State Transitions).
+    if (emissions.trace) {
+      await this.emit("reasoning.completed", {
+        packet_id: packet.packet_id,
+        trace: emissions.trace,
+      });
+    }
+
     this.transitionOrThrow("Publishing");
     await this.emit("agent.completed", {
       packet_id: packet.packet_id,

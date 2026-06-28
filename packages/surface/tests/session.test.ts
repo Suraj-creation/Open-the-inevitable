@@ -11,6 +11,7 @@ import { TieredMemoryStore } from "@inevitable/memory";
 import {
   DeterministicMvpUnit,
   FiberedLearningLoop,
+  FramePlannerUnit,
   LearningPathProjector,
   MVP_AGENT_MANIFESTS,
   MasteryCheckpointRecorder,
@@ -18,15 +19,18 @@ import {
   PRODUCT_DISPATCH_POLICIES,
   ProductRuntimeDispatcher,
   SupervisorUnit,
+  SurfaceComposerUnit,
+  type DepthTestResult,
   type OnboardingSession,
 } from "@inevitable/product-cognition";
 import type { ModelRuntime } from "@inevitable/contracts";
-import type { CognitiveIdentity } from "@inevitable/protocols";
-import { ManualClock, SeededIdGenerator } from "@inevitable/shared";
+import type { CognitionPacket, CognitiveIdentity, CognitiveWorkItem } from "@inevitable/protocols";
+import { ManualClock, SeededIdGenerator, ok } from "@inevitable/shared";
 import { WorldStateGraph } from "@inevitable/world-state";
 import { foldSurfaceEvents } from "../src/projection";
+import type { MediaGenerator } from "../src/providers";
 import { TextSurfaceRenderer } from "../src/renderer";
-import { SurfaceSession, type SurfaceAskInput } from "../src/session";
+import { SurfaceSession, type GovernedDispatcher, type SurfaceAskInput } from "../src/session";
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -86,7 +90,7 @@ function onboarding(userId = "user-surface", trustLevel = 5): OnboardingSession 
 }
 
 function agentIdentity(
-  kind: "supervisor" | "explanation" | "practice",
+  kind: "supervisor" | "explanation" | "practice" | "composer" | "frameplanner",
   cid: string,
 ): CognitiveIdentity {
   const manifest = MVP_AGENT_MANIFESTS.find((m) => m.id === `agent.${kind}`)!;
@@ -140,9 +144,107 @@ function fakeLayeredModel(): ModelRuntime {
   };
 }
 
+/**
+ * A fake composer model: distilled MCCR anchors + a SEPARATE narration script + an image decision.
+ * The board text and the spoken text are deliberately DIFFERENT (no duplication) — UCS, ADR-0030.
+ */
+function fakeComposerModel(): ModelRuntime {
+  return {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          mccr: {
+            core_concept: "Linear algebra",
+            definition: "The study of vectors, matrices, and the linear maps between them.",
+            key_formula: { latex: "A\\mathbf{x}=\\mathbf{b}", plain: "A x equals b" },
+            mental_model: "Data as arrows in space; matrices reshape that space.",
+          },
+          narration_script: {
+            segments: [
+              {
+                text: "Think of every data point as an arrow pointing out from the origin.",
+                anchor_ref: "mental_model",
+                intent: "introduce",
+                pause_after: false,
+              },
+              {
+                text: "A matrix is a machine that stretches and rotates all those arrows at once.",
+                anchor_ref: "core_concept",
+                intent: "build",
+                pause_after: false,
+              },
+              {
+                text: "So solving A x equals b asks: which arrow, once reshaped, lands on b?",
+                anchor_ref: "key_formula",
+                intent: "connect",
+                pause_after: true,
+              },
+            ],
+          },
+          image_plan: {
+            helps: true,
+            prompt: "vectors as arrows being transformed by a matrix grid",
+            rationale: "a visual makes the reshaping concrete",
+          },
+        }),
+        model: "fake-composer-model",
+        finishReason: "stop",
+      };
+    },
+    async embed() {
+      return [0, 0, 0, 0, 0, 0, 0, 0];
+    },
+  };
+}
+
+/**
+ * A fake frame planner: decomposes the concept into a 2-frame progressive sequence (intuition →
+ * formal), each with a distinct sub_focus — UCS, ADR-0030 Phase 2. Deterministic per call.
+ */
+function fakeFramePlannerModel(): ModelRuntime {
+  return {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          frames: [
+            {
+              title: "Intuition: arrows in space",
+              sub_focus: "the geometric intuition of vectors and transformations",
+              archetype: "image-led",
+              slots: ["core_concept", "mental_model"],
+              intent: "introduce",
+            },
+            {
+              title: "The map, precisely",
+              sub_focus: "the formal definition and the matrix equation",
+              archetype: "formal",
+              slots: ["definition", "key_formula"],
+              intent: "deepen",
+            },
+          ],
+          pacing: { strategy: "progressive", notes: "intuition → formal" },
+        }),
+        model: "fake-frameplanner-model",
+        finishReason: "stop",
+      };
+    },
+    async embed() {
+      return [0, 0, 0, 0, 0, 0, 0, 0];
+    },
+  };
+}
+
 function makeFixture(
   seed = "surface-session",
-  options: { governance?: boolean; trustLevel?: number; explanationModel?: ModelRuntime } = {},
+  options: {
+    governance?: boolean;
+    trustLevel?: number;
+    explanationModel?: ModelRuntime;
+    composerModel?: ModelRuntime;
+    framePlannerModel?: ModelRuntime;
+    media?: MediaGenerator;
+    motivationDispatcher?: GovernedDispatcher;
+  } = {},
 ): Fixture {
   const clock = new ManualClock(Date.UTC(2026, 5, 11));
   const idGenerator = new SeededIdGenerator(seed);
@@ -225,6 +327,44 @@ function makeFixture(
     nodeId: "surface-loop",
   });
 
+  const composerManifest = MVP_AGENT_MANIFESTS.find((m) => m.id === "agent.composer")!;
+  const composerDispatcher = options.composerModel
+    ? new ProductRuntimeDispatcher({
+        bus,
+        clock,
+        idGenerator,
+        nodeId: "surface-composer",
+        agent: {
+          identity: agentIdentity("composer", "cog-comp-surface"),
+          unit: new SurfaceComposerUnit({
+            manifest: composerManifest,
+            model: options.composerModel,
+            idGenerator,
+          }),
+        },
+        governance,
+      })
+    : undefined;
+
+  const framePlannerManifest = MVP_AGENT_MANIFESTS.find((m) => m.id === "agent.frameplanner")!;
+  const framePlannerDispatcher = options.framePlannerModel
+    ? new ProductRuntimeDispatcher({
+        bus,
+        clock,
+        idGenerator,
+        nodeId: "surface-frameplanner",
+        agent: {
+          identity: agentIdentity("frameplanner", "cog-plan-surface"),
+          unit: new FramePlannerUnit({
+            manifest: framePlannerManifest,
+            model: options.framePlannerModel,
+            idGenerator,
+          }),
+        },
+        governance,
+      })
+    : undefined;
+
   const surface = new SurfaceSession({
     session,
     world,
@@ -234,6 +374,10 @@ function makeFixture(
     clock,
     idGenerator,
     nodeId: "surface-session",
+    ...(options.media ? { media: options.media } : {}),
+    ...(options.motivationDispatcher ? { motivationDispatcher: options.motivationDispatcher } : {}),
+    ...(composerDispatcher ? { composerDispatcher } : {}),
+    ...(framePlannerDispatcher ? { framePlannerDispatcher } : {}),
   });
 
   return { surface, world, bus };
@@ -265,6 +409,13 @@ function teachMeNeuralNetworks(): SurfaceAskInput {
       passed: true,
       confidence: 0.9,
       evidence: [{ kind: "practice", result: "solved correctly" }],
+      depthTests: [
+        { kind: "explanation", passed: true, confidence: 0.9, evidence: "articulated correctly" },
+        { kind: "application", passed: true, confidence: 0.88, evidence: "solved problem" },
+        { kind: "connection", passed: true, confidence: 0.85, evidence: "linked to prerequisites" },
+        { kind: "teaching", passed: true, confidence: 0.82, evidence: "rephrased for novice" },
+        { kind: "edge_case", passed: true, confidence: 0.8, evidence: "handled edge case" },
+      ],
     },
   };
 }
@@ -302,13 +453,40 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
     expect(status.get("perceptron")).toBe("available"); // unlocked by mastery
     expect(status.get("neural-networks")).toBe("locked");
 
-    // 4. Cognition blocks appeared, typed and ordered
+    // 4. Cognition blocks appeared, typed and ordered — incl. the projected concept map (S2.1a)
     expect(asked.value.blocks.map((b) => b.block_type)).toEqual([
       "routing",
+      "concept",
       "explanation",
       "practice",
       "assessment",
     ]);
+
+    // S2.2 — depth gate recorded in state
+    expect(asked.value.state.depth_gates).toHaveLength(1);
+    const gate = asked.value.state.depth_gates[0]!;
+    expect(gate.concept_id).toBe("linear-algebra");
+    expect(gate.passed).toBe(true);
+    expect(gate.passed_count).toBe(5);
+    expect(gate.total_count).toBe(5);
+    expect(gate.tests).toHaveLength(5);
+    expect(gate.tests.map((t) => t.kind)).toEqual([
+      "explanation",
+      "application",
+      "connection",
+      "teaching",
+      "edge_case",
+    ]);
+    // Assessment block carries the depth_gate payload
+    const assessmentBlock = asked.value.blocks.find((b) => b.block_type === "assessment");
+    expect(assessmentBlock?.content["depth_gate"]).toBeTruthy();
+    // The concept map is a structured visual projected from the learning graph
+    const conceptMap = asked.value.blocks.find((b) => b.block_type === "concept");
+    const map = conceptMap?.content["map"] as
+      | { focus?: string; nodes?: unknown[]; edges?: unknown[] }
+      | undefined;
+    expect(map?.focus).toBe("linear-algebra");
+    expect((map?.nodes ?? []).length).toBeGreaterThan(0);
 
     // 5. Supervisor orchestration decision is visible
     expect(asked.value.routing.targetAgent).toBe("explanation");
@@ -327,6 +505,31 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
 
     // The fiber journal is part of the result (D2 replayable record)
     expect(asked.value.loop.journal.length).toBeGreaterThan(5);
+  });
+
+  test("learner interactions are governed, recorded, and folded (S1.3)", async () => {
+    const { surface } = makeFixture("surface-interact");
+    await surface.start("Teach me Neural Networks");
+    await surface.ask(teachMeNeuralNetworks());
+
+    const jump = await surface.interact({ kind: "jump", target_id: "perceptron" });
+    expect(jump.ok).toBe(true);
+    if (!jump.ok) throw jump.error;
+    expect(jump.value.effect).toBe("refocused");
+
+    const interrupt = await surface.interact({ kind: "interrupt" });
+    expect(interrupt.ok).toBe(true);
+    if (!interrupt.ok) throw interrupt.error;
+    expect(interrupt.value.effect).toBe("cancelled");
+
+    const state = surface.state();
+    expect(state?.interactions).toHaveLength(2);
+    const byId = new Map((state?.interactions ?? []).map((i) => [i.interaction_id, i]));
+    expect(byId.get(jump.value.interaction_id)?.kind).toBe("jump");
+    expect(byId.get(jump.value.interaction_id)?.effect).toBe("refocused");
+    expect(byId.get(interrupt.value.interaction_id)?.effect).toBe("cancelled");
+    // jump moved the surface's focus to the requested concept
+    expect(state?.focus?.target_id).toBe("perceptron");
   });
 
   test("8. the session replays deterministically", async () => {
@@ -409,6 +612,155 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
     expect(state.presence.find((p) => p.role === "explainer")?.state).toBe("contributing");
   });
 
+  test("UCS frame path: the board holds the MCCR; the voice carries a SEPARATE narration (ADR-0030)", async () => {
+    const { surface, bus } = makeFixture("surface-frame", {
+      composerModel: fakeComposerModel(),
+      media: {
+        async generate(request) {
+          return {
+            artifact_id: `art-${request.request_id}`,
+            modality: request.modality,
+            content_ref: `/api/surface/${request.surface_id}/media/art-${request.request_id}`,
+            mime_type: "image/svg+xml",
+            provider_id: "test-null",
+            deterministic: true,
+          };
+        },
+      },
+    });
+    await surface.start("Teach me Neural Networks");
+    const asked = await surface.ask(teachMeNeuralNetworks());
+    expect(asked.ok).toBe(true);
+    if (!asked.ok) throw asked.error;
+    const state = asked.value.state;
+
+    // A Cognitive Frame was composed — the board holds the distilled MCCR, not prose.
+    expect(state.frames).toHaveLength(1);
+    const frame = state.frames[0]!;
+    expect(frame.status).toBe("composed");
+    expect(frame.concept_id).toBe("linear-algebra");
+    expect(frame.mccr?.core_concept?.content).toEqual({ kind: "text", text: "Linear algebra" });
+    expect(frame.mccr?.key_formula?.content).toMatchObject({ kind: "formula" });
+    // image-as-cognition: the generated illustration is folded into the MCCR (not a detached block)
+    expect(frame.mccr?.image?.content).toMatchObject({ kind: "image" });
+
+    // The frame REPLACES the prose explanation block — no document on the board.
+    expect(asked.value.blocks.map((b) => b.block_type)).not.toContain("explanation");
+
+    // The narration is a SEPARATE script, recorded and voiced.
+    expect(state.narration_scripts).toHaveLength(1);
+    expect(state.narration_scripts[0]?.segments).toHaveLength(3);
+    expect(state.narration.length).toBe(3);
+    // The spoken text differs from the board text (no duplication) and targets MCCR elements.
+    const spoken = state.narration.map((s) => s.text).join(" ");
+    expect(spoken).toContain("arrow");
+    expect(spoken).not.toContain("the study of vectors"); // board's definition is not re-spoken verbatim
+    expect(state.narration[0]?.frame_id).toBe(frame.frame_id);
+    expect(state.narration[0]?.focus?.target_type).toBe("element");
+    expect(state.frames[0]?.segment_ids).toHaveLength(3);
+
+    // The image decision is recorded and observable; the composer's reasoning reaches the Observatory.
+    expect(state.image_decisions).toHaveLength(1);
+    expect(state.image_decisions[0]?.helps).toBe(true);
+    expect(state.agent_reasoning.some((r) => r.agent_id === "composer")).toBe(true);
+
+    // Ordering: frame.composed precedes its script + narration segments (SRF-002 laws 8/10).
+    const types = bus.replay({ subject: "surface.>" }).map((e) => e.event_type);
+    expect(types.indexOf("surface.frame.composed")).toBeLessThan(
+      types.indexOf("surface.narration.script.produced"),
+    );
+    expect(types.indexOf("surface.frame.composed")).toBeLessThan(
+      types.indexOf("surface.narration.segment"),
+    );
+  });
+
+  test("UCS frame path replays deterministically (deep-equal folded state)", async () => {
+    const run = async () => {
+      const { surface, bus } = makeFixture("surface-frame-replay", {
+        composerModel: fakeComposerModel(),
+      });
+      await surface.start("Teach me Neural Networks");
+      const asked = await surface.ask(teachMeNeuralNetworks());
+      expect(asked.ok).toBe(true);
+      await surface.close();
+      return { state: surface.state(), events: bus.replay({ subject: "surface.>" }) };
+    };
+    const [a, b] = await Promise.all([run(), run()]);
+    expect(a.state).toEqual(b.state);
+    const refolded = foldSurfaceEvents(a.events, a.state?.surface_id);
+    expect(refolded).toEqual(a.state);
+  });
+
+  test("UCS Phase 2: the planner decomposes the concept into a progressive frame sequence (ADR-0030)", async () => {
+    const { surface, bus } = makeFixture("surface-multiframe", {
+      composerModel: fakeComposerModel(),
+      framePlannerModel: fakeFramePlannerModel(),
+    });
+    await surface.start("Teach me Neural Networks");
+    const asked = await surface.ask(teachMeNeuralNetworks());
+    expect(asked.ok).toBe(true);
+    if (!asked.ok) throw asked.error;
+    const state = asked.value.state;
+
+    // The lesson is a SEQUENCE of frames: 2 teaching frames (planner) + practice + assessment.
+    expect(state.frames).toHaveLength(4);
+    expect(state.frames.every((f) => f.status === "composed")).toBe(true);
+    // Ordinals are sparse + monotone (promotion-friendly; SRF-002 law 8).
+    expect(state.frames.map((f) => f.ordinal)).toEqual([1000, 2000, 3000, 4000]);
+    const titles = state.frames.map((f) => f.title);
+    expect(titles[0]).toBe("Intuition: arrows in space");
+    expect(titles[1]).toBe("The map, precisely");
+    expect(titles).toContain("Practice — Linear Algebra");
+    expect(titles).toContain("Checkpoint — Linear Algebra");
+
+    // Practice became its own anchored frame carrying the practice prompt as a key_example.
+    const practiceFrame = state.frames.find((f) => f.title === "Practice — Linear Algebra");
+    expect(practiceFrame?.mccr?.key_example?.content).toEqual({
+      kind: "text",
+      text: "Give me one matrix-vector practice problem",
+    });
+
+    // Each teaching frame reserved its layout first (planned → composed); 4 planned events in all.
+    const types = bus.replay({ subject: "surface.>" }).map((e) => e.event_type);
+    expect(types.filter((t) => t === "surface.frame.planned")).toHaveLength(4);
+    expect(types.filter((t) => t === "surface.frame.composed")).toHaveLength(4);
+    // Law 8: a frame's planned + composed precede its narration segments.
+    expect(types.indexOf("surface.frame.planned")).toBeLessThan(
+      types.indexOf("surface.frame.composed"),
+    );
+    expect(types.indexOf("surface.frame.composed")).toBeLessThan(
+      types.indexOf("surface.narration.segment"),
+    );
+
+    // Narration spans every frame: distinct frame_ids in order, each frame voiced.
+    const narratedFrameIds = new Set(state.narration.map((s) => s.frame_id));
+    expect(narratedFrameIds.size).toBe(4);
+    expect(state.frames.every((f) => f.segment_ids.length > 0)).toBe(true);
+
+    // The planner's decomposition reasoning reaches the Observatory (ADR-0029).
+    expect(state.agent_reasoning.some((r) => r.agent_id === "frameplanner")).toBe(true);
+    // The board still never holds a prose explanation block.
+    expect(asked.value.blocks.some((b) => b.block_type === "explanation")).toBe(false);
+  });
+
+  test("UCS Phase 2 planner path replays deterministically (deep-equal folded state)", async () => {
+    const run = async () => {
+      const { surface, bus } = makeFixture("surface-multiframe-replay", {
+        composerModel: fakeComposerModel(),
+        framePlannerModel: fakeFramePlannerModel(),
+      });
+      await surface.start("Teach me Neural Networks");
+      const asked = await surface.ask(teachMeNeuralNetworks());
+      expect(asked.ok).toBe(true);
+      await surface.close();
+      return { state: surface.state(), events: bus.replay({ subject: "surface.>" }) };
+    };
+    const [a, b] = await Promise.all([run(), run()]);
+    expect(a.state).toEqual(b.state);
+    const refolded = foldSurfaceEvents(a.events, a.state?.surface_id);
+    expect(refolded).toEqual(a.state);
+  });
+
   test("event ordering laws hold (created first, joined before contributed, closed terminal)", async () => {
     const { surface, bus } = makeFixture("surface-ordering");
     await surface.start("Teach me Neural Networks");
@@ -477,5 +829,210 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
       .map((e) => (e.payload as Record<string, unknown>)["agent_cid"]);
     expect(joins).not.toContain("cog-exp-surface");
     expect(joins).not.toContain("cog-prc-surface");
+  });
+
+  test("prerequisite-descent triggers on depth-gate failure and surfaces the prereq (S2.3)", async () => {
+    // 1/5 depth tests pass → gate fails (threshold 4) → descent to "linear-algebra"
+    const FAILING_DEPTH_TESTS: DepthTestResult[] = [
+      { kind: "explanation", passed: false, confidence: 0.3, evidence: "unclear explanation" },
+      { kind: "application", passed: false, confidence: 0.2, evidence: "failed to apply" },
+      { kind: "connection", passed: false, confidence: 0.3, evidence: "no connections made" },
+      { kind: "teaching", passed: true, confidence: 0.7, evidence: "rephrased basics" },
+      { kind: "edge_case", passed: false, confidence: 0.2, evidence: "missed edge cases" },
+    ];
+
+    const { surface, bus } = makeFixture("surface-descent");
+    await surface.start("Teach me Neural Networks");
+
+    // "perceptron" has "linear-algebra" as a direct prerequisite.
+    const asked = await surface.ask({
+      goal: "Teach me Neural Networks",
+      pathId: "path-neural-networks",
+      concepts: [
+        { id: "linear-algebra", title: "Linear Algebra" },
+        { id: "perceptron", title: "The Perceptron", prerequisites: ["linear-algebra"] },
+      ],
+      focusConceptId: "perceptron",
+      explanationPrompt: "Explain the perceptron",
+      practicePrompt: "Practice the perceptron",
+      mastery: {
+        assessorCid: "cog-sup-surface",
+        passed: false,
+        confidence: 0.3,
+        evidence: [],
+        depthTests: FAILING_DEPTH_TESTS,
+      },
+    });
+    expect(asked.ok).toBe(true);
+    if (!asked.ok) throw asked.error;
+
+    // S2.3: one descent recorded in folded state
+    const state = asked.value.state;
+    expect(state.prerequisite_descents).toHaveLength(1);
+    const descent = state.prerequisite_descents[0]!;
+    expect(descent.from_concept_id).toBe("perceptron");
+    expect(descent.to_concept_id).toBe("linear-algebra");
+    expect(descent.trigger).toBe("depth_gate_failed");
+    expect(descent.completed).toBe(true);
+
+    // Descent blocks are visible on the surface (routing banner + prereq explanation)
+    const prereqBlocks = asked.value.blocks.filter((b) => b.concept_ids.includes("linear-algebra"));
+    expect(prereqBlocks.length).toBeGreaterThan(0);
+    const prereqBlockTypes = prereqBlocks.map((b) => b.block_type);
+    expect(prereqBlockTypes).toContain("routing");
+    expect(prereqBlockTypes).toContain("explanation");
+
+    // D3: descent.started precedes descent.completed in the event log
+    const events = bus.replay({ subject: "surface.>" }).map((e) => e.event_type);
+    expect(events).toContain("surface.prerequisite.descent.started");
+    expect(events).toContain("surface.prerequisite.descent.completed");
+    const startIdx = events.indexOf("surface.prerequisite.descent.started");
+    const completeIdx = events.indexOf("surface.prerequisite.descent.completed");
+    expect(startIdx).toBeLessThan(completeIdx);
+
+    // Timeline re-projected after descent: the prerequisite concept is now mastered
+    const laNode = asked.value.timeline.nodes.find((n) => n.concept_id === "linear-algebra");
+    expect(laNode?.status).toBe("mastered");
+  });
+
+  test("inline image block appears after explanation when a MediaGenerator is wired (S2.1b)", async () => {
+    // Deterministic fake: no external dependency; bytes-out-of-band contract held (content_ref only)
+    const fakeMedia: MediaGenerator = {
+      async generate(request) {
+        return {
+          artifact_id: `art-image-${request.request_id}`,
+          modality: request.modality,
+          content_ref: `/api/surface/${request.surface_id}/media/art-image-${request.request_id}`,
+          mime_type: "image/svg+xml",
+          provider_id: "test-null",
+          deterministic: true,
+        };
+      },
+    };
+    const { surface, bus } = makeFixture("surface-media-gen", { media: fakeMedia });
+    await surface.start("Teach me Neural Networks");
+    const asked = await surface.ask(teachMeNeuralNetworks());
+    expect(asked.ok).toBe(true);
+    if (!asked.ok) throw asked.error;
+
+    // The image block must appear immediately after the explanation block
+    const blockTypes = asked.value.blocks.map((b) => b.block_type);
+    expect(blockTypes).toContain("image");
+    const imageIdx = blockTypes.indexOf("image");
+    const explanationIdx = blockTypes.indexOf("explanation");
+    expect(imageIdx).toBe(explanationIdx + 1);
+
+    // The block carries the artifact reference (bytes never in events — SRF-006 D3)
+    const imageBlock = asked.value.blocks[imageIdx];
+    const artifact = imageBlock?.content["artifact"] as Record<string, unknown> | undefined;
+    expect(artifact?.content_ref).toMatch(/^\/api\/surface\//);
+    expect(artifact?.mime_type).toBe("image/svg+xml");
+    expect(artifact?.deterministic).toBe(true);
+
+    // The surface.visual.generated event was emitted (D3 record-before-use: recorded before the block)
+    const events = bus.replay({ subject: "surface.>" }).map((e) => e.event_type);
+    expect(events).toContain("surface.visual.generated");
+    expect(events.filter((t) => t === "surface.visual.generated")).toHaveLength(1);
+  });
+
+  test("S3.3 motivation surfaced when barely-passed mastery (0.6 ≤ conf < 0.75)", async () => {
+    // Stub motivation dispatcher: returns a packet with content.message
+    const fakeMotivationDispatcher: GovernedDispatcher = {
+      async dispatch() {
+        return ok({
+          workItem: {
+            work_id: "wk-mot-001",
+            work_type: "student_interaction",
+            session_id: "intent-surface-001",
+            tenant_id: null,
+            risk_class: "low",
+          } as unknown as CognitiveWorkItem,
+          packet: {} as unknown as CognitionPacket,
+          emissions: { packets: [] },
+          responsePackets: [
+            {
+              packet_id: "cp-mot-001",
+              schema_version: "1.0.0",
+              source_cid: "agent.motivation",
+              target_cid: "cog-surface-learner",
+              tenant_id: null,
+              session_id: "intent-surface-001",
+              causation_id: "cp-mot-000",
+              correlation_id: "cp-mot-001",
+              timestamp: "2026-06-11T00:00:00.000Z",
+              hlc: "00000000000000000000:0:test",
+              sequence_number: 1,
+              packet_type: "response",
+              intent: "motivation",
+              concept_ids: ["linear-algebra"],
+              domain_ids: [],
+              content: {
+                message: "You passed! Confidence will grow with practice — keep going.",
+                response_kind: "motivational-message",
+              },
+              evidence: [],
+              confidence: 0.8,
+              uncertainty_estimate: 0.2,
+              reasoning_depth: 1,
+              classification: "internal",
+              policy_tags: [],
+              requires_human_review: false,
+              priority: 5,
+              expiry: null,
+              trace_id: "00000000000000000000000000000001",
+              span_id: "0000000000000001",
+            },
+          ],
+        });
+      },
+    };
+
+    const { surface, bus } = makeFixture("surface-motivation", {
+      motivationDispatcher: fakeMotivationDispatcher,
+    });
+    await surface.start("Teach me Neural Networks");
+
+    // Barely-passed mastery: confidence 0.65 — above 0.6 floor, below 0.75 research threshold.
+    const asked = await surface.ask({
+      goal: "Teach me Neural Networks",
+      pathId: "path-neural-networks",
+      concepts: [{ id: "linear-algebra", title: "Linear Algebra" }],
+      focusConceptId: "linear-algebra",
+      explanationPrompt: "Explain linear algebra",
+      practicePrompt: "Practice linear algebra",
+      mastery: {
+        assessorCid: "cog-sup-surface",
+        passed: true,
+        confidence: 0.65,
+        evidence: [{ kind: "practice", result: "partial" }],
+        depthTests: [],
+      },
+    });
+    expect(asked.ok).toBe(true);
+    if (!asked.ok) throw asked.error;
+
+    // D3: surface.motivation.surfaced emitted (before the motivation block)
+    const events = bus.replay({ subject: "surface.>" }).map((e) => e.event_type);
+    expect(events).toContain("surface.motivation.surfaced");
+
+    // Fold: motivation_surfaced flag is set
+    expect(asked.value.state.motivation_surfaced).toBe(true);
+
+    // Motivation block contributed by the dispatcher
+    const motBlock = asked.value.blocks.find((b) => b.block_type === "motivation");
+    expect(motBlock).toBeDefined();
+    expect(motBlock?.content["message"]).toContain("keep going");
+  });
+
+  test("S3.3 motivation NOT surfaced above research-readiness threshold", async () => {
+    const { surface, bus } = makeFixture("surface-no-motivation");
+    await surface.start("Teach me Neural Networks");
+
+    // Confidence 0.9 — above 0.75 threshold; research frontier path, not motivation.
+    await surface.ask(teachMeNeuralNetworks());
+
+    const events = bus.replay({ subject: "surface.>" }).map((e) => e.event_type);
+    expect(events).not.toContain("surface.motivation.surfaced");
+    expect(surface.state()?.motivation_surfaced).toBe(false);
   });
 });

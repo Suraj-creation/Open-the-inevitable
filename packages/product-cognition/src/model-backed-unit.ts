@@ -35,7 +35,7 @@ import type { WorldStateGraph } from "@inevitable/world-state";
 
 const SPEC_REF = "protocols/model-invocation-protocol";
 
-export type ModelBackedRole = "explanation" | "practice" | "assessment";
+export type ModelBackedRole = "explanation" | "practice" | "assessment" | "revision";
 
 export interface ModelBackedUnitDeps {
   readonly manifest: AgentManifest;
@@ -47,6 +47,12 @@ export interface ModelBackedUnitDeps {
   readonly world?: WorldStateGraph;
   readonly timeoutMs?: number;
   readonly idGenerator?: IdGenerator;
+  /**
+   * Live depth-bias provider (P5.2, DPS-010 §5). When set, the current integer bias shifts the
+   * concept's natural explanation depth so evolution rollouts take effect immediately without a
+   * restart. Injected as a callback to avoid a package-level dependency on @inevitable/orchestration.
+   */
+  readonly getDepthBias?: () => number;
 }
 
 /**
@@ -77,6 +83,8 @@ const ROLE_INSTRUCTION: Record<ModelBackedRole, string> = {
     "Generate one concrete practice task for the concept, with the expected approach. Lead with an intuitive framing of why this practice matters.",
   assessment:
     "Produce one mastery-probing question for the concept and describe what a passing answer demonstrates. Lead with the intuition being verified.",
+  revision:
+    "You are a pedagogical challenger. Present an ALTERNATIVE explanation that approaches the concept from a fundamentally different angle than the primary agent. Use a different story, metaphor, or entry point — not a refinement of the same one. Your goal is to reveal whether the learner understands the concept deeply or only one presentation of it. If the concept has both abstract and concrete faces, choose the one the primary explanation likely did not lead with.",
 };
 
 /** F04 seven-layer names for adaptive prompt assembly (ADR-0016). */
@@ -193,6 +201,7 @@ export class ModelBackedUnit implements CognitiveUnit {
   private readonly world: WorldStateGraph | undefined;
   private readonly timeoutMs: number;
   private readonly idGenerator: IdGenerator;
+  private readonly getDepthBias: (() => number) | undefined;
   private preparedLeaseId: string | null = null;
 
   constructor(deps: ModelBackedUnitDeps) {
@@ -203,6 +212,7 @@ export class ModelBackedUnit implements CognitiveUnit {
     this.world = deps.world;
     this.timeoutMs = deps.timeoutMs ?? 20_000;
     this.idGenerator = deps.idGenerator ?? new CryptoIdGenerator();
+    this.getDepthBias = deps.getDepthBias;
   }
 
   describe(): UnitDescriptor {
@@ -242,6 +252,13 @@ export class ModelBackedUnit implements CognitiveUnit {
         invocation_key: request.invocation_key,
       });
     }
+    if (result.finishReason === "max_tokens") {
+      throw modelError(
+        "E_MODEL_OUTPUT_TRUNCATED",
+        "model output was cut off at the token budget; JSON is incomplete",
+        { invocation_key: request.invocation_key, text_length: result.text.length },
+      );
+    }
     const parsed = parseModelLayeredOutput(result.text);
     const response = this.buildResponsePacket(packet, parsed, result);
     const trace = this.buildTrace(packet, parsed, result);
@@ -252,20 +269,22 @@ export class ModelBackedUnit implements CognitiveUnit {
     const conceptIds = packet.concept_ids ?? [];
     const content = (packet.content ?? {}) as Record<string, unknown>;
 
-    // Determine target explanation depth (explanation role only; practice/assessment stay at 0).
+    // Determine target explanation depth (explanation and revision roles; practice/assessment at 0).
+    const isExplainerRole = this.role === "explanation" || this.role === "revision";
     const requestedLayer =
-      this.role === "explanation" && typeof content["layer"] === "number"
-        ? (content["layer"] as number)
-        : 0;
+      isExplainerRole && typeof content["layer"] === "number" ? (content["layer"] as number) : 0;
     // Read the concept's natural depth from the KG (seeded by KnowledgeGraphEngine, ADR-0015).
     const primaryConceptNode =
       this.world?.getNode(`concept:${conceptIds[0] ?? ""}`) ??
       this.world?.getNode(conceptIds[0] ?? "");
     const conceptNaturalLayer =
-      this.role === "explanation" && typeof primaryConceptNode?.props["layer"] === "number"
+      isExplainerRole && typeof primaryConceptNode?.props["layer"] === "number"
         ? (primaryConceptNode.props["layer"] as number)
         : 0;
-    const targetLayer = Math.max(requestedLayer, conceptNaturalLayer);
+    // Depth bias from a rolled-out evolution proposal shifts the concept's natural depth (P5.2).
+    const depthBias = this.getDepthBias ? Math.round(this.getDepthBias()) : 0;
+    const biasedNaturalLayer = Math.max(0, Math.min(6, conceptNaturalLayer + depthBias));
+    const targetLayer = Math.max(requestedLayer, biasedNaturalLayer);
 
     // Assembled context from P2.4 working memory (assembled_context_items in packet content,
     // threaded from FiberedLearningLoopInput.assembledContextItems — ADR-0016).
@@ -293,7 +312,7 @@ export class ModelBackedUnit implements CognitiveUnit {
       assembledContextItems.length > 0
         ? `Prior learner knowledge (already understood — build on it, do not re-explain):\n${assembledContextItems.map((item) => `  • ${item.text}`).join("\n")}`
         : "",
-      this.role === "explanation" && targetLayer > 0
+      isExplainerRole && targetLayer > 0
         ? `Produce ALL of the following explanation layers:\n${targetLayerNames.map((name) => `  ${name}`).join("\n")}`
         : "Produce a clear layer_0 (Intuition & Story). Include layer_1 when a visual mental model genuinely helps.",
       `Respond with JSON only (no markdown fences) matching:`,
@@ -310,10 +329,14 @@ export class ModelBackedUnit implements CognitiveUnit {
       `Target depth: layers 0–${String(targetLayer)}`,
     ].join("\n");
 
+    // Explanation and revision need the same depth budget; practice/assessment are smaller.
+    const maxTokens = isExplainerRole
+      ? Math.max(4096, 1024 * (targetLayer + 1))
+      : Math.max(2048, 512 * (targetLayer + 1));
     return {
       prompt,
       system,
-      maxTokens: Math.max(1024, 512 * (targetLayer + 1)),
+      maxTokens,
       responseSchema: OUTPUT_CONTRACT_SCHEMA,
       invocation_key: `${this.manifest.id}:${packet.packet_id}:${this.role}`,
     };

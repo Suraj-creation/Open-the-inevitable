@@ -869,3 +869,172 @@ outcomes) that P6 self-evolution will read as its inputs.
 **Verify:** `pnpm verify` green across all 24 packages+apps+services (codegen + typecheck + test + lint + format). One typecheck fix: `handler(...)` returns `Promise<unknown> | unknown` — wrapped in `Promise.resolve()` before `.catch()`. One lint fix: `CosClient` used only as type in `tools.ts` function signature — converted to `import { type CosClient, ... }`. Prettier run on 3 files. All clean.
 
 **Deferred to P7.2+:** duplex WebSocket transport (ADR-0006 explicitly deferred); multi-user CRDT; auth at the SDK boundary; SSE streaming helper in the SDK; integration tests against a live gateway instance.
+
+## 2026-06-21 — Phase S1: Cognitive Surface maturity (static viewer → living environment)
+
+Prompted by a forward-looking founder review. Three independent code audits confirmed the assessment: the surface was a sophisticated streaming/replay engine playing back a **deterministic, single-agent-per-phase, single-cycle** reasoning trace over a **flat prerequisite spine**, with `ask|expand|close` interactivity and client-only playback — a "living illusion," not a living environment. Roadmap at `spec/implementation-roadmaps/cognitive-surface-maturity.md`. The governing principle for every increment: a **composition over the existing substrate** (cognitive units, the event log, `ProposalBlackboard`, the fold, governance, D3 recording) — no new infrastructure, no new adapter contract, `foldSurfaceEvents` stays pure, record→replay byte-identical, governance preserved. `pnpm verify` green at every sub-phase boundary.
+
+**S1.0 — Spec-first.** ADR-0024 (Surface Interaction Protocol — learner intents as governed replayable events; interrupt as cooperative cancellation, not preemption). ADR-0025 (Cognitive Ensemble Orchestration — concurrent proposals → arbiter synthesis; extends ADR-0018, promotes the blackboard to live arbitration; focused ~6–8 ensemble expanding later). SRF-002 → schema_version 1.2.0 with four new sub-families (`surface.proposal.*`, `surface.synthesis.recorded`, `surface.graph.*`, `surface.interaction.*`) + fold mapping. SRF-003 extended to a cognitive multi-graph (typed edges + entry points), kept a pure projection. Event taxonomy updated.
+
+**S1.1 — Timeline as a cognitive graph.** `KnowledgeGraphEngine.addEdge(from, to, type)` adds typed edges (`depends_on`/`applies_to`/`research_adjacent`/`frontier_of`/`bridges_to`) alongside the legacy `addBridge`. `SurfaceTimelineBuilder` now projects `edges[]` (the prerequisite spine derived from the seeds + informational edges read from world-state via `neighbors`), per-node `layer` (KG-seeded layer prop, else computed prerequisite-chain depth, capped at 6) and `confidence` (from the best mastery checkpoint), an `entry_point`, and a `reproject(entryPoint)` that emits `surface.graph.entrypoint.changed`. `TimelineProjection`/`SurfaceTimelineNode` extended; the fold carries the graph through `surface.timeline.updated` unchanged + folds `surface.graph.entrypoint.changed`. Client types re-exported. 4 new timeline tests (typed-edge spine, depth layers, mastery confidence, reproject idempotence).
+
+**S1.2 — Cognitive ensemble loop.** The P4.1 challenger `Promise.all` (a discarded probe) was generalized into a deterministic **N-member fan-out** in `FiberedLearningLoop.handleDispatch`: members iterate in fixed order (so id/HLC advance deterministically), each publishes a proposal to the live `ProposalBlackboard` and emits `surface.proposal.proposed` (summary + confidence) + parallel `surface.presence.updated` (thinking→contributing); the arbiter emits `surface.synthesis.recorded` (chosen proposals + rationale); divergence still emits `surface.agent.disagreed`. The primary explanation remains the authoritative surfaced result → determinism + replay unchanged. `SurfaceState` gained `proposals[]`/`syntheses[]` (pure fold). Already wired in `apps/cli/wiring.ts` (challenger + blackboard), so visible end-to-end. New ensemble test (proposals=2, one synthesis, parallel presence, surface_id stamped).
+
+**S1.3 — Surface Interaction protocol.** Gateway command envelope extended with `interrupt | jump | branch | challenge | request_depth | request_simplify | request_example`. `SurfaceSession.interact()` emits `surface.interaction.received` → performs the effect → `surface.interaction.applied`, folded into a new `interactions[]` slice. Effects: `jump`/`branch` emit `surface.focus.changed` (refocused/reprojected); reshaping kinds re-frame the cached last-ask through the governed `ask` path (dispatched); `interrupt` sets a cooperative flag. The flag is threaded into the loop as `isInterrupted()` and checked at fiber phase boundaries (early-exits as `phase:interrupted`) — live-only, so replay re-folds recorded events and determinism holds. Threaded through the `ServedSurface` seam (live delegates; restored surface returns the read-only signal). New loop interrupt test + session interaction test.
+
+**S1.4 — Experience layer (`apps/web`).** The flat `LivingTimeline` `<ol>` spine was deleted and replaced by an interactive `TimelineGraph`: depth-layered SVG (columns by layer, rows by topological order), typed edges drawn distinctly (prerequisite/dependency solid; applies/research/bridge/frontier dashed), clickable nodes issuing `jump` (and a ⤳ affordance issuing `branch`), a beginner/intermediate/advanced/research entry-point selector (a pure client projection that highlights suggested start nodes), and living status (status-colored nodes, confidence bars, focus glow). New `EnsemblePanel` in the right rail surfaces live proposals (agent sigil + confidence bar + summary), a disagreement flag, and the arbiter's synthesis rationale. `NarrationTrack` gained in-stream interaction controls (Interrupt / Go deeper / Simpler / Example / Challenge) wired to the new gateway `interact` command via `api.ts`. `SurfaceView` re-laid-out coherently; `styles.css` extended with graph/ensemble/interject styles using the existing token system. New web test asserting the ensemble panel, typed graph edges, and interaction controls render.
+
+**Verify:** `pnpm verify` green across all 24 packages+apps+services at each boundary (codegen + typecheck + test + lint + format). Replay-equivalence preserved (client fold ≡ server `SurfaceState`); the timeline graph rides inside the existing `surface.timeline.updated` projection; all new learner/agent activity is governed `surface.*` events folded deterministically.
+
+**Deferred to S2+:** inline multimodal block instantiation (diagram/image/voice/simulation via the SRF-004 provider seam, recorded for replay) + new spec SRF-006; five-test depth verification (F14); prerequisite-descent on confusion (F03); live curriculum-generated graph (not seeded); readiness-gated research/innovation agents and ensemble expansion toward the full F06 roster (S3); modes/twin/collaboration + the Cognitive Evaluation layer (S4).
+
+
+---
+
+## Phase S3 — Research mode + ensemble expansion (2026-06-25)
+
+All four sub-phases landed spec-first. `pnpm verify` green after every boundary (25 tasks, codegen + typecheck + test + lint + format).
+
+**S3.0 — Spec-first.** ADR-0026 authored (`spec/architecture-decisions/ADR-0026-research-mode-and-readiness-gating.md`): documents research-readiness threshold design (0.75 gate-backed / 0.85 fallback), D3 event ordering law (frontier.detected emitted BEFORE any agent dispatch), ResearchUnit ABI, frontier KG edge seeding, ensemble expansion manifests. Event taxonomy updated with `surface.research.frontier.detected`, `surface.research.frontier.surfaced`, `surface.research.frontier.deferred`, `surface.motivation.surfaced`. Roadmap expanded: S3.0–S3.4 sub-phases added to `cognitive-surface-maturity.md`.
+
+**S3.1 — Research-readiness gate: events + SurfaceState fold.** `ResearchFrontierRecord` interface added to `packages/surface/src/projection.ts`; `research_frontiers: readonly ResearchFrontierRecord[]` and `motivation_surfaced: boolean` added to `SurfaceState` and `MutableSurfaceState`. Three new fold cases in `foldSurfaceEvents`: `frontier.detected` (appends record surfaced=false), `frontier.surfaced` (flips matching record or appends), `motivation.surfaced` (sets flag); `frontier.deferred` falls to default (version-only). `resolveResearchReadiness()` private method in `SurfaceSession.ask()` step 8: emits `frontier.detected` (D3) before any dispatch; emits `frontier.deferred` when below threshold but mastery passed. 5 new projection tests + exports updated in index/client. 60 surface tests green.
+
+**S3.2 — ResearchUnit: model-backed research cognitive unit.** `packages/product-cognition/src/research-unit.ts`: full `ResearchUnit implements CognitiveUnit` — same ABI as `CurriculumUnit`. `ResearchOutput` = `{frontier, gap, hypothesis_seed, source_note}`. `parseResearchOutput` strips fences + validates all four fields (error messages prefixed with `E_MODEL_OUTPUT_MALFORMED` for testability). `deterministicResearch` deterministic fallback. D3 trace for model path, D2 for deterministic. `runResearchFrontier()` in session: dispatches research agent, emits `frontier.surfaced` (D3), contributes `research` block, seeds `frontier_of` KG edge in world-state. `"research"/"motivation"/"reflection"/"debate"` added to `ProductRuntimeAgentId` union and `workTypeFor` exhaustiveness switch in `runtime-dispatch.ts`. MVP agent catalog and `minimalAgentSet()` snapshot updated. 15 new unit tests (`research-unit.test.ts`). Wired in `apps/cli/src/wiring.ts`.
+
+**S3.3 — Motivation pass.** `motivationDispatcher?: GovernedDispatcher` added to `SurfaceSessionDeps`. Step 9 in `ask()`: fires `resolveMotivation()` when mastery passed + `0.6 ≤ confidence < 0.75`. D3: emits `surface.motivation.surfaced` before any dispatch; optional `motivationDispatcher` dispatches `agent.motivation` and contributes a `motivation` block. `"motivation"` added to `COGNITION_BLOCK_TYPES`. Two new session tests: motivation surfaced on barely-passed mastery; NOT surfaced above 0.75 threshold.
+
+**S3.4 — UI: research/motivation block renderers + frontier edge styling.** `ResearchBody` (frontier/gap/hypothesis/source-note structured rows with research-accent tag labels) and `MotivationBody` (message + confidence, green-tinted card) added to `apps/web/src/blocks.tsx` and wired into the renderer registry. `frontier_of` and `research_adjacent` edges now use `--agent-research` (#8ab4ff) at distinct opacities (0.8 / 0.5) in `styles.css` rather than the generic `--ink-faint` group. Research/motivation block CSS added: `.research-body`, `.research-tag`, `.research-hypothesis`, `.research-source`, `.motivation-body`, `.motivation-message`, `.motivation-conf`.
+
+## 2026-06-26 — S-UCS: Universal Cognitive Surface immersive redesign
+
+A presentation-level redesign (plus the observability plumbing needed to make it honest) that turns the surface from a 3-pane dashboard into one living cognitive environment. The whiteboard is the product; everything else floats over it. Every prior capability is preserved — re-homed, not removed. Spec-first; `pnpm verify` green at every phase boundary.
+
+**Phase 0 — Specs & ADRs.** ADR-0028 (block-delta streaming projection: a transient `streaming_blocks` buffer cleared by the whole block, so `fold([delta...,generated]) == fold([generated])` and replay equivalence holds) and ADR-0029 (surface agent-observability events; latency is real-clock, deterministic-per-log, excluded from canonical block content). SRF-002 schema 1.2.0 -> 1.3.0: `surface.block.delta`, `surface.agent.reasoning.summary`, `surface.agent.work.timing` added to the catalog, sub-family paragraphs, ordering law, fold semantics, evolution. SRF-001 SurfaceState extended (`streaming_blocks`, `agent_reasoning`, `agent_work_timings`) + fold table. SRF-005 §4.6 (streaming deltas over the same SSE channel preserve §6.2). SRF-004 (word-level sync is a client projection — no provider word-timestamps; inline placement is a render projection). cognitive-unit-ABI (host publishes `emissions.trace` as `reasoning.completed`). F09 §4.1 (immersive composition law). event-taxonomy surface row updated.
+
+**Phase 1 — Fullscreen whiteboard shell.** `SurfaceView.tsx` rewritten: the `.surface` grid became a fullscreen container with the stage filling the viewport and a slim floating top bar. New reusable `Overlay` primitive (always mounted, CSS-toggled via `data-open`, Escape-to-close — SSR-stable so existing capability assertions keep passing). New `AgentsButton` (live status pills from `state.presence`) and `PathLauncher` (floating button -> center overlay hosting `TimelineGraph`/`SceneCanvas` + projection toggle). `styles.css`: fullscreen layout + overlay/launcher/agents classes + floating transport HUD. Visually verified against the live Gemini gateway.
+
+**Phase 2 — Agent Observatory + plumbing.** `projection.ts`: `StreamingBlockBuffer`/`AgentReasoningRecord`/`AgentWorkTimingRecord` types; three new `SurfaceState` slices + fold cases (delta -> transient buffer; whole block clears it; reasoning append; work-timing upsert-by-`work_id`). `fiber-learning-loop.ts` `emitAgentWork()` emits the reasoning summary (from each dispatch's `emissions.trace`) + work timing (measured latency) for the standard and ensemble paths. `host.ts` publishes `reasoning.completed` when a trace is present. New `ReasoningPanel` + enriched `Observatory`. 3 new projection tests incl. delta replay-equivalence + `contributeStreaming`. Reasoning panel confirmed live.
+
+**Phase 3 — Synchronized narration + transport HUD.** `useChoreographer` gains `progress` (rAF over audio `currentTime` / reading-time estimate). New `TransportHud` (supersedes `NarrationTrack`): the current sentence streams as word spans with spoken/active highlight (teleprompter); controls auto-hide on idle via `useAutoHide` and return on intent. Visually verified.
+
+**Phase 4 — Streaming cognitive content.** `AgentContributionRuntime.contributeStreaming` pre-allocates the block, emits paced ordered `surface.block.delta` chunks, then the whole block. `SurfaceSession` streams the explanation via `revealChunks()` when `streamRevealMs > 0` (gateway 45ms; CLI/tests off -> whole block, byte-identical determinism). `CognitiveStage` renders the transient buffer with a caret. Gateway replay-equivalence test passes with streaming enabled.
+
+**Phase 5 — Inline media + activity timeline.** `CognitiveStage` co-locates media blocks sharing the focused concept inline (excluded from the ribbon). New `ActivityTimeline` (clickable, ordered, labeled pipeline steps) replaces the static facet ribbon. Confirmed live (ROUTE -> MAP).
+
+**Phase 6 — Polish, a11y, verify.** `prefers-reduced-motion` reset; removed orphaned `.facet` CSS. Restarted the dev gateway against the new backend and verified the full stack end-to-end. Status docs updated. Final `pnpm verify` green across the monorepo.
+
+---
+
+## UCS — Cognitive Frames, MCCR & the narration-script split (2026-06-26)
+
+The Universal Cognitive Surface stops being a growing document. Root cause removed: the explanation
+agent's 7-layer prose was both rendered on the board (`ProseBody`) and spoken verbatim
+(`narrateBlock`→`collectNarrationTexts`). The redesign (ADR-0030) splits the two: the board holds only
+the **Minimal Complete Cognitive Representation (MCCR)** — distilled anchors — while a **separate paced
+narration script** carries the teaching, and learning divides into viewport-complete **Cognitive Frames**.
+Scope this milestone: Phase 0 (spec law) + Phase 1 (vertical slice), `pnpm verify` 25/25 green.
+
+**Phase 0 — spec-first.** ADR-0030 records six locked decisions (Frame = top-level folded slice; MCCR =
+frame-level content with deterministic client-rendered diagram/table; narration as a separate artifact;
+narration↔region sync as a client projection; active frame is a client projection — no `active_frame_id`,
+no `surface.frame.activated`; governed/budgeted/discardable look-ahead) and reconciles look-ahead with the
+"no static pre-generation" non-goal. SRF-001 (§4.7 Cognitive Frame, §4.8 MCCR, §4.3 slices, §6.1 lifecycle,
+§7 transitions), SRF-002 (8 new events, `FocusTargetType` += element/frame, `NarrationSegment` +=
+frame_id/anchor_ref/intent, ordering laws 8–11, §7 fold rules, schema 1.4.0), SRF-005 (§4.7 frame element
+deltas + §6.2 replay extension + §11 tests), F16 (§2 non-goal note, §12 fallback rows), F09 §4.1 (board=MCCR,
+progressive frames, element-targeted narration) updated.
+
+**Phase 1a — substrate.** New `packages/surface/src/frames.ts`: `CognitiveFrame`, `Mccr`, `MccrElement`
+(text/formula/relationship/diagram/table/image content), `NarrationScriptRecord`, `ImageDecisionRecord`,
+`StreamingFrameElementBuffer`, plus defensive plain-JSON fold readers. `projection.ts`: `FocusTargetType`
+gains `element`/`frame`; `NarrationSegment` gains `frame_id`/`anchor_ref`/`intent`; `SurfaceState` gains
+`frames`/`speculative_frames` (upsert by frame_id), `narration_scripts` (by script_id), `image_decisions`
+(append), `streaming_frame_elements` (transient, cleared by compose). Eight `surface.frame.*` fold cases.
+Ten new projection tests prove the replay-equivalence properties (planned→composed convergence, element-delta
+transient clear, speculation prepared→invalidated absent from `frames[]`, prepared→promoted copy, purity).
+
+**Phase 1b — Surface Composer.** `SurfaceComposerUnit` (`@inevitable/product-cognition`): one model call →
+`{mccr, narration_script, image_plan}` (avoids show/speak divergence), strict parser (nulls dangling
+anchor_refs; requires a core concept + a script), deterministic world-state fallback (confidence ≤ 0.5),
+live depth-bias steering. `composer`/`frameplanner`/`imageplanner` manifests added to the agent catalog;
+`ProductRuntimeAgentId` + `workTypeFor` + `DISPATCH_CAPABILITIES` extended. 8 unit tests.
+
+**Phase 1c — session integration.** `SurfaceSession.composeFocusFrame` (behind a new `composerDispatcher`
+dep): dispatches the composer; folds an inline `image` MCCR element when `image_plan.helps` + a generator is
+wired (image-as-cognition); emits `surface.frame.composed` → `surface.image.decided` →
+`surface.narration.script.produced`; voices the script via the new `SurfaceChoreographer.narrateScript`
+(one narration segment per script segment, each spotlighting its MCCR element via `focus.target_type:"element"`);
+surfaces composer reasoning (`surface.agent.reasoning.summary`). Absent a composer dispatcher the legacy
+explanation-block path runs unchanged. `buildDemoSession` gains an opt-in `composer` flag. Two session tests
+prove the end-to-end frame path and its deterministic replay.
+
+**Phase 1d — frontend.** New `FrameStage` (viewport-complete, no scroll via `useFitToViewport` uniform
+downscale), `MccrElement` (type-keyed renderer registry; pure-SVG diagram projection, KaTeX deferred),
+`HighlightLayer` (one soft moving marker measuring the spotlit element; snaps under reduced-motion via the
+global rule), `frames.ts` pure helpers, `useChoreographer` `activeFrameId`/`highlightElementId` projections.
+`SurfaceView` renders `FrameStage` when `state.frames` is non-empty, else the legacy `CognitiveStage`. Frame
+types exported from `@inevitable/surface/client`. Web tests: frame helpers + a render test proving the board
+shows MCCR anchors and not the prose explanation.
+
+**Deferred (tracked):** gateway cutover (`apps/api/host.ts` `composer:true` + migrating the gateway/voice-media/
+continuity/durable-persistence integration tests from explanation-block/`expand` assertions to the frame path;
+investigate the empty-narration observed under the gateway's governed+curriculum-built ask); Phase 2
+(`FramePlannerUnit` + multi-frame decomposition + frame transitions + N+1 buffering + Observatory composition
+panel); Phase 3 (governed look-ahead speculation + `lookaheadBudget` live-config); Phase 4 (`ImagePlannerUnit`).
+
+## UCS — Gateway cutover: the live product renders frames (2026-06-27)
+
+The Surface Gateway now serves the frame path end-to-end. `apps/api/host.ts` sets `composer:true` on
+both `buildDemoSession` call sites (create + rehydrate); the CLI/debug harness deliberately stays on the
+legacy explanation-block path so `expand` and the substrate keep coverage. Root cause of the earlier
+empty-narration under the gateway: the GOV-P01 trust gate's `STUDENT_AGENTS` allowlist didn't include
+`composer`, so the governed composer dispatch was blocked → `composeFocusFrame` degraded → no frame, no
+narration. Fix: added `composer`/`frameplanner`/`imageplanner` to `STUDENT_AGENTS` (trust ≥ 1) — presenting
+a learner's own session is core student-facing cognition, not a privileged shared-KG mutation (curriculum
+stays privileged at trust ≥ 3). Gateway integration tests migrated to the frame path: `gateway.test.ts`
+(replay-equivalence still asserts client-fold ≡ server-state — now over `surface.frame.*`; "live command
+effects" opens the stream then asks and asserts `surface.frame.composed` + `surface.narration.script.produced`
+arrive live), `voice-media.test.ts` (narration now from `narrateScript`), `continuity.test.ts` +
+`durable-persistence.test.ts` (assert a composed frame survives restart; `expand`-on-restored re-scoped to a
+fresh-ask-composes-a-frame check). `pnpm verify` 25/25 green. Deferred: `expand()` (layer-deepening) has no
+frame counterpart yet; Phases 2–4.
+
+## UCS — Phase 2: frame decomposition, transitions, N+1 buffering (2026-06-27)
+
+One concept now unfolds as a SEQUENCE of Cognitive Frames instead of a single slide. New
+`FramePlannerUnit` (`@inevitable/product-cognition`) mirrors `SurfaceComposerUnit`'s model-backed ABI:
+one model call → `{frames[], pacing}`, where each entry carries `title`, `sub_focus` (the teaching
+slice), `archetype`, `slots` (the MCCR anchors it will fill), and `intent`. The parser validates
+archetypes/slots/intents to safe defaults, forces `core_concept` into every frame, caps at `maxFrames`
+(default 5, density law), and throws on zero frames so the unit degrades to a deterministic single-frame
+plan (Phase 1 parity) — visibly via `fallback_reason`.
+
+`SurfaceSession` threads a new optional `framePlannerDispatcher`. When both composer + planner are wired
+(`onPlannerFramePath`), `ask()` step 4 calls `planAndComposeFrames`: dispatch the governed planner →
+read `frame_plan` → for each entry, `composeFrameViaComposer` emits `surface.frame.planned` (layout
+reserved, SRF-002 law 8) then dispatches the composer **steered by `sub_focus`/`frame_focus`** so each
+frame distills different anchors → `emitFrameArtifacts` lands composed → image.decided → script.produced →
+reasoning.summary → voiced narration (the exact Phase-1 order, lifted into one shared helper so the
+composer-only path stays byte-identical). Practice and the mastery checkpoint render as their own
+**deterministic** frames (`composeDeterministicFrame`, no model) so the whole lesson is frame-based;
+ordinals are sparse + monotone (`nextFrameOrdinal`, ×1000) for promotion-friendliness. The planner's
+decomposition reasoning is surfaced to the Observatory (ADR-0029). Composer-only (no planner) keeps the
+single-frame Phase-1 path unchanged; the legacy explanation-block path remains the graceful fallback.
+
+Frontend: a new `FrameDeck` replaces the bare `FrameStage` mount in `SurfaceView`. It cross-dissolves the
+prior frame out + the incoming frame in as the choreographer cursor crosses a frame boundary (a pure
+projection over `activeFrameId`; `frame-enter`/`frame-exit` keyframes collapse to an instant swap under
+`prefers-reduced-motion`) and buffers the **N+1** frame off-stage to pre-warm its illustration. New pure
+helpers `activeFrameIndex`/`nextFrame` (Node-free, tested). The Observatory gained `CompositionPanel`: the
+ordered frame queue with status, MCCR anchor chips, the per-frame density check against the ~6-anchor
+budget, narration count, image decision, and a look-ahead sub-list (empty until Phase 3).
+
+Wiring: `frameplanner` added to the CLI `DISPATCH_CAPABILITIES`; `buildDemoSession` gains an opt-in
+`framePlanner?` flag (requires `composer`). The gateway sets `framePlanner:true` on both call sites, so the
+live product decomposes concepts into progressive frames; the CLI/debug harness stays single-frame/legacy.
+New tests: 10 planner-unit cases; a surface session multi-frame test (2 teaching + practice + assessment
+frames, monotone ordinals, narration spans every frame, planner reasoning in Observatory, planned-before-
+composed-before-narration ordering) + its replay-equivalence twin; web `frames`/`surface-view` tests for the
+deck helpers + Composition panel. Gateway/continuity/durable-persistence integration tests pass unchanged
+with the planner live (more frames, same invariants). `pnpm verify` 25/25 green. Deferred: Phase 3 (governed
+look-ahead speculation + `lookaheadBudget` live-config), Phase 4 (`ImagePlannerUnit`), `expand()`-on-frames.

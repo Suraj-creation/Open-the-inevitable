@@ -9,6 +9,8 @@
 export type { ArbitrationRecord, ProposalEntry } from "./proposals";
 export { ProposalBlackboard } from "./proposals";
 
+export { LiveEvolutionConfig } from "./live-config";
+
 export type {
   EvaluationResult,
   EvolutionEngineOptions,

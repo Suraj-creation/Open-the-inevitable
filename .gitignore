@@ -22,6 +22,9 @@ coverage/
 .env.*
 !.env.example
 
+# Runtime gateway artifacts (learner data, surface logs, media blobs)
+tmp-events/
+
 # OS / editor
 .DS_Store
 Thumbs.db

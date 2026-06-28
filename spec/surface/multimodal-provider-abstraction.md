@@ -151,6 +151,20 @@ output reference is recorded in the event log (the segment's `voice` ref + `surf
 durable cross-process audio persistence is deferred (the event log still replays the timing exactly).
 Image/video/live adopt the same seam next.
 
+**Word-level narration sync (S-UCS) is a client projection.** Gemini TTS returns audio bytes and a
+derived total `duration_ms` — **not** per-word timestamps. Per ADR-0007 (perfectly tight word↔voice sync
+is explicitly not guaranteed and is a client concern), the viewport derives sentence/word highlighting by
+interpolating across the segment's known `duration_ms`, driven by the audio element's `currentTime`. No
+fabricated word-timestamps enter events; the event model and fold are unchanged. If a provider later
+supplies real timing marks, they ride as out-of-band artifact metadata beside the audio bytes (same seam
+as the bytes), never as canonical event data.
+
+**Inline multimodal placement (S-UCS) is a render projection.** An illustrative artifact already becomes
+a first-class `image`/`video`/`simulation` `CognitionBlock` carrying `concept_ids` (SRF-001 §4.1). The
+viewport co-locates such a block *beside the explanation block that shares its `concept_ids`* — a pure
+projection over existing blocks; no event, block, or attachment-model change. See
+`surface/inline-multimodal-artifacts`.
+
 ## 7. Event and State Transitions
 
 | Transition | Event |

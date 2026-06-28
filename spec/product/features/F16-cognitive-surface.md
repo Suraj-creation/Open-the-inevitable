@@ -80,7 +80,9 @@ collaboration+replay model, and block-type registry* the experience is built fro
   once" maximalism; immersion or animation for spectacle rather than understanding; **static
   pre-generation of all content** — the surface is a live, continuously-planning, interactive
   classroom where cognition is generated dynamically on demand (SRF-001 §2; ADR-0007 §7), not a
-  lesson frozen at generation time and replayed.
+  lesson frozen at generation time and replayed. Look-ahead frame planning (ADR-0030) does not violate
+  this: speculative frames are governed, budgeted, discardable, and re-planned on every learner signal,
+  never surfaced until promoted — anticipation, not pre-generation.
 
 ## 3. Personas & Modes
 
@@ -227,6 +229,8 @@ resolves F09 Open Question #2 (the persistence threshold).
 | Concurrent-edit conflict | Resolve via per-property CRDT/LWW under server-assigned order; unresolved → `disagreement.raised` (F07) |
 | Replay divergence detected | Recover from last consistent world-state snapshot; mark replay degraded; CI determinism gate must catch before ship |
 | Block-type render handler missing/crashes | Render provenance placeholder + text fallback; emit `blocktype.render.failed` |
+| MCCR composer unavailable (no model / offline) | Fall back to the legacy explanation-block + narrated-text path; frame slices stay empty; legacy logs fold deep-equal (ADR-0030) |
+| MCCR element renderer missing | Render the element's plain/text form; never block the frame (graceful degradation, ADR-0030) |
 | Memory mutation rejected | Keep ephemeral block in session; surface reason if learner-visible |
 | Density/perf collapse (too many live media) | Auto-collapse to summaries per load budget; never silently drop without an event |
 | Sandboxed execution escape attempt | Terminate sandbox; emit governance event; do not persist effects |

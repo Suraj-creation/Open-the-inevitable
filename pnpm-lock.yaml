@@ -97,6 +97,9 @@ importers:
       '@inevitable/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@inevitable/evaluation':
+        specifier: workspace:*
+        version: link:../../packages/evaluation
       '@inevitable/events':
         specifier: workspace:*
         version: link:../../packages/events
@@ -209,6 +212,25 @@ importers:
         specifier: workspace:*
         version: link:../shared
 
+  packages/evaluation:
+    dependencies:
+      '@inevitable/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@inevitable/events':
+        specifier: workspace:*
+        version: link:../events
+      '@inevitable/protocols':
+        specifier: workspace:*
+        version: link:../protocols
+      '@inevitable/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
+
   packages/events:
     dependencies:
       '@inevitable/protocols':
@@ -268,6 +290,9 @@ importers:
 
   packages/orchestration:
     dependencies:
+      '@inevitable/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@inevitable/shared':
         specifier: workspace:*
         version: link:../shared
@@ -371,6 +396,9 @@ importers:
 
   packages/surface:
     dependencies:
+      '@inevitable/evaluation':
+        specifier: workspace:*
+        version: link:../evaluation
       '@inevitable/events':
         specifier: workspace:*
         version: link:../events

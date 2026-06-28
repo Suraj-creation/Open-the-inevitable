@@ -27,7 +27,7 @@ spec:
   related_protocols:
     [cognition-packet-protocol, cognitive-event-protocol, memory-mutation-protocol, reasoning-trace-protocol]
   related_events:
-    [surface.created, surface.block.generated, surface.block.modified, surface.timeline.updated, surface.agent.joined, surface.agent.contributed, surface.memory.attached, surface.reasoning.recorded, surface.session.closed, surface.narration.segment, surface.focus.changed, surface.presence.updated]
+    [surface.created, surface.block.generated, surface.block.modified, surface.timeline.updated, surface.agent.joined, surface.agent.contributed, surface.memory.attached, surface.reasoning.recorded, surface.session.closed, surface.narration.segment, surface.narration.script.produced, surface.focus.changed, surface.presence.updated, surface.frame.planned, surface.frame.composed, surface.frame.element.delta, surface.image.decided, surface.frame.speculation.prepared, surface.frame.speculation.invalidated, surface.frame.promoted]
   related_runtime_systems:
     [cognitive-unit-runtime, deterministic-execution-engine, world-state-graph, universal-cognitive-bus]
   related_governance_systems: [governance-kernel, capability-envelope, context-lease, intent-lease]
@@ -184,10 +184,35 @@ interface SurfaceState {
   readonly narration: readonly NarrationSegment[];  // ordered choreography cues (Phase 2D)
   readonly focus: SurfaceFocus | null;              // current directed attention ("look here now")
   readonly presence: readonly AgentPresence[];      // agents as visible entities, by CID
+  readonly streaming_blocks: readonly StreamingBlockBuffer[];  // transient live-stream buffers (S-UCS)
+  readonly agent_reasoning: readonly AgentReasoningRecord[];   // surfaced reasoning summaries (S-UCS)
+  readonly agent_work_timings: readonly AgentWorkTimingRecord[]; // work lifecycle + latency (S-UCS)
   readonly version: number;               // count of folded events
   readonly last_hlc: string | null;
 }
 ```
+
+> The interface above shows the Phase-2A/2D core slice. The implementation additionally folds the
+> ensemble (`proposals`, `syntheses`, `disagreements`), interaction (`interactions`), mastery
+> (`depth_gates`, `prerequisite_descents`), research (`research_frontiers`), evaluation
+> (`evaluation_records`), and mode/projection slices defined by SRF-002 and the ADR-0024/0025/0026/0027
+> families; those records are documented in their owning specs.
+
+The **streaming/observability slice** (S-UCS) makes generation and reasoning *visible as they happen*:
+`streaming_blocks` is a **transient** buffer of in-flight block text (keyed by `block_id`, appended in
+`seq` order, and cleared when the whole-block `surface.block.generated` arrives — so it is empty in the
+settled state); `agent_reasoning` holds per-contribution reasoning summaries; `agent_work_timings`
+holds per-work-item lifecycle + real latency (upserted by `work_id`). Like the choreography slice these
+carry order and durations, never a playback clock; latency is real-clock and deterministic *per log*
+(ADR-0028/0029).
+
+The **Cognitive Frame slice** (UCS, ADR-0030) adds `frames` (the canonical frame line, upsert by
+`frame_id`, §4.7), `speculative_frames` (discardable look-ahead frames, upsert by `frame_id`),
+`narration_scripts` (the separate spoken teaching, upsert by `script_id`), `image_decisions`
+(append-only whether-an-image-helps records), and `streaming_frame_elements` (a **transient** per-element
+text buffer cleared by `surface.frame.composed`). There is deliberately **no `active_frame_id`** in
+`SurfaceState`: which frame is on screen is a client projection over the Choreographer cursor (ADR-0007),
+so replay scrubbing and multi-viewport playback never fight the canonical log.
 
 The **choreography slice** (`narration`, `focus`, `presence`) makes cognition *visible over time*:
 narration segments carry the spoken/visible explanation in logical order (with an optional focus
@@ -218,6 +243,94 @@ is the *block-document/scene* manifestation of F16 §9; the spatial Living-Canva
 projections layer in later over the **same** `SurfaceState`. A client **Choreographer** interprets
 the `narration`/`focus`/`presence` cues over a client clock (audio `currentTime` as ground truth) —
 it owns no truth and never enters the canonical record.
+
+### 4.7 Cognitive Frame (UCS, ADR-0030)
+
+A **Cognitive Frame** is a bounded, viewport-complete cognitive *state* — the unit of progressive
+learning that fits one screen without scrolling and transitions to the next. It is the answer to
+"what should the learner be looking at, as a complete thought, right now". A frame is **not** a block
+(blocks are single-producer atoms; a frame is composed by the planner, composer, and media seam) and
+**not** a UI page. It is a top-level folded slice of `SurfaceState` (`frames[]`, upsert by `frame_id`).
+
+```ts
+type CognitiveFrameStatus =
+  | "planned" | "composed" | "speculative" | "invalidated" | "promoted";
+
+interface CognitiveFrame {
+  readonly frame_id: string;            // "cfr-" + id
+  readonly surface_id: string;
+  readonly ordinal: number;             // logical progression order (sparse — promotion-friendly)
+  readonly status: CognitiveFrameStatus;
+  readonly concept_id: string | null;
+  readonly title: string;
+  readonly layout: FrameLayout | null;  // reserved skeleton (from `planned`); carried through compose
+  readonly mccr: Mccr | null;           // §4.8 — the only thing shown; null until `composed`
+  readonly segment_ids: readonly string[];   // narration segments that voice this frame, in order
+  readonly speculative_of: string | null;    // set when promoted/invalidated from a speculative line
+  readonly invalidation_reason: string | null;
+  readonly provenance: FrameProvenance;       // multi-producer (planner + composer + media)
+  readonly version: number;             // bumps planned→composed and on delta-settle
+  readonly hlc: string;
+}
+
+interface FrameProvenance {
+  readonly planner_packet_id: string | null;
+  readonly composer_packet_id: string | null;
+  readonly producer_cid: string;        // mandatory (matches the block-provenance discipline)
+  readonly source_event_id: string | null;  // enriched at fold time from surface.frame.composed
+  readonly world_state_nodes: readonly string[];
+  readonly trace_id: string | null;
+  readonly reason: string;              // human-readable why-this-frame-exists
+}
+```
+
+**Which frame is on screen is a client projection**, derived by the Choreographer from the cursor over
+`narration` + `frames` (ADR-0007); it is never a logged pointer. `surface.frame.composed` is the
+readiness/resume anchor. Speculative (look-ahead) frames live in a separate `speculative_frames[]`
+slice and are never shown until a `surface.frame.promoted` event copies them into `frames[]`.
+
+### 4.8 Minimal Complete Cognitive Representation (MCCR) (UCS, ADR-0030)
+
+The MCCR is the frame's content: only the distilled visual anchors that *deserve persistent visual
+attention*. Everything else — analogies, storytelling, verbal reasoning — belongs to the narration
+script, not the board. Each element carries a stable `element_id` so a narration segment can spotlight
+it (the highlight schedule is a client projection).
+
+```ts
+type MccrElementType =
+  | "core_concept" | "definition" | "key_formula" | "diagram" | "relationship"
+  | "mental_model" | "table" | "key_example" | "memory_cue" | "image";
+
+interface MccrElement {
+  readonly element_id: string;          // "el-" + id; matches narration focus.target_id
+  readonly type: MccrElementType;
+  readonly slot: string;                // layout hint; a render projection only
+  readonly reveal_order: number;        // staged reveal (logical, not a clock)
+  readonly concept_id: string | null;
+  readonly content: MccrElementContent; // text | formula | relationship | diagram | table | image
+}
+
+interface Mccr {
+  readonly frame_id: string;
+  readonly core_concept: MccrElement;   // required anchor
+  readonly definition: MccrElement;     // required anchor
+  readonly key_formula: MccrElement | null;
+  readonly diagram: MccrElement | null;
+  readonly relationship: MccrElement | null;
+  readonly mental_model: MccrElement | null;
+  readonly table: MccrElement | null;
+  readonly key_example: MccrElement | null;
+  readonly memory_cue: MccrElement | null;
+  readonly image: MccrElement | null;
+  readonly elements: readonly MccrElement[];  // flat, reveal-order index for O(1) targeting
+}
+```
+
+`diagram` and `table` elements carry only structured data (`{kind, nodes, edges}` / `{headers, rows}`);
+the client renders them with a **pure** layout function (as the concept-map block already does), so they
+replay byte-identically with **no media provider** and honor content-determinism (§6.4). The `image`
+element is the only provider-touching element, gated by the composer's `image_plan.helps` and recorded
+out-of-band via `surface.visual.generated` (SRF-004/SRF-006).
 
 ## 5. Protocols and Contracts
 
@@ -253,6 +366,16 @@ created ──ask*──▶ active ──close──▶ closed
       `AgentContributionRuntime` (`surface.agent.joined` on first contribution,
       `surface.agent.contributed` + `surface.block.generated` per block);
    d. record the supervisor decision as a `routing` block and `surface.reasoning.recorded`.
+   When a composer dispatcher is wired (UCS, ADR-0030), the explanation step is replaced by the
+   **frame path**: the `FramePlannerUnit` plans the concept's frames (`surface.frame.planned`), the
+   `SurfaceComposerUnit` composes the focused frame's MCCR (`surface.frame.composed`) and its separate
+   narration script (`surface.narration.script.produced`, voiced via the existing
+   `surface.narration.segment` choreography with `focus.target_type:"element"`), and the image decision
+   is recorded (`surface.image.decided`, generating media only when it helps). Within `lookaheadBudget`,
+   likely next frames are pre-composed as discardable speculation (`surface.frame.speculation.prepared`)
+   and either promoted (`surface.frame.promoted`) or invalidated (`surface.frame.speculation.invalidated`)
+   on the next learner signal. Absent a composer dispatcher, the legacy explanation-block path runs
+   unchanged (F16 §12 graceful fallback).
 3. **expand** — `SurfaceSession.expand(blockId, layer)` (Phase 2B, optional capability):
    progressive deepening of an existing explanation block per F04 layers 0–1. This is a live
    interaction point: the deeper layer is **generated dynamically** through the governed dispatcher
@@ -297,7 +420,8 @@ owned by `surface/surface-event-architecture`. Summary of state-affecting transi
 |---|---|
 | `surface.created` | initialize state, `status: "active"` |
 | `surface.timeline.updated` | replace `timeline` projection |
-| `surface.block.generated` | append block (version 1) |
+| `surface.block.generated` | append block (version 1); clear any `streaming_blocks` buffer for it |
+| `surface.block.delta` | append `text_delta` to the transient `streaming_blocks` buffer (by `block_id`, `seq` order) |
 | `surface.block.modified` | replace block content, increment version |
 | `surface.agent.joined` | append CID to `agents_joined` |
 | `surface.agent.contributed` | record contribution metadata (block linkage) |
@@ -305,6 +429,16 @@ owned by `surface/surface-event-architecture`. Summary of state-affecting transi
 | `surface.narration.segment` | append to `narration`; set `focus` when the segment carries one |
 | `surface.focus.changed` | replace `focus` (directed attention) |
 | `surface.presence.updated` | upsert `presence` by `agent_cid` |
+| `surface.agent.reasoning.summary` | append reasoning summary to `agent_reasoning` |
+| `surface.agent.work.timing` | upsert `agent_work_timings` by `work_id` (latency, lifecycle status) |
+| `surface.frame.planned` | upsert `frames` by `frame_id` (reserve layout, status `planned`) |
+| `surface.frame.composed` | upsert `frames` by `frame_id` (full MCCR, status `composed`); clear transient element buffers |
+| `surface.narration.script.produced` | upsert `narration_scripts` by `script_id` |
+| `surface.image.decided` | append to `image_decisions` |
+| `surface.frame.element.delta` | append `text_delta` to transient `streaming_frame_elements` (by `frame_id:element_id`, `seq` order) |
+| `surface.frame.speculation.prepared` | upsert `speculative_frames` by `frame_id` (status `speculative`) |
+| `surface.frame.speculation.invalidated` | mark matching `speculative_frames` entry `invalidated` (never copied to `frames`) |
+| `surface.frame.promoted` | copy matching `speculative_frames` entry into `frames` (status `promoted`, final ordinal) |
 | `surface.memory.attached` | mark block as memory-backed (`memory_mutation_id`) |
 | `surface.session.closed` | `status: "closed"` |
 

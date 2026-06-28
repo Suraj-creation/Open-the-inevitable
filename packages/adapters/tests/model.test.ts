@@ -187,6 +187,9 @@ describe("GeminiModelRuntime", () => {
             usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20 },
           };
         },
+        async embedContent() {
+          return { embeddings: [{ values: [0.1, 0.2] }] };
+        },
       },
     };
     const runtime = GeminiModelRuntime.fromClient(fake, "gemini-test");

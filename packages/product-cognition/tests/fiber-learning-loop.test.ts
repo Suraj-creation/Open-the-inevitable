@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { InMemoryEventBus } from "@inevitable/events";
 import { TieredMemoryStore } from "@inevitable/memory";
+import { ProposalBlackboard } from "@inevitable/orchestration";
 import type { CognitiveIdentity } from "@inevitable/protocols";
 import { ManualClock, SeededIdGenerator } from "@inevitable/shared";
 import { WorldStateGraph } from "@inevitable/world-state";
@@ -70,7 +71,7 @@ function session(userId = "user-fiber"): OnboardingSession {
 }
 
 function agentIdentity(
-  kind: "supervisor" | "explanation" | "practice",
+  kind: "supervisor" | "explanation" | "practice" | "revision",
   cid: string,
 ): CognitiveIdentity {
   const manifest = MVP_AGENT_MANIFESTS.find((m) => m.id === `agent.${kind}`)!;
@@ -93,9 +94,14 @@ interface LoopFixture {
   loop: FiberedLearningLoop;
   world: WorldStateGraph;
   bus: InMemoryEventBus;
+  proposals: ProposalBlackboard;
 }
 
-function makeLoop(_userId = "user-fiber", seed = "fiber-loop"): LoopFixture {
+function makeLoop(
+  _userId = "user-fiber",
+  seed = "fiber-loop",
+  opts: { challenger?: boolean } = {},
+): LoopFixture {
   const clock = new ManualClock(Date.UTC(2026, 5, 5));
   const idGenerator = new SeededIdGenerator(seed);
   const bus = new InMemoryEventBus({ idGenerator });
@@ -143,6 +149,21 @@ function makeLoop(_userId = "user-fiber", seed = "fiber-loop"): LoopFixture {
     },
   });
 
+  const revManifest = MVP_AGENT_MANIFESTS.find((m) => m.id === "agent.revision")!;
+  const proposals = new ProposalBlackboard();
+  const challengerDispatcher = opts.challenger
+    ? new ProductRuntimeDispatcher({
+        bus,
+        clock,
+        idGenerator,
+        nodeId: "fiber-challenger",
+        agent: {
+          identity: agentIdentity("revision", "cog-rev-fiber"),
+          unit: new DeterministicMvpUnit(revManifest, idGenerator),
+        },
+      })
+    : undefined;
+
   const loop = new FiberedLearningLoop({
     learningPaths: new LearningPathProjector(world),
     supervisorDispatcher,
@@ -163,9 +184,10 @@ function makeLoop(_userId = "user-fiber", seed = "fiber-loop"): LoopFixture {
     clock,
     idGenerator,
     nodeId: "fiber-loop",
+    ...(challengerDispatcher ? { challengerDispatcher, proposals } : {}),
   });
 
-  return { loop, world, bus };
+  return { loop, world, bus, proposals };
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +258,77 @@ describe("FiberedLearningLoop", () => {
     expect(journalLabels).toContain("phase:mastery-record");
     expect(journalLabels).toContain("phase:cycle-complete");
     expect(result.value.journal.length).toBeGreaterThan(5);
+  });
+
+  test("cognitive ensemble surfaces proposals, parallel presence, and a synthesis (S1.2)", async () => {
+    const { loop, bus } = makeLoop("user-ensemble", "fiber-ensemble", { challenger: true });
+
+    const result = await loop.run({
+      session: session("user-ensemble"),
+      pathId: "path-ensemble",
+      concepts: [{ id: "perceptron", title: "The Perceptron" }],
+      focusConceptId: "perceptron",
+      explanationPrompt: "Explain the perceptron",
+      practicePrompt: "Give me one practice problem",
+      surfaceId: "srf-ensemble",
+      mastery: { assessorCid: "cog-sup-fiber", passed: true, confidence: 0.9, evidence: [] },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw result.error;
+
+    // Two ensemble members (explanation + challenger) each surfaced a proposal.
+    const proposals = bus.replay({ subject: "surface.proposal.proposed" });
+    expect(proposals).toHaveLength(2);
+    const agentIds = proposals.map((e) => (e.payload as Record<string, unknown>)["agent_id"]);
+    expect(agentIds).toContain("explanation");
+    expect(agentIds).toContain("revision");
+
+    // The arbiter recorded exactly one synthesis carrying a chosen proposal.
+    const syntheses = bus.replay({ subject: "surface.synthesis.recorded" });
+    expect(syntheses).toHaveLength(1);
+    expect(
+      ((syntheses[0]?.payload as Record<string, unknown>)["chosen_proposal_ids"] as string[])
+        .length,
+    ).toBeGreaterThan(0);
+
+    // Parallel presence was surfaced for both members; the primary result is still authoritative.
+    expect(bus.replay({ subject: "surface.presence.updated" }).length).toBeGreaterThanOrEqual(2);
+    expect(
+      (result.value.explanation?.responsePackets[0]?.content as Record<string, unknown>)?.[
+        "handled_by"
+      ],
+    ).toBe("agent.explanation");
+
+    // Every ensemble event carries the surface_id so it folds into SurfaceState.
+    for (const e of [...proposals, ...syntheses]) {
+      expect((e.payload as Record<string, unknown>)["surface_id"]).toBe("srf-ensemble");
+    }
+  });
+
+  test("cooperative interrupt early-exits the cycle before explanation (S1.3)", async () => {
+    const { loop } = makeLoop("user-interrupt", "fiber-interrupt");
+    const result = await loop.run({
+      session: session("user-interrupt"),
+      pathId: "path-interrupt",
+      concepts: [{ id: "perceptron", title: "The Perceptron" }],
+      focusConceptId: "perceptron",
+      explanationPrompt: "Explain the perceptron",
+      practicePrompt: "Give me one practice problem",
+      isInterrupted: () => true,
+      mastery: { assessorCid: "cog-sup-fiber", passed: true, confidence: 0.9, evidence: [] },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw result.error;
+
+    // No explanation/practice ran; the journal records the interrupt at the phase boundary.
+    expect(result.value.explanation).toBeNull();
+    expect(result.value.practice).toBeNull();
+    const labels = result.value.journal
+      .filter((e) => e.kind === "reason")
+      .map((e) => e.detail["label"] as string);
+    expect(labels).toContain("phase:interrupted");
+    expect(labels).not.toContain("phase:explanation-dispatch");
   });
 
   test("emits supervisor.route and learning.fiber.* bridge events to the bus", async () => {

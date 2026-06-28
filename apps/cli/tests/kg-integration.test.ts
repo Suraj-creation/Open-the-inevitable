@@ -54,4 +54,83 @@ describe("KG engine integration", () => {
     const nonPending = state.filter((s) => s.phase !== "pending");
     expect(nonPending.length).toBeGreaterThanOrEqual(1);
   });
+
+  test("generateCurriculum seeds concept layer/domain and typed edges into the KG (S2.4)", async () => {
+    // Stub model returns a curriculum with layer/domain on concepts and typed cross-concept edges.
+    const ENRICHED_CURRICULUM = JSON.stringify({
+      concepts: [
+        {
+          id: "linear-algebra",
+          title: "Linear Algebra",
+          prerequisites: [],
+          layer: 3,
+          domain: "mathematics",
+        },
+        {
+          id: "statistics",
+          title: "Statistics",
+          prerequisites: [],
+          layer: 3,
+          domain: "mathematics",
+        },
+        {
+          id: "ml",
+          title: "Machine Learning",
+          prerequisites: ["linear-algebra", "statistics"],
+          layer: 2,
+          domain: "machine-learning",
+        },
+      ],
+      edges: [
+        { from: "linear-algebra", to: "statistics", type: "bridges_to" },
+        { from: "ml", to: "linear-algebra", type: "applies_to" },
+      ],
+      focus_concept_id: "linear-algebra",
+      explanation_prompt: "Explain linear algebra as the geometry of data",
+      practice_prompt: "One matrix-vector exercise",
+    });
+    const fixture = buildDemoSession({
+      seed: "kg-s24",
+      modelFactory: () => ({
+        async generate() {
+          return { text: ENRICHED_CURRICULUM, model: "stub", finishReason: "stop" as const };
+        },
+        async embed() {
+          return [];
+        },
+      }),
+    });
+
+    const result = await fixture.generateCurriculum("Teach me Machine Learning");
+    expect(result.ok).toBe(true);
+
+    // After generateCurriculum the KG contains the three curriculum concepts
+    // (linear-algebra upserts the existing demo concept; statistics + ml are new → total 6).
+    expect(fixture.kg.size()).toBeGreaterThanOrEqual(5);
+    const ids = fixture.kg.concepts().map((c) => c.id);
+    expect(ids).toContain("linear-algebra");
+    expect(ids).toContain("statistics");
+    expect(ids).toContain("ml");
+
+    // Typed edges must be present in world-state so the timeline builder can project them.
+    const snapshot = fixture.world.snapshot();
+    const bridgesToEdge = snapshot.edges.find(
+      (e) =>
+        e.type === "bridges_to" &&
+        e.from === "concept:linear-algebra" &&
+        e.to === "concept:statistics",
+    );
+    expect(bridgesToEdge).toBeDefined();
+    const appliesToEdge = snapshot.edges.find(
+      (e) =>
+        e.type === "applies_to" && e.from === "concept:ml" && e.to === "concept:linear-algebra",
+    );
+    expect(appliesToEdge).toBeDefined();
+
+    // The returned SurfaceAskInput includes the three concepts for the timeline builder.
+    const input = result.ok ? result.value : null;
+    expect(input?.concepts.map((c) => c.id)).toContain("linear-algebra");
+    expect(input?.concepts.map((c) => c.id)).toContain("statistics");
+    expect(input?.concepts.map((c) => c.id)).toContain("ml");
+  });
 });

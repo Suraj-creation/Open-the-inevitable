@@ -27,6 +27,7 @@ export const COGNITION_BLOCK_TYPES = [
   "code",
   "debate",
   "research",
+  "motivation",
   "routing",
 ] as const;
 

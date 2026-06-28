@@ -21,6 +21,7 @@ import {
   CurriculumUnit,
   DeterministicMvpUnit,
   FiberedLearningLoop,
+  FramePlannerUnit,
   LearningPathProjector,
   MVP_AGENT_MANIFESTS,
   IntentInferenceUnit,
@@ -28,11 +29,14 @@ import {
   ModelBackedUnit,
   PRODUCT_DISPATCH_POLICIES,
   ProductRuntimeDispatcher,
+  ResearchUnit,
   SupervisorUnit,
+  SurfaceComposerUnit,
   TwinRegistry,
   curriculumSlug,
   type ModelBackedRole,
   type OnboardingSession,
+  type ProductMode,
   type TwinConsent,
   type TwinSnapshot,
   type TwinState,
@@ -57,9 +61,11 @@ import {
   type IdGenerator,
   type Result,
 } from "@inevitable/shared";
+import { CognitiveEvaluationEngine, EVALUATION_PASS_THRESHOLD } from "@inevitable/evaluation";
 import { CognitiveAnalysisEngine, InMemoryMeter } from "@inevitable/observability";
 import {
   EvolutionEngine,
+  LiveEvolutionConfig,
   ProposalBlackboard,
   type EvaluationResult,
   type EvolutionProposal,
@@ -68,11 +74,19 @@ import {
   type SyntheticLearnerSeed,
 } from "@inevitable/orchestration";
 import { guard as governanceGuard } from "@inevitable/governance";
-import { SurfaceSession, type SurfaceAskInput, type VoiceSynthesizer } from "@inevitable/surface";
+import {
+  SurfaceSession,
+  type MediaGenerator,
+  type SurfaceAskInput,
+  type VoiceSynthesizer,
+} from "@inevitable/surface";
+import type { DepthTestResult } from "@inevitable/product-cognition";
 import {
   KnowledgeGraphEngine,
   WorldStateGraph,
+  type ConceptLayer,
   type ConceptSpec,
+  type KnowledgeEdgeType,
   type WorldStateSnapshot,
 } from "@inevitable/world-state";
 
@@ -293,7 +307,7 @@ export interface DemoFixture {
     config: ProposalConfiguration,
   ) => EvolutionProposal;
   /** Run shadow tests against default synthetic learners. Emits experiment + shadow_result events. */
-  readonly evaluateEvolution: (proposalId: string) => EvaluationResult;
+  readonly evaluateEvolution: (proposalId: string) => Promise<EvaluationResult>;
   /** Approve a proposal that passed shadow tests (governance gate). */
   readonly approveEvolution: (proposalId: string) => EvolutionProposal;
   /** Mark an approved proposal as rolled out. Emits `evolution.rollout.completed`. */
@@ -312,6 +326,9 @@ const DISPATCH_CAPABILITIES = [
   "revision",
   "memory",
   "intent",
+  "research",
+  "composer",
+  "frameplanner",
 ].map((id) => `dispatch.${id}`);
 
 export interface DemoOptions {
@@ -321,6 +338,29 @@ export interface DemoOptions {
   readonly trustLevel?: number;
   /** Optional narration voice synthesis (Phase 2D-S4). Absent ⇒ text-only narration. */
   readonly voice?: VoiceSynthesizer;
+  /** Optional generated-media seam (S2.1b, SRF-006). Absent ⇒ no inline generated artifacts. */
+  readonly media?: MediaGenerator;
+  /** Product mode for this session (S4.3). Absent ⇒ "student". */
+  readonly mode?: ProductMode;
+  /**
+   * Enable the UCS frame path (UCS, ADR-0030): the focus concept becomes a Cognitive Frame —
+   * distilled MCCR on the board + a SEPARATE paced narration script + an image decision — instead of
+   * a prose explanation block. The product surface (gateway → web) sets this; the CLI/debug harness
+   * leaves it off so the substrate's explanation-block path (and `expand`) stays exercised.
+   */
+  readonly composer?: boolean;
+  /**
+   * Enable the UCS frame planner (UCS, ADR-0030; Phase 2): the focus concept is decomposed into a
+   * SEQUENCE of progressive Cognitive Frames (and practice/assessment become frames), instead of a
+   * single composed frame. Requires `composer` to be on. The gateway sets this; the CLI leaves it off.
+   */
+  readonly framePlanner?: boolean;
+  /**
+   * Live progressive-reveal pacing (ms) for the explanation block (S-UCS, ADR-0028). When > 0, the
+   * explanation streams as paced `surface.block.delta` chunks before the whole block. Absent/0 ⇒ the
+   * whole block is emitted at once (the default; deterministic CLI/tests stay byte-identical).
+   */
+  readonly streamRevealMs?: number;
   /**
    * Rehydrate a previously-persisted surface into a LIVE session (DPS-002). When present, world-state
    * is restored, memory mutations replayed, and the event log hydrated; the session uses a
@@ -342,6 +382,10 @@ export interface DemoOptions {
    * generator is seed-independent, so `seed` alone does not separate id-spaces).
    */
   readonly idGenerator?: IdGenerator;
+  /** LLM judge for evaluation scoring (D3 path). Absent ⇒ heuristic D1 scorecards only. */
+  readonly evaluationModel?: ModelRuntime;
+  /** Semantic embed fn for ContextAssembler. Absent ⇒ local FNV-1a fallback. */
+  readonly embedFn?: (text: string) => Promise<number[]>;
 }
 
 /** A learner the surface is owned by (DPS-003). Defaults to the demo learner for the CLI/tests. */
@@ -359,7 +403,7 @@ const DEMO_LEARNER: LearnerDescriptor = {
   trustLevel: 5,
 };
 
-function onboarding(learner: LearnerDescriptor): OnboardingSession {
+function onboarding(learner: LearnerDescriptor, mode?: ProductMode): OnboardingSession {
   const { userId, cid, trustLevel } = learner;
   const learnerIdentity: CognitiveIdentity = {
     cid,
@@ -410,6 +454,7 @@ function onboarding(learner: LearnerDescriptor): OnboardingSession {
     learnerNodeId: `learner:${userId}`,
     intentNodeId: `intent:intent-${userId}`,
     seedMemoryMutationId: `mut-${userId}`,
+    ...(mode ? { mode } : {}),
   };
 }
 
@@ -463,7 +508,7 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     ...DEMO_LEARNER,
     trustLevel: options.trustLevel ?? DEMO_LEARNER.trustLevel,
   };
-  const session = onboarding(learner);
+  const session = onboarding(learner, options.mode);
   const governance = new GovernanceEngine(PRODUCT_DISPATCH_POLICIES, { idGenerator });
   // Dynamic capability registry (GOV-P03): grant the learner the dispatch capabilities up front;
   // revoking one blocks that agent's next dispatch. Spec: spec/kernel/capability-registry.md.
@@ -474,6 +519,8 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
   const model = options.modelFactory(bus, clock, idGenerator);
 
   const manifest = (id: string) => MVP_AGENT_MANIFESTS.find((m) => m.id === `agent.${id}`)!;
+  // Live evolution config (P5.2, DPS-010 §5): rollout callbacks mutate this; modelUnit reads it.
+  const liveConfig = new LiveEvolutionConfig();
   const modelUnit = (role: ModelBackedRole) =>
     new ModelBackedUnit({
       manifest: manifest(role),
@@ -481,8 +528,9 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
       role,
       fallback: new DeterministicMvpUnit(manifest(role), idGenerator),
       world,
-      timeoutMs: 30_000,
+      timeoutMs: 60_000,
       idGenerator,
+      getDepthBias: () => liveConfig.depthBias,
     });
   const dispatcher = (
     kind: string,
@@ -500,15 +548,41 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     });
 
   const explanationDispatcher = dispatcher("explanation", "cog-exp-demo", modelUnit("explanation"));
-  // P4.1 — multi-agent blackboard arbitration (ADR-0018): revision agent runs concurrently with
-  // the explanation agent; disagreements are emitted as surface.agent.disagreed.
-  // DeterministicMvpUnit used (ModelBackedUnit supports explanation/practice/assessment only; P7 adds revision).
-  const challengerDispatcher = dispatcher(
-    "revision",
-    "cog-rev-demo",
-    new DeterministicMvpUnit(manifest("revision"), idGenerator),
-  );
+  // P4 — revision agent is now a real ModelBackedUnit so it produces genuine competing content.
+  // When the two agents' layer_0 outputs have Jaccard similarity < 0.3, surface.agent.disagreed
+  // fires and the arbiter records a synthesis — making multi-agent cognition visible in the panel.
+  const challengerDispatcher = dispatcher("revision", "cog-rev-demo", modelUnit("revision"));
   const proposals = new ProposalBlackboard();
+  // S3.2 — research frontier dispatcher (F10, ADR-0026).
+  const researchDispatcher = dispatcher(
+    "research",
+    "cog-res-demo",
+    new ResearchUnit({ manifest: manifest("research"), model, idGenerator }),
+  );
+  // UCS (ADR-0030) — Surface Composer: the focus concept becomes a Cognitive Frame (distilled MCCR
+  // on the board + a SEPARATE paced narration script + an image decision). Reads the live depth bias.
+  const composerDispatcher = dispatcher(
+    "composer",
+    "cog-comp-demo",
+    new SurfaceComposerUnit({
+      manifest: manifest("composer"),
+      model,
+      idGenerator,
+      getDepthBias: () => liveConfig.depthBias,
+    }),
+  );
+  // UCS (ADR-0030; Phase 2) — Frame Planner: decomposes the focus concept into a SEQUENCE of
+  // progressive Cognitive Frames. The composer then distills each frame. Reads the live depth bias.
+  const framePlannerDispatcher = dispatcher(
+    "frameplanner",
+    "cog-plan-demo",
+    new FramePlannerUnit({
+      manifest: manifest("frameplanner"),
+      model,
+      idGenerator,
+      getDepthBias: () => liveConfig.depthBias,
+    }),
+  );
 
   const loop = new FiberedLearningLoop({
     learningPaths: new LearningPathProjector(world),
@@ -538,17 +612,32 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     nodeId: "demo-loop",
   });
 
+  const evaluationEngine = new CognitiveEvaluationEngine({
+    bus,
+    clock,
+    idGenerator,
+    nodeId: "demo-eval",
+    producerCid: "engine.evaluation.demo",
+    model: options.evaluationModel,
+  });
+
   const surface = new SurfaceSession({
     session,
     world,
     bus,
     loop,
     explanationDispatcher,
+    researchDispatcher,
+    evaluationEngine,
     supervisorCid: "cog-sup-demo",
     clock,
     idGenerator,
     nodeId: "demo-surface",
+    ...(options.composer ? { composerDispatcher } : {}),
+    ...(options.composer && options.framePlanner ? { framePlannerDispatcher } : {}),
     ...(options.voice ? { voice: options.voice } : {}),
+    ...(options.media ? { media: options.media } : {}),
+    ...(options.streamRevealMs ? { streamRevealMs: options.streamRevealMs } : {}),
   });
 
   // The curriculum agent (F02/F03) turns any goal into a concept DAG — governed like every unit.
@@ -586,6 +675,50 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
         }),
       );
     }
+    // S2.4 — Seed the live curriculum into the KG: concept layer/domain + typed cross-concept edges.
+    // `SurfaceTimelineBuilder.projectEdges()` reads world-state neighbors for typed edge types, so
+    // seeding here is all that is needed — no changes to the timeline builder.
+    const CURRICULUM_EDGE_TYPES = new Set<string>([
+      "depends_on",
+      "applies_to",
+      "research_adjacent",
+      "bridges_to",
+      "frontier_of",
+    ]);
+    const conceptSpecs: ConceptSpec[] = rawConcepts
+      .filter((e): e is Record<string, unknown> => typeof e === "object" && e !== null)
+      .map((c) => {
+        const rawLayer = typeof c["layer"] === "number" ? c["layer"] : 2;
+        const layer = Math.min(6, Math.max(0, Math.round(rawLayer))) as ConceptLayer;
+        const domain =
+          typeof c["domain"] === "string" && c["domain"].trim()
+            ? c["domain"].trim()
+            : curriculumSlug(goal);
+        return {
+          id: String(c["id"] ?? ""),
+          label: String(c["title"] ?? ""),
+          domain,
+          layer,
+          prerequisites: Array.isArray(c["prerequisites"])
+            ? (c["prerequisites"] as unknown[]).filter((p): p is string => typeof p === "string")
+            : [],
+        };
+      })
+      .filter((s) => s.id);
+    if (conceptSpecs.length > 0) {
+      kg.seedConcepts(conceptSpecs);
+    }
+    const rawEdges = Array.isArray(content["edges"]) ? (content["edges"] as unknown[]) : [];
+    for (const entry of rawEdges) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const e = entry as Record<string, unknown>;
+      const from = typeof e["from"] === "string" ? e["from"] : "";
+      const to = typeof e["to"] === "string" ? e["to"] : "";
+      const type = typeof e["type"] === "string" ? e["type"] : "";
+      if (from && to && type && CURRICULUM_EDGE_TYPES.has(type)) {
+        kg.addEdge(from, to, type as KnowledgeEdgeType);
+      }
+    }
     const focusConceptId =
       typeof content["focus_concept_id"] === "string" &&
       concepts.some((c) => c.id === content["focus_concept_id"])
@@ -612,6 +745,7 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
         passed: true,
         confidence: 0.9,
         evidence: [{ kind: "practice", result: "solved correctly" }],
+        depthTests: DEMO_DEPTH_TESTS,
       },
     });
   };
@@ -678,7 +812,10 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
 
   // Context-lease-bounded retrieval (DPS-005): assemble the learner's relevant prior knowledge into
   // working memory on demand, bounded by the session's context lease. VectorStore-backed; deterministic.
-  const contextAssembler = new ContextAssembler({ vectors: new InMemoryVectorStore() });
+  const contextAssembler = new ContextAssembler({
+    vectors: new InMemoryVectorStore(),
+    ...(options.embedFn ? { embedFn: options.embedFn } : {}),
+  });
   const ownerUserId = session.intentLease.owner_user_id;
   const assembleContext = async (query: string): Promise<WorkingMemoryContext> => {
     // Index the learner's durable-tier memory (the retrievable knowledge), then assemble under the lease.
@@ -902,6 +1039,17 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
       });
       return result.allowed;
     },
+    evaluationGuard: (proposal) => {
+      // S4.2 (ADR-0027): block evolution approval when cognitive evaluation quality is
+      // insufficient. The overallPassRate already captures shadow-learner cognitive signal;
+      // we gate it against EVALUATION_PASS_THRESHOLD (0.7) from @inevitable/evaluation.
+      const passRate = proposal.evaluationResult?.overallPassRate ?? 0;
+      return passRate >= EVALUATION_PASS_THRESHOLD;
+    },
+    // P5.2: apply/revert the proposal's configuration to the live config so all subsequent
+    // model-backed units pick up the depth shift immediately without a restart (DPS-010 §5).
+    onRollout: (proposal) => liveConfig.apply(proposal.configuration),
+    onRollback: (proposal) => liveConfig.revert(proposal.configuration),
   });
   const proposeEvolution = (
     kind: ProposalKind,
@@ -914,7 +1062,7 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
       configuration: config,
       syntheticLearners: DEFAULT_SYNTHETIC_LEARNERS,
     });
-  const evaluateEvolution = (proposalId: string): EvaluationResult =>
+  const evaluateEvolution = (proposalId: string): Promise<EvaluationResult> =>
     evolution.evaluate(proposalId);
   const approveEvolution = (proposalId: string): EvolutionProposal => evolution.approve(proposalId);
   const rolloutEvolution = (proposalId: string): EvolutionProposal => evolution.rollout(proposalId);
@@ -950,6 +1098,28 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
   };
 }
 
+/**
+ * Deterministic five-test depth results for demo/offline paths (S2.2, F14).
+ * All five pass at high confidence — the gate will always pass in the demo.
+ */
+const DEMO_DEPTH_TESTS: readonly DepthTestResult[] = [
+  { kind: "explanation", passed: true, confidence: 0.9, evidence: "articulated core concept" },
+  { kind: "application", passed: true, confidence: 0.88, evidence: "solved practice problem" },
+  {
+    kind: "connection",
+    passed: true,
+    confidence: 0.85,
+    evidence: "linked to prerequisite concepts",
+  },
+  { kind: "teaching", passed: true, confidence: 0.82, evidence: "rephrased for a novice" },
+  {
+    kind: "edge_case",
+    passed: true,
+    confidence: 0.8,
+    evidence: "handled degenerate input correctly",
+  },
+];
+
 /** The canonical demo ask. */
 export function demoAsk(goal: string): SurfaceAskInput {
   return {
@@ -973,6 +1143,7 @@ export function demoAsk(goal: string): SurfaceAskInput {
       passed: true,
       confidence: 0.9,
       evidence: [{ kind: "practice", result: "solved correctly" }],
+      depthTests: DEMO_DEPTH_TESTS,
     },
   };
 }

@@ -38,6 +38,18 @@ export interface CurriculumConcept {
   readonly id: string;
   readonly title: string;
   readonly prerequisites: readonly string[];
+  /** Natural depth layer 0–6 (0=intuition … 6=research). Seeded into the KG for adaptive prompting. */
+  readonly layer?: number;
+  /** Domain label (e.g. "mathematics", "machine-learning"). Seeded into the KG as graph context. */
+  readonly domain?: string;
+}
+
+/** A typed cross-concept edge beyond the prerequisite spine (SRF-003, S2.4). */
+export interface CurriculumEdge {
+  readonly from: string;
+  readonly to: string;
+  /** depends_on | applies_to | research_adjacent | bridges_to | frontier_of */
+  readonly type: string;
 }
 
 export interface GeneratedCurriculum {
@@ -45,6 +57,8 @@ export interface GeneratedCurriculum {
   readonly focusConceptId: string;
   readonly explanationPrompt?: string;
   readonly practicePrompt?: string;
+  /** Optional informational edges that enrich the cognitive graph beyond the prerequisite spine. */
+  readonly edges?: readonly CurriculumEdge[];
 }
 
 export interface CurriculumUnitDeps {
@@ -67,6 +81,20 @@ const OUTPUT_CONTRACT_SCHEMA: Record<string, unknown> = {
           id: { type: "string" },
           title: { type: "string" },
           prerequisites: { type: "array", items: { type: "string" } },
+          layer: { type: "number" },
+          domain: { type: "string" },
+        },
+      },
+    },
+    edges: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["from", "to", "type"],
+        properties: {
+          from: { type: "string" },
+          to: { type: "string" },
+          type: { type: "string" },
         },
       },
     },
@@ -127,6 +155,7 @@ export function parseCurriculumOutput(text: string): GeneratedCurriculum {
   }
   const obj = raw as {
     concepts?: unknown;
+    edges?: unknown;
     focus_concept_id?: unknown;
     explanation_prompt?: unknown;
     practice_prompt?: unknown;
@@ -140,7 +169,13 @@ export function parseCurriculumOutput(text: string): GeneratedCurriculum {
   const seen = new Set<string>();
   const concepts: CurriculumConcept[] = [];
   for (const entry of obj.concepts) {
-    const candidate = entry as { id?: unknown; title?: unknown; prerequisites?: unknown };
+    const candidate = entry as {
+      id?: unknown;
+      title?: unknown;
+      prerequisites?: unknown;
+      layer?: unknown;
+      domain?: unknown;
+    };
     const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
     const title = typeof candidate.title === "string" ? candidate.title.trim() : "";
     if (!id || !title || seen.has(id)) continue;
@@ -148,7 +183,21 @@ export function parseCurriculumOutput(text: string): GeneratedCurriculum {
     const prerequisites = Array.isArray(candidate.prerequisites)
       ? candidate.prerequisites.filter((p): p is string => typeof p === "string")
       : [];
-    concepts.push({ id, title, prerequisites });
+    const layer =
+      typeof candidate.layer === "number"
+        ? Math.min(6, Math.max(0, Math.round(candidate.layer)))
+        : undefined;
+    const domain =
+      typeof candidate.domain === "string" && candidate.domain.trim()
+        ? candidate.domain.trim()
+        : undefined;
+    concepts.push({
+      id,
+      title,
+      prerequisites,
+      ...(layer !== undefined ? { layer } : {}),
+      ...(domain ? { domain } : {}),
+    });
   }
   if (concepts.length === 0) {
     throw curriculumError("E_MODEL_OUTPUT_MALFORMED", "curriculum output had no valid concepts");
@@ -159,6 +208,26 @@ export function parseCurriculumOutput(text: string): GeneratedCurriculum {
     ...c,
     prerequisites: c.prerequisites.filter((p) => ids.has(p) && p !== c.id),
   }));
+  // Parse typed cross-concept edges (S2.4); drop unknown types or refs to unknown concept ids.
+  const VALID_EDGE_TYPES = new Set([
+    "depends_on",
+    "applies_to",
+    "research_adjacent",
+    "bridges_to",
+    "frontier_of",
+  ]);
+  const edges: CurriculumEdge[] = [];
+  if (Array.isArray(obj.edges)) {
+    for (const entry of obj.edges) {
+      const e = entry as { from?: unknown; to?: unknown; type?: unknown };
+      const from = typeof e.from === "string" ? e.from.trim() : "";
+      const to = typeof e.to === "string" ? e.to.trim() : "";
+      const type = typeof e.type === "string" ? e.type.trim() : "";
+      if (!from || !to || !type || !ids.has(from) || !ids.has(to) || !VALID_EDGE_TYPES.has(type))
+        continue;
+      edges.push({ from, to, type });
+    }
+  }
   let focus = typeof obj.focus_concept_id === "string" ? obj.focus_concept_id.trim() : "";
   if (!ids.has(focus)) {
     const root = cleaned.find((c) => c.prerequisites.length === 0);
@@ -167,6 +236,7 @@ export function parseCurriculumOutput(text: string): GeneratedCurriculum {
   return {
     concepts: cleaned,
     focusConceptId: focus,
+    ...(edges.length > 0 ? { edges } : {}),
     ...(typeof obj.explanation_prompt === "string" && obj.explanation_prompt.trim()
       ? { explanationPrompt: obj.explanation_prompt }
       : {}),
@@ -267,9 +337,12 @@ export class CurriculumUnit implements CognitiveUnit {
       "Decompose the learner's goal into a prerequisite-ordered concept DAG: the minimal set of",
       "concepts that, learned in dependency order, take a motivated beginner to the goal.",
       "Respond with JSON only (no markdown fences) matching:",
-      `{"concepts":[{"id":"kebab-case-id","title":"Human Title","prerequisites":["other-id"]}],"focus_concept_id":"first-foundational-id","explanation_prompt":"<for the focus concept>","practice_prompt":"<one practice task>"}`,
+      `{"concepts":[{"id":"kebab-case-id","title":"Human Title","prerequisites":["other-id"],"layer":2,"domain":"mathematics"}],"edges":[{"from":"concept-a","to":"concept-b","type":"applies_to"}],"focus_concept_id":"first-foundational-id","explanation_prompt":"<for the focus concept>","practice_prompt":"<one practice task>"}`,
       "Rules: 5–8 concepts; ids are unique kebab-case; every prerequisite is another concept's id;",
       "the graph is acyclic; order foundational concepts first; focus_concept_id has no prerequisites.",
+      "layer: 0=intuition, 1=visual, 2=conceptual, 3=mathematical, 4=applied, 5=advanced, 6=research.",
+      'domain: e.g. "mathematics", "physics", "biology", "machine-learning", "programming".',
+      "edges: optional informational links beyond prerequisites (depends_on | applies_to | research_adjacent | bridges_to | frontier_of).",
     ].join("\n");
     return {
       prompt: `Goal: ${goal}`,
@@ -310,7 +383,10 @@ export class CurriculumUnit implements CognitiveUnit {
           id: c.id,
           title: c.title,
           prerequisites: c.prerequisites,
+          ...(c.layer !== undefined ? { layer: c.layer } : {}),
+          ...(c.domain ? { domain: c.domain } : {}),
         })),
+        ...(curriculum.edges?.length ? { edges: curriculum.edges } : {}),
         focus_concept_id: curriculum.focusConceptId,
         ...(curriculum.explanationPrompt
           ? { explanation_prompt: curriculum.explanationPrompt }

@@ -5,7 +5,8 @@
  */
 import type { CognitionBlock } from "@inevitable/surface/client";
 import { identityFor } from "../agents";
-import { blockLede, renderBlockBody } from "../blocks";
+import { renderBlockBody } from "../blocks";
+import { ActivityTimeline } from "./ActivityTimeline";
 
 export interface CognitiveStageProps {
   readonly block: CognitionBlock | null;
@@ -14,6 +15,10 @@ export interface CognitiveStageProps {
   readonly activeId: string | null;
   readonly onSelect: (blockId: string) => void;
   readonly thinking: boolean;
+  /** An in-flight streamed explanation (S-UCS, ADR-0028): show it forming until the whole block lands. */
+  readonly streaming?: { readonly text: string } | null;
+  /** Media blocks (image/video/sim) sharing the focused concept — rendered inline, beside it (S-UCS). */
+  readonly relatedMedia?: readonly CognitionBlock[];
 }
 
 export function CognitiveStage({
@@ -23,7 +28,38 @@ export function CognitiveStage({
   activeId,
   onSelect,
   thinking,
+  streaming,
+  relatedMedia = [],
 }: CognitiveStageProps) {
+  // Streaming preview: cognition is unfolding live — show the text forming with a caret (ADR-0028).
+  if (streaming && streaming.text) {
+    return (
+      <section className="stage" aria-live="polite">
+        <article
+          className="stage-core is-speaking is-streaming"
+          style={{ ["--stage-accent" as string]: "var(--agent-explainer)" }}
+        >
+          <header className="stage-head">
+            <span className="stage-agent">
+              <span className="stage-sigil" style={{ color: "var(--agent-explainer)" }}>
+                ◈
+              </span>
+              Explainer
+            </span>
+            <span className="stage-kind">explanation</span>
+            <span className="stage-live">generating</span>
+          </header>
+          <div className="stage-body">
+            <p className="block-lede">
+              {streaming.text}
+              <span className="stream-caret" aria-hidden />
+            </p>
+          </div>
+        </article>
+      </section>
+    );
+  }
+
   if (!block) {
     return (
       <section className="stage stage-empty" aria-live="polite">
@@ -39,6 +75,9 @@ export function CognitiveStage({
   }
 
   const agent = identityFor(block.provenance.agent_id ?? block.provenance.producer_cid);
+  const responseKind = block.content["response_kind"] as string | undefined;
+  const fallbackReason = block.content["fallback_reason"] as string | undefined;
+  const modelName = block.content["model"] as string | undefined;
 
   return (
     <section className="stage" aria-live="polite">
@@ -55,35 +94,38 @@ export function CognitiveStage({
             {agent.label}
           </span>
           <span className="stage-kind">{block.block_type}</span>
+          {responseKind === "deterministic-fallback" ? (
+            <span
+              className="stage-badge stage-badge--fallback"
+              title={`deterministic fallback${fallbackReason ? ` · ${fallbackReason}` : ""}`}
+            >
+              deterministic
+            </span>
+          ) : modelName && modelName !== "null" ? (
+            <span className="stage-badge stage-badge--model" title={modelName}>
+              {modelName.replace(/^gemini-/, "").replace(/-preview.*$/, "")}
+            </span>
+          ) : null}
           {speaking ? <span className="stage-live">narrating</span> : null}
         </header>
         <h2 className="stage-title">{block.title.replace(/^.*—\s*/, "")}</h2>
         <div className="stage-body">{renderBlockBody(block)}</div>
+        {relatedMedia.length > 0 ? (
+          <div className="stage-media" aria-label="Illustrations for this concept">
+            {relatedMedia.map((m) => (
+              <figure key={m.block_id} className="stage-figure">
+                {renderBlockBody(m)}
+                <figcaption className="stage-figure-cap">
+                  {m.title.replace(/^.*—\s*/, "")}
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        ) : null}
       </article>
 
       {context.length > 0 ? (
-        <div className="stage-ribbon" role="tablist" aria-label="Other cognition on this surface">
-          {context.map((b) => {
-            const id = identityFor(b.provenance.agent_id ?? b.provenance.producer_cid);
-            return (
-              <button
-                key={b.block_id}
-                type="button"
-                role="tab"
-                aria-selected={b.block_id === activeId}
-                className={`facet ${b.block_id === activeId ? "is-active" : ""}`}
-                style={{ ["--facet-accent" as string]: id.accent }}
-                onClick={() => onSelect(b.block_id)}
-                title={blockLede(b)}
-              >
-                <span className="facet-sigil" style={{ color: id.accent }}>
-                  {id.sigil}
-                </span>
-                <span className="facet-kind">{b.block_type}</span>
-              </button>
-            );
-          })}
-        </div>
+        <ActivityTimeline blocks={[...context].reverse()} activeId={activeId} onSelect={onSelect} />
       ) : null}
     </section>
   );

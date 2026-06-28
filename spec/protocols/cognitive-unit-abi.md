@@ -163,6 +163,13 @@ where the lifecycle may retry them.
 ABI calls drive `agent.registered → agent.ready → agent.executing → agent.completed | agent.failed`
 and checkpoint/recover transitions. Each hook emits lifecycle events referencing the unit's CID.
 
+When `execute()` returns a non-null `emissions.trace`, the runtime publishes it to the bus as a
+`reasoning.completed` event (`reasoning.*` family, recorded-observation) — this realizes the `outcome`
+trace of the `observability_contract` and feeds the observability engine (DPS-007). Product surfaces may
+additionally project a structured summary of the trace into their own family (e.g.
+`surface.agent.reasoning.summary`, SRF-002) for the Agent Observatory; the bus `reasoning.completed`
+event remains the canonical, replayable record of the unit's reasoning outcome.
+
 ## Observability
 
 `health()` feeds population management and autoscaling; `describe().observability_contract` is

@@ -21,9 +21,15 @@ export interface ChoreographyView {
   readonly current: NarrationSegment | null;
   readonly focus: SurfaceFocus | null;
   readonly speakingBlockId: string | null;
+  /** The Cognitive Frame the current narration segment voices (UCS, ADR-0030) — client projection. */
+  readonly activeFrameId: string | null;
+  /** The MCCR element the current segment spotlights (UCS, ADR-0030) — drives the moving highlight. */
+  readonly highlightElementId: string | null;
   readonly mode: PlaybackMode;
   readonly isPlaying: boolean;
   readonly atEnd: boolean;
+  /** Playback progress within the current segment, 0..1 — drives word-level highlight (client projection). */
+  readonly progress: number;
   readonly speed: number;
   readonly play: () => void;
   readonly pause: () => void;
@@ -112,6 +118,35 @@ export function useChoreographer(state: SurfaceState | null): ChoreographyView {
     };
   }, [mode, cursor, segments, speed]);
 
+  // Word-level highlight (client projection, ADR-0007): interpolate progress across the current
+  // segment — the audio's `currentTime` when voiced, else elapsed/reading-time. Never canonical.
+  const [progress, setProgress] = useState(0);
+  useEffect(() => {
+    setProgress(0);
+    if (mode !== "playing") return;
+    if (typeof requestAnimationFrame === "undefined") return;
+    const seg = segments[cursor] ?? null;
+    if (!seg) return;
+    const audio = audioRef.current;
+    const voiceRef = seg.voice?.content_ref ?? null;
+    const dwell = durationMs(seg) / Math.max(0.25, speed);
+    const startedAt = typeof performance !== "undefined" ? performance.now() : 0;
+    let raf = 0;
+    const tick = (): void => {
+      let p: number;
+      if (audio && voiceRef && audio.duration > 0) {
+        p = audio.currentTime / audio.duration;
+      } else {
+        const now = typeof performance !== "undefined" ? performance.now() : startedAt + dwell;
+        p = dwell > 0 ? (now - startedAt) / dwell : 1;
+      }
+      setProgress(Math.max(0, Math.min(1, p)));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [mode, cursor, segments, speed]);
+
   const current = segments[cursor] ?? null;
   const atEnd = cursor >= segments.length - 1;
 
@@ -137,6 +172,13 @@ export function useChoreographer(state: SurfaceState | null): ChoreographyView {
   // The spotlight: the current segment's focus directive, falling back to the surface's focus.
   const focus = current?.focus ?? state?.focus ?? null;
   const speakingBlockId = mode === "playing" && current ? current.block_id : null;
+  // UCS (ADR-0030): which frame is on screen + which MCCR element is spotlit are pure projections of
+  // the cursor — never logged. The active frame is the one the current segment voices (or the latest).
+  const activeFrameId =
+    current?.frame_id ??
+    (state?.frames.length ? (state.frames[state.frames.length - 1]?.frame_id ?? null) : null);
+  const highlightElementId =
+    current?.focus?.target_type === "element" ? current.focus.target_id : null;
 
   return {
     segments,
@@ -144,9 +186,12 @@ export function useChoreographer(state: SurfaceState | null): ChoreographyView {
     current,
     focus,
     speakingBlockId,
+    activeFrameId,
+    highlightElementId,
     mode,
     isPlaying: mode === "playing",
     atEnd,
+    progress,
     speed,
     play,
     pause,

@@ -23,10 +23,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   FileEventTransport,
+  GeminiImageRuntime,
   GeminiModelRuntime,
   GeminiVoiceRuntime,
+  NullImageRuntime,
   NullModelRuntime,
   RecordingModelRuntime,
+  type ImageRuntime,
   type VoiceRuntime,
 } from "@inevitable/adapters";
 import {
@@ -35,6 +38,7 @@ import {
   type DemoFixture,
   type DemoRestore,
 } from "@inevitable/cli";
+import type { ProductMode } from "@inevitable/product-cognition";
 import type { ModelRuntime } from "@inevitable/contracts";
 import { createEvent } from "@inevitable/events";
 import type { CognitiveEvent } from "@inevitable/protocols";
@@ -48,12 +52,13 @@ import {
   type Result,
 } from "@inevitable/shared";
 import { foldSurfaceEvents, type SurfaceAskResult, type SurfaceState } from "@inevitable/surface";
-import { geminiApiKey, persistDir } from "./env";
+import { geminiApiKey, persistDir, strictModel } from "./env";
 import { LearnerRegistry, type LearnerRecord } from "./learners";
 import {
   FileMediaStore,
   InMemoryMediaStore,
   type MediaStore,
+  createMediaGenerator,
   createVoiceSynthesizer,
 } from "./media";
 
@@ -89,6 +94,8 @@ export interface ServedSurface {
   ask(goal: string): Promise<Result<SurfaceAskResult, CosError>>;
   expand(blockId: string, layer: number): ReturnType<Surface["expand"]>;
   close(reason?: string): ReturnType<Surface["close"]>;
+  /** Apply a governed learner interaction (S1.3, ADR-0024). */
+  interact(input: Parameters<Surface["interact"]>[0]): ReturnType<Surface["interact"]>;
   onAttach(): void;
   onDetach(): void;
 }
@@ -99,6 +106,8 @@ export interface CreateSurfaceOptions {
   readonly seed?: string;
   /** Resolve an existing durable learner (DPS-003); absent ⇒ mint a fresh learner. */
   readonly learnerId?: string;
+  /** Product mode for the session (S4.3). Absent ⇒ "student". */
+  readonly mode?: string;
 }
 
 export function gatewayError(message: string, details?: Record<string, unknown>): CosError {
@@ -114,6 +123,12 @@ async function resolveModel(): Promise<{ inner: ModelRuntime; provider: string }
     const connected = await GeminiModelRuntime.connect({ apiKey });
     if (connected.ok) return { inner: connected.value, provider: "gemini" };
   }
+  if (strictModel()) {
+    throw new Error(
+      "[COS] NullModelRuntime is not allowed in strict-model mode (COS_STRICT_MODEL=1 or NODE_ENV=production). " +
+        "Set GEMINI_API_KEY to enable real cognition.",
+    );
+  }
   return { inner: new NullModelRuntime(), provider: "null" };
 }
 
@@ -125,6 +140,16 @@ async function resolveVoice(): Promise<VoiceRuntime | null> {
     if (connected.ok) return connected.value;
   }
   return null;
+}
+
+/** Resolve an image runtime: Gemini Imagen when keyed, else SVG null runtime (offline default). */
+async function resolveImage(): Promise<ImageRuntime> {
+  const apiKey = geminiApiKey();
+  if (apiKey) {
+    const connected = await GeminiImageRuntime.connect({ apiKey });
+    if (connected.ok) return connected.value;
+  }
+  return new NullImageRuntime();
 }
 
 const SURFACE_SUBJECT_PREFIX = "surface.";
@@ -144,9 +169,19 @@ export class SurfaceHost {
   private readonly learners: LearnerRegistry;
   /** Test seam: inject a deterministic voice runtime instead of resolving Gemini by key. */
   private readonly injectedVoice: VoiceRuntime | undefined;
+  /** Image runtime (S2.1b, SRF-006): injected by tests; resolved per-create in production. */
+  private readonly imageRuntime: ImageRuntime | null;
 
-  constructor(deps: { voiceRuntime?: VoiceRuntime; persistDir?: string } = {}) {
+  constructor(
+    deps: {
+      voiceRuntime?: VoiceRuntime;
+      /** Inject a specific image runtime (tests use this); production calls resolveImage() per-create. */
+      imageRuntime?: ImageRuntime;
+      persistDir?: string;
+    } = {},
+  ) {
     this.injectedVoice = deps.voiceRuntime;
+    this.imageRuntime = deps.imageRuntime ?? null;
     this.persistDir = deps.persistDir ?? persistDir();
     this.media = this.persistDir
       ? new FileMediaStore(join(this.persistDir, "media"))
@@ -157,6 +192,11 @@ export class SurfaceHost {
   /** A learner profile + the surfaces they own (resume-by-learner, DPS-003). */
   getLearner(learnerId: string): LearnerRecord | undefined {
     return this.learners.get(learnerId);
+  }
+
+  /** Resolve a learner by API key (bearer credential). Returns undefined for unknown keys. */
+  getLearnerByApiKey(apiKey: string): LearnerRecord | undefined {
+    return this.learners.getByApiKey(apiKey);
   }
 
   private surfaceDir(surfaceId: string): string {
@@ -171,6 +211,8 @@ export class SurfaceHost {
     const { inner, provider } = await resolveModel();
     const voiceRuntime = this.injectedVoice ?? (await resolveVoice());
     const voice = voiceRuntime ? createVoiceSynthesizer(voiceRuntime, this.media) : undefined;
+    const imageRuntime = this.imageRuntime ?? (await resolveImage());
+    const mediaGen = createMediaGenerator(imageRuntime, this.media);
     const seed = options.seed ?? `gw-${++this.counter}`;
     // Resolve (or mint) the durable learner that will own this surface (DPS-003).
     const learner = this.learners.resolveOrCreate({
@@ -190,6 +232,21 @@ export class SurfaceHost {
       learner: { userId: learner.learnerId, cid: learner.cid, trustLevel: learner.trustLevel },
       ...(learnerSeed ? { learnerSeed } : {}),
       ...(voice ? { voice } : {}),
+      media: mediaGen,
+      ...(options.mode ? { mode: options.mode as ProductMode } : {}),
+      // Live progressive reveal: stream the explanation as it unfolds (S-UCS, ADR-0028). Gateway-only;
+      // the CLI/tests leave this off so deterministic runs emit the whole block at once.
+      streamRevealMs: 45,
+      // UCS (ADR-0030): the product surface renders Cognitive Frames — distilled MCCR on the board
+      // with a SEPARATE narration script — not a prose explanation block. Gateway-only (CLI/tests
+      // exercise the legacy explanation-block path so `expand` and the substrate stay covered).
+      composer: true,
+      // UCS (ADR-0030; Phase 2): decompose each concept into a progressive sequence of Cognitive
+      // Frames (and render practice/assessment as frames), instead of a single composed frame.
+      framePlanner: true,
+      ...(provider === "gemini"
+        ? { evaluationModel: inner, embedFn: (t: string) => inner.embed(t) }
+        : {}),
     });
 
     // Durable sink: one subscription. The surface id (the log's home) is only known after start(),
@@ -282,6 +339,13 @@ export class SurfaceHost {
         this.persistSnapshots(hosted.surfaceId, fixture);
         return result;
       },
+      interact: async (input) => {
+        const result = await fixture.surface.interact(input);
+        this.persistSnapshots(hosted.surfaceId, fixture);
+        // A reshaping interaction re-runs the governed cycle, so capture cross-surface cognition.
+        if (result.ok && result.value.effect === "dispatched") this.captureCognition(hosted);
+        return result;
+      },
       onAttach: () => this.emitBoundaryEvent(hosted, "gateway.stream.attached"),
       onDetach: () => this.emitBoundaryEvent(hosted, "gateway.stream.detached"),
     };
@@ -315,6 +379,7 @@ export class SurfaceHost {
       ask: async () => replayOnly(),
       expand: async () => replayOnly(),
       close: async () => replayOnly(),
+      interact: async () => replayOnly(),
       onAttach: () => {},
       onDetach: () => {},
     };
@@ -387,12 +452,26 @@ export class SurfaceHost {
     const { inner, provider } = await resolveModel();
     const voiceRuntime = this.injectedVoice ?? (await resolveVoice());
     const voice = voiceRuntime ? createVoiceSynthesizer(voiceRuntime, this.media) : undefined;
+    const imageRuntime = this.imageRuntime ?? (await resolveImage());
+    const mediaGen = createMediaGenerator(imageRuntime, this.media);
     const fixture = buildDemoSession({
       modelFactory: (bus, clock, idGenerator) =>
         new RecordingModelRuntime({ mode: "record", bus, inner, provider, clock, idGenerator }),
       restore,
       ...(learner ? { learner } : {}),
       ...(voice ? { voice } : {}),
+      media: mediaGen,
+      streamRevealMs: 45,
+      // UCS (ADR-0030): the product surface renders Cognitive Frames — distilled MCCR on the board
+      // with a SEPARATE narration script — not a prose explanation block. Gateway-only (CLI/tests
+      // exercise the legacy explanation-block path so `expand` and the substrate stay covered).
+      composer: true,
+      // UCS (ADR-0030; Phase 2): decompose each concept into a progressive sequence of Cognitive
+      // Frames (and render practice/assessment as frames), instead of a single composed frame.
+      framePlanner: true,
+      ...(provider === "gemini"
+        ? { evaluationModel: inner, embedFn: (t: string) => inner.embed(t) }
+        : {}),
     });
     const resumed = fixture.surface.resume(surfaceId);
     if (!resumed.ok) return undefined;

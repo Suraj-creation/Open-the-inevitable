@@ -8,8 +8,8 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { VoiceRuntime } from "@inevitable/adapters";
-import type { VoiceSynthesizer } from "@inevitable/surface";
+import type { ImageRuntime, VoiceRuntime } from "@inevitable/adapters";
+import type { MediaGenerator, VoiceSynthesizer } from "@inevitable/surface";
 
 export interface StoredMedia {
   readonly bytes: Uint8Array;
@@ -83,6 +83,39 @@ export function createVoiceSynthesizer(runtime: VoiceRuntime, store: MediaStore)
         content_ref: `/api/surface/${request.surface_id}/media/${artifactId}`,
         duration_ms: result.value.durationMs,
         provider_id: runtime.provider,
+      };
+    },
+  };
+}
+
+/**
+ * Bridge an `ImageRuntime` (adapter) to the surface's `MediaGenerator` seam (S2.1b, SRF-006): on a
+ * generation request, produce bytes, stash them in the store keyed by a unique artifact id, and
+ * return only the reference (the media route) that the fold records. Generation failure ⇒ null
+ * (the surface degrades to structured/text content) — never a crash. Bytes never enter events.
+ */
+export function createMediaGenerator(runtime: ImageRuntime, store: MediaStore): MediaGenerator {
+  return {
+    async generate(request) {
+      const result = await runtime.generate({
+        prompt: request.prompt,
+        conceptIds: request.concept_ids,
+      });
+      if (!result.ok) {
+        console.warn(
+          `[media] image generation failed (${runtime.provider}): ${result.error.code} — ${result.error.message}`,
+        );
+        return null;
+      }
+      const artifactId = `art-image-${request.request_id}`;
+      store.put(artifactId, { bytes: result.value.bytes, mimeType: result.value.mimeType });
+      return {
+        artifact_id: artifactId,
+        modality: request.modality,
+        content_ref: `/api/surface/${request.surface_id}/media/${artifactId}`,
+        mime_type: result.value.mimeType,
+        provider_id: runtime.provider,
+        deterministic: runtime.deterministic,
       };
     },
   };

@@ -41,4 +41,13 @@ export {
   type VoiceSynthesisInput,
 } from "./voice";
 
+export {
+  NullImageRuntime,
+  GeminiImageRuntime,
+  type GenAiImageClientLike,
+  type GeneratedVisual,
+  type ImageRuntime,
+  type VisualGenerationInput,
+} from "./visual";
+
 export { runEventTransportConformance, runVectorStoreConformance } from "./conformance";

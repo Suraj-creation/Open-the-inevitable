@@ -39,10 +39,31 @@ export interface SurfaceTimelineNode {
   readonly title: string;
   readonly order: number;
   readonly prerequisites: readonly string[];
+  /** 0–6 natural depth (KG concept layer when seeded, else prerequisite-chain depth). */
+  readonly layer: number;
   readonly status: TimelineNodeStatus;
+  /** Mastery confidence (0..1) when a checkpoint exists for this learner, else null. */
+  readonly confidence: number | null;
   readonly milestone: boolean;
   readonly mastery_target: { readonly min_confidence: number };
 }
+
+/** Typed cognitive-graph edge (SRF-003). Mirrors KnowledgeEdgeType in world-state. */
+export type TimelineEdgeType =
+  | "prerequisite_of"
+  | "depends_on"
+  | "applies_to"
+  | "research_adjacent"
+  | "bridges_to"
+  | "frontier_of";
+
+export interface SurfaceTimelineEdge {
+  readonly from: string; // concept_id
+  readonly to: string; // concept_id
+  readonly edge_type: TimelineEdgeType;
+}
+
+export type TimelineEntryPoint = "beginner" | "intermediate" | "advanced" | "research";
 
 export interface TimelineProjection {
   readonly timeline_id: string;
@@ -50,9 +71,19 @@ export interface TimelineProjection {
   readonly goal: string;
   readonly path_node_id: string;
   readonly nodes: readonly SurfaceTimelineNode[];
+  readonly edges: readonly SurfaceTimelineEdge[];
+  readonly entry_point: TimelineEntryPoint;
   readonly completed: boolean;
   readonly version: number;
 }
+
+/** Concept layer (0–6) for the entry-point heuristic. */
+const ENTRY_LAYER: Record<TimelineEntryPoint, number> = {
+  beginner: 0,
+  intermediate: 2,
+  advanced: 4,
+  research: 6,
+};
 
 export interface SurfaceTimelineInput {
   readonly surface_id: string;
@@ -60,6 +91,8 @@ export interface SurfaceTimelineInput {
   readonly path_id: string;
   readonly owner_user_id: string;
   readonly concepts: readonly ConceptSeed[];
+  /** Starting layer emphasis; learner-selectable. Defaults to "beginner". */
+  readonly entry_point?: TimelineEntryPoint;
 }
 
 export interface SurfaceTimelineBuilderDeps {
@@ -99,6 +132,7 @@ export class SurfaceTimelineBuilder {
   private input: SurfaceTimelineInput | null = null;
   private last: TimelineProjection | null = null;
   private completedEmitted = false;
+  private entryPoint: TimelineEntryPoint = "beginner";
 
   constructor(deps: SurfaceTimelineBuilderDeps) {
     this.world = deps.world;
@@ -133,12 +167,16 @@ export class SurfaceTimelineBuilder {
     if (!order.ok) return order;
 
     this.input = input;
+    this.entryPoint = input.entry_point ?? "beginner";
+    const nodes = this.projectNodes(input, order.value);
     const projection: TimelineProjection = {
       timeline_id: `tl-${this.idGenerator.hex(8)}`,
       surface_id: input.surface_id,
       goal: input.goal,
       path_node_id: pathResult.value.pathNodeId,
-      nodes: this.projectNodes(input, order.value),
+      nodes,
+      edges: this.projectEdges(input, nodes),
+      entry_point: this.entryPoint,
       completed: false,
       version: 1,
     };
@@ -176,13 +214,17 @@ export class SurfaceTimelineBuilder {
     if (!order.ok) return order;
 
     const nodes = this.projectNodes(this.input, order.value);
-    const unchanged = JSON.stringify(nodes) === JSON.stringify(this.last.nodes);
+    const edges = this.projectEdges(this.input, nodes);
+    const unchanged =
+      JSON.stringify(nodes) === JSON.stringify(this.last.nodes) &&
+      JSON.stringify(edges) === JSON.stringify(this.last.edges);
     if (unchanged) return ok(this.last);
 
     const completed = nodes.every((n) => n.status === "mastered");
     const projection: TimelineProjection = {
       ...this.last,
       nodes,
+      edges,
       completed,
       version: this.last.version + 1,
     };
@@ -198,6 +240,42 @@ export class SurfaceTimelineBuilder {
     return ok(projection);
   }
 
+  /**
+   * Re-project the same graph at a different entry-point emphasis (learner-selectable, SRF-003).
+   * Entry point is a projection parameter, never canonical state — it only changes which available
+   * nodes are highlighted as suggested starting points; mastery truth and statuses are unchanged.
+   * Emits `surface.graph.entrypoint.changed` and a `surface.timeline.updated`.
+   */
+  async reproject(entryPoint: TimelineEntryPoint): Promise<Result<TimelineProjection, CosError>> {
+    if (!this.input || !this.last) {
+      return err(timelineError("reproject() called before build()"));
+    }
+    if (entryPoint === this.entryPoint) return ok(this.last);
+    this.entryPoint = entryPoint;
+    const projection: TimelineProjection = {
+      ...this.last,
+      entry_point: entryPoint,
+      version: this.last.version + 1,
+    };
+    this.last = projection;
+    await this.emit("surface.graph.entrypoint.changed", {
+      surface_id: this.input.surface_id,
+      timeline_id: projection.timeline_id,
+      entry_point: entryPoint,
+    });
+    await this.emit("surface.timeline.updated", {
+      surface_id: this.input.surface_id,
+      projection,
+      reason: `entry-point:${entryPoint}`,
+    });
+    return ok(projection);
+  }
+
+  /** The layer (0–6) of the configured entry point — UI highlights available nodes at/below it. */
+  entryLayer(): number {
+    return ENTRY_LAYER[this.entryPoint];
+  }
+
   // -------------------------------------------------------------------------
   // Status derivation (spec §5 — deterministic precedence)
   // -------------------------------------------------------------------------
@@ -207,7 +285,13 @@ export class SurfaceTimelineBuilder {
     order: readonly string[],
   ): readonly SurfaceTimelineNode[] {
     const byId = new Map(input.concepts.map((c) => [c.id, c]));
-    const mastered = this.masteredSet(input);
+    const mastery = this.masteryMap(input);
+    const mastered = new Set(
+      [...mastery]
+        .filter(([, m]) => m.passed && m.confidence >= this.masteryTarget)
+        .map(([id]) => id),
+    );
+    const depth = this.depthMap(input.concepts);
     const dependents = new Set<string>();
     for (const concept of input.concepts) {
       for (const prereq of concept.prerequisites ?? []) dependents.add(prereq);
@@ -216,33 +300,116 @@ export class SurfaceTimelineBuilder {
     return order.map((conceptId, index) => {
       const seed = byId.get(conceptId);
       const prerequisites = [...(seed?.prerequisites ?? [])];
+      const m = mastery.get(conceptId);
       return {
         concept_id: conceptId,
         node_id: `concept:${conceptId}`,
         title: seed?.title ?? conceptId,
         order: index,
         prerequisites,
+        layer: this.layerOf(conceptId, depth),
         status: this.deriveStatus(conceptId, prerequisites, mastered, input.owner_user_id),
+        confidence: m ? m.confidence : null,
         milestone: !dependents.has(conceptId),
         mastery_target: { min_confidence: this.masteryTarget },
       };
     });
   }
 
-  private masteredSet(input: SurfaceTimelineInput): ReadonlySet<string> {
-    const mastered = new Set<string>();
+  /** Best mastery checkpoint per concept for this learner (passed wins, then higher confidence). */
+  private masteryMap(
+    input: SurfaceTimelineInput,
+  ): Map<string, { passed: boolean; confidence: number }> {
+    const best = new Map<string, { passed: boolean; confidence: number }>();
     for (const checkpoint of this.world.nodesByType("mastery_checkpoint")) {
       const props = checkpoint.props;
+      if (props["ownerUserId"] !== input.owner_user_id) continue;
+      if (typeof props["conceptId"] !== "string") continue;
+      const cid = props["conceptId"] as string;
+      const passed = props["passed"] === true;
+      const confidence = (props["confidence"] as number | undefined) ?? (passed ? 1 : 0);
+      const existing = best.get(cid);
       if (
-        props["ownerUserId"] === input.owner_user_id &&
-        props["passed"] === true &&
-        ((props["confidence"] as number | undefined) ?? 1) >= this.masteryTarget &&
-        typeof props["conceptId"] === "string"
+        !existing ||
+        (passed && !existing.passed) ||
+        (passed === existing.passed && confidence > existing.confidence)
       ) {
-        mastered.add(props["conceptId"] as string);
+        best.set(cid, { passed, confidence });
       }
     }
-    return mastered;
+    return best;
+  }
+
+  /** Longest prerequisite-chain depth per concept (0-based, capped at 6) — layer fallback. */
+  private depthMap(concepts: readonly ConceptSeed[]): Map<string, number> {
+    const byId = new Map(concepts.map((c) => [c.id, c]));
+    const memo = new Map<string, number>();
+    const depthOf = (id: string, stack: Set<string>): number => {
+      const cached = memo.get(id);
+      if (cached !== undefined) return cached;
+      if (stack.has(id)) return 0; // cycle guard (projector already rejects cycles)
+      const prereqs = byId.get(id)?.prerequisites ?? [];
+      if (prereqs.length === 0) {
+        memo.set(id, 0);
+        return 0;
+      }
+      stack.add(id);
+      let max = 0;
+      for (const p of prereqs) max = Math.max(max, depthOf(p, stack) + 1);
+      stack.delete(id);
+      const capped = Math.min(max, 6);
+      memo.set(id, capped);
+      return capped;
+    };
+    for (const c of concepts) depthOf(c.id, new Set());
+    return memo;
+  }
+
+  /** Prefer the KG-seeded `layer` prop on the world concept node; else the prerequisite depth. */
+  private layerOf(conceptId: string, depth: ReadonlyMap<string, number>): number {
+    const seeded = this.world.getNode(`concept:${conceptId}`)?.props["layer"];
+    if (typeof seeded === "number") return seeded;
+    return depth.get(conceptId) ?? 0;
+  }
+
+  /**
+   * Typed cognitive-graph edges (SRF-003): the prerequisite spine derived from the concept seeds
+   * (always present), plus structural/informational edges seeded in world-state
+   * (`KnowledgeGraphEngine.addEdge`). Deterministic order for replay stability.
+   */
+  private projectEdges(
+    input: SurfaceTimelineInput,
+    nodes: readonly SurfaceTimelineNode[],
+  ): readonly SurfaceTimelineEdge[] {
+    const known = new Set(input.concepts.map((c) => c.id));
+    const edges: SurfaceTimelineEdge[] = [];
+    const seen = new Set<string>();
+    const push = (from: string, to: string, edge_type: TimelineEdgeType): void => {
+      if (!known.has(from) || !known.has(to)) return;
+      const key = `${edge_type}:${from}:${to}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      edges.push({ from, to, edge_type });
+    };
+    for (const node of nodes) {
+      for (const prereq of node.prerequisites) push(prereq, node.concept_id, "prerequisite_of");
+    }
+    const worldTypes: readonly TimelineEdgeType[] = [
+      "depends_on",
+      "applies_to",
+      "research_adjacent",
+      "bridges_to",
+      "frontier_of",
+    ];
+    for (const node of nodes) {
+      for (const type of worldTypes) {
+        for (const target of this.world.neighbors(node.node_id, type)) {
+          const to = target.startsWith("concept:") ? target.slice("concept:".length) : target;
+          push(node.concept_id, to, type);
+        }
+      }
+    }
+    return edges;
   }
 
   private deriveStatus(

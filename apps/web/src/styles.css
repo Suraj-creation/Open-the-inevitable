@@ -118,25 +118,33 @@
   transform: translateX(2px);
 }
 
-/* ─────────────────────────── Surface grid ─────────────────────────── */
+/* ─────────────────── Universal Cognitive Surface (S-UCS, F09 §4.1) ───────────────────
+   The whiteboard is fullscreen; everything else floats over it as overlays / HUDs / launchers. */
 .surface {
-  display: grid;
-  grid-template-columns: minmax(208px, 0.8fr) minmax(0, 2.5fr) minmax(248px, 0.95fr);
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  grid-template-areas:
-    "top top top"
-    "timeline stage right"
-    "track track track";
-  gap: var(--s-5);
+  position: relative;
   height: 100dvh;
-  padding: var(--s-5);
+  width: 100%;
+  overflow: hidden;
 }
 
+/* Slim floating top bar — identity, goal, Agents control, connection. */
 .surface-top {
-  grid-area: top;
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 30;
   display: flex;
   align-items: center;
   gap: var(--s-5);
+  padding: var(--s-4) clamp(var(--s-4), 4vw, var(--s-7));
+  background: linear-gradient(
+    to bottom,
+    color-mix(in oklab, var(--base) 88%, transparent),
+    transparent
+  );
+  pointer-events: none;
+}
+.surface-top > * {
+  pointer-events: auto;
 }
 .brand {
   display: inline-flex;
@@ -291,12 +299,17 @@
 
 /* ─────────────────────────── Cognitive stage ─────────────────────────── */
 .stage-wrap {
-  grid-area: stage;
-  min-height: 0;
+  position: absolute;
+  inset: 0;
+  padding: 4.75rem clamp(var(--s-4), 6vw, var(--s-8)) 7rem;
   display: flex;
+  justify-content: center;
+  min-height: 0;
 }
 .stage {
   flex: 1;
+  width: 100%;
+  max-width: 1140px;
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
@@ -374,6 +387,23 @@
   background: var(--stage-accent);
   animation: breathe 1.6s var(--ease-soft) infinite;
 }
+.stage-badge {
+  font-size: var(--t-2xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border-radius: var(--r-pill);
+  padding: 2px 9px;
+  cursor: default;
+}
+.stage-badge--fallback {
+  background: hsl(38 80% 14%);
+  color: hsl(38 90% 68%);
+  border: 1px solid hsl(38 65% 32%);
+}
+.stage-badge--model {
+  color: var(--ink-faint);
+  border: 1px solid var(--hairline);
+}
 .stage-title {
   font-family: var(--font-serif);
   font-weight: 460;
@@ -430,6 +460,51 @@
   color: var(--in-progress);
 }
 
+/* Depth-gate five-test grid (S2.2, F14) */
+.depth-gate {
+  margin-top: var(--s-3);
+}
+.depth-gate-score {
+  font-size: var(--t-sm);
+  color: var(--ink-soft);
+  display: block;
+  margin-bottom: var(--s-2);
+}
+.depth-tests {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.depth-test {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-sm);
+}
+.depth-test-glyph {
+  font-size: var(--t-xs);
+  width: 1em;
+  flex-shrink: 0;
+}
+.depth-test--pass .depth-test-glyph {
+  color: var(--mastered);
+}
+.depth-test--fail .depth-test-glyph {
+  color: var(--in-progress);
+}
+.depth-test-label {
+  flex: 1;
+  color: var(--ink-body);
+}
+.depth-test-conf {
+  font-size: var(--t-xs);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Designed media slot — not an apology, a held place for a modality. */
 .media-slot {
   display: flex;
@@ -457,41 +532,16 @@
   text-transform: uppercase;
   color: var(--ink-ghost);
 }
-
-/* Context ribbon — peripheral cognition, dimmed; click to bring to the stage. */
-.stage-ribbon {
-  display: flex;
-  gap: var(--s-2);
-  flex-wrap: wrap;
+.media-slot--loaded {
+  padding: 0;
+  border: none;
+  background: transparent;
 }
-.facet {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-2) var(--s-3);
-  border-radius: var(--r-pill);
-  border: 1px solid var(--hairline);
-  background: var(--surface-1);
-  color: var(--ink-faint);
-  font-size: var(--t-2xs);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  cursor: pointer;
-  opacity: 0.6;
-  transition: all var(--dur) var(--ease-expo);
-}
-.facet:hover {
-  opacity: 1;
-  color: var(--ink-soft);
-  transform: translateY(-1px);
-}
-.facet.is-active {
-  opacity: 1;
-  color: var(--ink);
-  border-color: color-mix(in oklab, var(--facet-accent) 40%, var(--hairline));
-}
-.facet-sigil {
-  font-size: 0.85rem;
+.media-img {
+  width: 100%;
+  max-width: 480px;
+  border-radius: var(--r-lg);
+  display: block;
 }
 
 /* ─────────────────────────── Agent presence ─────────────────────────── */
@@ -634,17 +684,25 @@
   cursor: pointer;
 }
 
-/* ─────────────────────────── Narration track ─────────────────────────── */
+/* ─────────────────── Narration transport (floating HUD) ─────────────────── */
 .track {
-  grid-area: track;
+  position: absolute;
+  z-index: 30;
+  left: 50%;
+  bottom: clamp(var(--s-4), 2.5vh, var(--s-6));
+  transform: translateX(-50%);
+  width: min(1100px, calc(100% - 2 * var(--s-5)));
   display: flex;
   align-items: center;
   gap: var(--s-5);
-  padding: var(--s-4) var(--s-5);
+  padding: var(--s-3) var(--s-5);
   border-radius: var(--r-lg);
-  background: var(--surface-1);
+  background: color-mix(in oklab, var(--surface-2) 70%, var(--base));
   border: 1px solid var(--hairline);
-  box-shadow: var(--inset-hi);
+  box-shadow:
+    var(--inset-hi),
+    0 24px 60px -32px rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(18px) saturate(1.1);
 }
 .track-narration {
   flex: 1;
@@ -873,26 +931,13 @@
   }
 }
 
-/* ─────────────────────────── Responsive collapse ─────────────────────────── */
+/* ─────────────────────────── Responsive ─────────────────────────── */
 @media (max-width: 1080px) {
-  .surface {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
-    grid-template-areas:
-      "top"
-      "timeline"
-      "stage"
-      "track";
-    height: auto;
-    min-height: 100dvh;
+  .stage-wrap {
+    padding: 4.5rem clamp(var(--s-3), 4vw, var(--s-6)) 8rem;
   }
-  .rail-right {
-    display: none;
-  }
-  .rail-timeline {
-    display: flex;
-    gap: var(--s-4);
-    overflow-x: auto;
+  .overlay--right .overlay-panel {
+    width: min(92vw, 30rem);
   }
 }
 @media (max-width: 720px) {
@@ -900,8 +945,1500 @@
     flex-direction: column;
     align-items: stretch;
     gap: var(--s-3);
+    width: calc(100% - 2 * var(--s-4));
   }
   .track-controls {
     flex-wrap: wrap;
   }
+  .surface-top {
+    gap: var(--s-3);
+  }
+}
+
+/* ─────────────────────────── Timeline graph (S1.4) ─────────────────────────── */
+.graph-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.entry-picker {
+  display: inline-flex;
+  gap: 2px;
+}
+.entry-chip {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--hairline);
+  background: var(--surface-1);
+  color: var(--ink-faint);
+  font-size: var(--t-2xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s var(--ease-soft);
+}
+.entry-chip.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+.graph-scroll {
+  overflow: auto;
+  margin-top: var(--s-3);
+}
+.graph-svg {
+  display: block;
+}
+.edge {
+  fill: none;
+  stroke: var(--ink-ghost);
+  stroke-width: 1.4;
+  opacity: 0.55;
+}
+.edge-prerequisite_of {
+  stroke: var(--accent-deep);
+  opacity: 0.7;
+}
+.edge-depends_on {
+  stroke: var(--in-progress);
+  opacity: 0.6;
+}
+.edge-applies_to,
+.edge-bridges_to {
+  stroke: var(--ink-faint);
+}
+.edge-research_adjacent {
+  stroke: var(--agent-research);
+  opacity: 0.5;
+}
+.edge-frontier_of {
+  stroke: var(--agent-research);
+  opacity: 0.8;
+}
+.gnode {
+  cursor: pointer;
+}
+.gnode-box {
+  fill: var(--surface-2);
+  stroke: var(--locked);
+  stroke-width: 1;
+  transition: all 0.2s var(--ease-soft);
+}
+.gnode.status-mastered .gnode-box {
+  stroke: var(--mastered);
+}
+.gnode.status-in_progress .gnode-box {
+  stroke: var(--in-progress);
+}
+.gnode.status-available .gnode-box {
+  stroke: var(--available);
+}
+.gnode.is-suggested .gnode-box {
+  stroke-dasharray: 3 2;
+}
+.gnode.is-here .gnode-box {
+  stroke: var(--accent);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 6px var(--accent-glow));
+}
+.gnode-title {
+  fill: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+}
+.gnode-status {
+  fill: var(--ink-faint);
+  font-size: 9px;
+  text-transform: capitalize;
+  font-family: var(--font-ui);
+}
+.gnode-conf {
+  fill: var(--mastered);
+}
+.gnode-branch {
+  fill: var(--ink-faint);
+  font-size: 13px;
+  cursor: pointer;
+}
+.gnode-branch:hover {
+  fill: var(--accent);
+}
+
+/* ─────────────────────────── Ensemble panel (S1.4) ─────────────────────────── */
+.ensemble-flag {
+  margin-left: var(--s-2);
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 206, 107, 0.16);
+  color: var(--in-progress);
+  font-size: var(--t-2xs);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.proposal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.proposal {
+  display: flex;
+  gap: var(--s-3);
+  align-items: flex-start;
+}
+.proposal-sigil {
+  font-size: 1rem;
+  line-height: 1.2;
+}
+.proposal-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.proposal-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--t-xs);
+}
+.proposal-agent {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.proposal-conf {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+}
+.proposal-bar {
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.proposal-bar span {
+  display: block;
+  height: 100%;
+}
+.proposal-summary {
+  font-size: var(--t-xs);
+  color: var(--ink-faint);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.synthesis {
+  margin: var(--s-4) 0 0;
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--hairline);
+  font-size: var(--t-xs);
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+.synthesis-mark {
+  color: var(--accent);
+  margin-right: var(--s-2);
+}
+
+/* ─────────────────────────── In-stream interaction (S1.4) ─────────────────────────── */
+.interject {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.ij-btn {
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--hairline);
+  background: var(--surface-1);
+  color: var(--ink-soft);
+  font-size: var(--t-xs);
+  cursor: pointer;
+  transition: all 0.2s var(--ease-soft);
+}
+.ij-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ij-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ij-interrupt {
+  border-color: rgba(255, 206, 107, 0.3);
+  color: var(--in-progress);
+}
+
+/* ─────────────────────────── Concept map (structured visual, S2.1a) ─────────────────────────── */
+.conceptmap {
+  margin-top: var(--s-3);
+  overflow: auto;
+}
+.conceptmap-svg {
+  display: block;
+  max-width: 100%;
+}
+.cm-edge {
+  fill: none;
+  stroke: var(--accent-deep);
+  stroke-width: 1.4;
+  opacity: 0.6;
+}
+.cm-applies_to,
+.cm-research_adjacent,
+.cm-bridges_to,
+.cm-frontier_of {
+  stroke: var(--ink-faint);
+  stroke-dasharray: 5 4;
+}
+.cm-node rect {
+  fill: var(--surface-2);
+  stroke: var(--locked);
+  stroke-width: 1;
+}
+.cm-node.status-mastered rect {
+  stroke: var(--mastered);
+}
+.cm-node.status-in_progress rect {
+  stroke: var(--in-progress);
+}
+.cm-node.status-available rect {
+  stroke: var(--available);
+}
+.cm-node.is-focus rect {
+  stroke: var(--accent);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 6px var(--accent-glow));
+}
+.cm-title {
+  fill: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+}
+
+/* ── Research block renderer ─────────────────────────────────────────────── */
+.research-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.research-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.research-tag {
+  font-size: var(--t-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--agent-research);
+  font-family: var(--font-ui);
+}
+.research-text {
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+.research-hypothesis {
+  color: var(--ink);
+  font-style: italic;
+}
+.research-source {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-2xs);
+  color: var(--ink-faint);
+  line-height: 1.4;
+}
+
+/* ── Motivation block renderer ───────────────────────────────────────────── */
+.motivation-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border-radius: var(--r-sm);
+  background: rgba(110, 231, 168, 0.07);
+  border: 1px solid rgba(110, 231, 168, 0.18);
+}
+.motivation-message {
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--ink);
+  line-height: 1.55;
+}
+.motivation-conf {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--ink-faint);
+}
+
+/* ── Entry mode chip selector (S4.3) ─────────────────────────────────────── */
+.enter-mode-row {
+  display: flex;
+  gap: var(--s-2);
+  margin-bottom: var(--s-3);
+}
+.enter-mode-chip {
+  padding: var(--s-1) var(--s-3);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: var(--t-xs);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background 0.15s;
+}
+.enter-mode-chip:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.enter-mode-chip--active {
+  border-color: var(--accent);
+  background: rgba(168, 139, 250, 0.12);
+  color: var(--accent);
+}
+
+/* ── Educator overlay (S4.3) ──────────────────────────────────────────────── */
+.edu-overlay {
+  position: fixed;
+  bottom: 4rem;
+  right: 0;
+  width: 320px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  border-top-left-radius: var(--r-md);
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  z-index: 30;
+  font-size: var(--t-xs);
+}
+.edu-overlay-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.edu-overlay-eyebrow {
+  font-size: var(--t-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.edu-overlay-mode {
+  font-size: var(--t-2xs);
+  color: var(--accent);
+  opacity: 0.8;
+}
+.edu-section-title {
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--ink-dim);
+  margin: 0 0 var(--s-2);
+  letter-spacing: 0.04em;
+}
+.edu-section {
+  display: flex;
+  flex-direction: column;
+}
+/* Evaluation cards */
+.edu-eval-list,
+.edu-gate-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.edu-eval-card,
+.edu-gate-card {
+  border-radius: var(--r-sm);
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--border);
+  background: var(--bg-stage);
+}
+.edu-eval-card--pass,
+.edu-gate-card--pass {
+  border-color: rgba(110, 231, 168, 0.25);
+}
+.edu-eval-card--fail,
+.edu-gate-card--fail {
+  border-color: rgba(248, 113, 113, 0.25);
+}
+.edu-eval-header,
+.edu-gate-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s-2);
+  margin-bottom: var(--s-1);
+}
+.edu-eval-concept,
+.edu-gate-concept {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: var(--t-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+.edu-eval-badge {
+  font-size: var(--t-2xs);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.edu-eval-badge--pass {
+  background: rgba(110, 231, 168, 0.12);
+  color: rgb(110, 231, 168);
+}
+.edu-eval-badge--fail {
+  background: rgba(248, 113, 113, 0.12);
+  color: rgb(248, 113, 113);
+}
+.edu-eval-scorecard {
+  font-size: var(--t-2xs);
+  color: var(--ink-faint);
+  margin-bottom: var(--s-2);
+}
+.edu-eval-dims {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.edu-eval-dim {
+  display: grid;
+  grid-template-columns: 6rem 2.5rem 1fr;
+  gap: var(--s-1);
+  align-items: baseline;
+}
+.edu-eval-dim-name {
+  color: var(--ink-dim);
+  font-size: var(--t-2xs);
+}
+.edu-eval-dim-score {
+  font-size: var(--t-2xs);
+  font-weight: 600;
+  text-align: right;
+}
+.edu-eval-dim-evidence {
+  font-size: var(--t-2xs);
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Depth gate tests */
+.edu-gate-count {
+  font-size: var(--t-2xs);
+  color: var(--ink-dim);
+}
+.edu-gate-tests {
+  list-style: none;
+  margin: var(--s-1) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+}
+.edu-gate-test {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-size: var(--t-2xs);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.edu-gate-test-kind {
+  color: var(--ink-dim);
+}
+.edu-gate-test-conf {
+  font-weight: 600;
+}
+/* Shared pass/fail tones */
+.edu--pass {
+  color: rgb(110, 231, 168);
+}
+.edu--fail {
+  color: rgb(248, 113, 113);
+}
+/* Routing / contributions */
+.edu-routing-list,
+.edu-contrib-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.edu-routing-item,
+.edu-contrib-item {
+  display: grid;
+  grid-template-columns: 5rem 5rem 1fr;
+  gap: var(--s-1);
+  align-items: baseline;
+}
+.edu-routing-agent,
+.edu-contrib-agent {
+  font-weight: 600;
+  color: var(--ink-dim);
+  font-size: var(--t-2xs);
+}
+.edu-routing-concept,
+.edu-contrib-blocks {
+  color: var(--ink-faint);
+  font-size: var(--t-2xs);
+}
+.edu-routing-reason {
+  color: var(--ink-faint);
+  font-size: var(--t-2xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.edu-empty {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: var(--t-xs);
+  font-style: italic;
+}
+
+/* ── Surface projection toggle — header chip pair (S4.4) ─────────────────── */
+.proj-bar {
+  display: flex;
+  gap: var(--s-1);
+  flex-shrink: 0;
+}
+.proj-chip {
+  padding: 3px var(--s-3);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: var(--t-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background 0.15s;
+}
+.proj-chip:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.proj-chip--active {
+  border-color: var(--accent);
+  background: rgba(168, 139, 250, 0.12);
+  color: var(--accent);
+}
+
+/* ── Scene canvas (S4.4) ──────────────────────────────────────────────────── */
+.scene-hint {
+  font-size: var(--t-2xs);
+  color: var(--ink-ghost);
+  letter-spacing: 0.04em;
+}
+.scene-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.scene-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: transparent;
+}
+.scene-edge {
+  stroke: var(--hairline);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+.scene-block-rect {
+  fill: var(--surface-1);
+}
+.scene-block--focus .scene-block-rect {
+  fill: var(--surface-2, var(--surface-1));
+}
+.scene-block-type {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  fill: var(--ink-faint);
+  font-family: var(--font-mono, monospace);
+}
+.scene-block-title {
+  font-size: 12px;
+  font-weight: 500;
+  fill: var(--ink);
+}
+.scene-block-concept {
+  font-size: 10px;
+  fill: var(--ink-faint);
+  font-family: var(--font-mono, monospace);
+}
+.scene-empty {
+  font-size: var(--t-sm);
+  fill: var(--ink-ghost);
+  font-style: italic;
+}
+
+/* ═══════════════════ S-UCS immersive layer: overlays, launchers, HUD chrome ═══════════════════
+   Overlay content is always mounted; `data-open` toggles visibility (pure projection, SSR-stable). */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  pointer-events: none;
+}
+.overlay[data-open="false"] {
+  visibility: hidden;
+}
+.overlay-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: color-mix(in oklab, var(--void) 55%, transparent);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease-soft);
+  cursor: pointer;
+  pointer-events: none;
+}
+.overlay[data-open="true"] .overlay-scrim {
+  opacity: 1;
+  pointer-events: auto;
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+.overlay-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in oklab, var(--stage) 92%, var(--base));
+  border: 1px solid var(--hairline);
+  box-shadow:
+    var(--inset-hi),
+    0 40px 120px -50px rgba(0, 0, 0, 0.9);
+  pointer-events: auto;
+  transition:
+    transform var(--dur) var(--ease-expo),
+    opacity var(--dur) var(--ease-expo);
+}
+.overlay[data-open="true"] .overlay-panel {
+  transform: none;
+  opacity: 1;
+}
+
+/* Right-docked inspector (Observatory). */
+.overlay--right {
+  justify-content: flex-end;
+}
+.overlay--right .overlay-panel {
+  width: min(92vw, 26rem);
+  height: 100%;
+  border-radius: var(--r-lg) 0 0 var(--r-lg);
+  border-right: 0;
+}
+.overlay--right[data-open="false"] .overlay-panel {
+  transform: translateX(18px);
+  opacity: 0;
+}
+
+/* Center modal (Path / concept graph). */
+.overlay--center {
+  align-items: center;
+  justify-content: center;
+  padding: clamp(var(--s-5), 6vh, var(--s-8));
+}
+.overlay--center .overlay-panel {
+  width: min(96vw, 60rem);
+  max-height: 86vh;
+  border-radius: var(--r-xl);
+}
+.overlay--center[data-open="false"] .overlay-panel {
+  transform: translateY(14px) scale(0.985);
+  opacity: 0;
+}
+
+.overlay-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding: var(--s-4) var(--s-5);
+  border-bottom: 1px solid var(--hairline);
+}
+.overlay-title {
+  margin: 0;
+  font-size: var(--t-2xs);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+.overlay-close {
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--ink-soft);
+  border-radius: var(--r-pill);
+  width: 1.9rem;
+  height: 1.9rem;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-soft),
+    border-color var(--dur-fast) var(--ease-soft);
+}
+.overlay-close:hover {
+  color: var(--ink);
+  border-color: var(--hairline-strong);
+}
+.overlay-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+}
+
+/* Agents control (top bar) — compact, with live status pills. */
+.agents-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3) var(--s-2) var(--s-4);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--hairline);
+  background: var(--surface-1);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-soft),
+    color var(--dur-fast) var(--ease-soft),
+    background var(--dur-fast) var(--ease-soft);
+}
+.agents-btn:hover,
+.agents-btn.is-active {
+  border-color: var(--hairline-strong);
+  color: var(--ink);
+}
+.agents-btn.is-active {
+  background: var(--surface-2);
+}
+.agents-label {
+  font-size: var(--t-2xs);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.agents-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.agents-pill {
+  --agent-accent: var(--ink-ghost);
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-pill);
+  background: var(--agent-accent);
+  opacity: 0.4;
+}
+.agents-pill.state-thinking {
+  opacity: 0.8;
+  animation: breathe 1.8s var(--ease-soft) infinite;
+}
+.agents-pill.state-contributing {
+  opacity: 1;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--agent-accent) 22%, transparent);
+}
+.agents-pill.state-speaking {
+  opacity: 1;
+  animation: breathe 1.2s var(--ease-soft) infinite;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--agent-accent) 30%, transparent);
+}
+.agents-word {
+  font-size: var(--t-2xs);
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+  min-width: 4.4rem;
+}
+
+/* Path launcher (floating, bottom-left). */
+.path-launcher {
+  position: absolute;
+  z-index: 30;
+  left: clamp(var(--s-4), 3vw, var(--s-6));
+  bottom: clamp(var(--s-4), 2.5vh, var(--s-6));
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-4);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--hairline);
+  background: color-mix(in oklab, var(--surface-2) 70%, var(--base));
+  color: var(--ink-soft);
+  font-size: var(--t-2xs);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  transition:
+    border-color var(--dur-fast) var(--ease-soft),
+    color var(--dur-fast) var(--ease-soft);
+}
+.path-launcher:hover,
+.path-launcher.is-open {
+  border-color: var(--hairline-strong);
+  color: var(--ink);
+}
+.path-launcher-glyph {
+  color: var(--accent);
+  font-size: 0.95rem;
+}
+
+/* Rails inside overlays fill their host (no longer grid areas). */
+.overlay .rail-timeline,
+.overlay .rail-right {
+  overflow: visible;
+  padding: 0;
+}
+.overlay .proj-bar {
+  margin-bottom: var(--s-4);
+}
+
+/* Agent reasoning (Observatory, S-UCS) — how each agent reasoned, with latency. */
+.reasoning-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+.reasoning-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+}
+.reasoning-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-xs);
+}
+.reasoning-spacer {
+  flex: 1;
+}
+.reasoning-agent {
+  color: var(--ink);
+  font-weight: 600;
+}
+.reasoning-strategy {
+  color: var(--ink-faint);
+  font-size: var(--t-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.reasoning-latency {
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--accent);
+}
+.reasoning-det {
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--ink-ghost);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-pill);
+  padding: 1px 6px;
+}
+.reasoning-decision {
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+.reasoning-critique {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--ink-faint);
+  font-style: italic;
+  line-height: 1.4;
+}
+.reasoning-conf {
+  display: block;
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: var(--hairline);
+  overflow: hidden;
+}
+.reasoning-conf > span {
+  display: block;
+  height: 100%;
+}
+
+/* Synchronized narration: word-level highlight + auto-hiding transport (S-UCS, ADR-0007/0029). */
+.nw {
+  color: var(--ink-faint);
+  transition: color 240ms var(--ease-soft);
+}
+.nw.w-spoken {
+  color: var(--ink-soft);
+}
+.nw.w-active {
+  color: var(--ink);
+  text-shadow: 0 0 18px var(--accent-glow);
+}
+.track {
+  transition:
+    width var(--dur) var(--ease-expo),
+    opacity var(--dur) var(--ease-soft);
+}
+.track-controls {
+  transition:
+    opacity var(--dur) var(--ease-soft),
+    max-width var(--dur) var(--ease-expo);
+  max-width: 1200px;
+}
+.track.is-idle {
+  width: min(720px, calc(100% - 2 * var(--s-5)));
+  opacity: 0.9;
+}
+.track.is-idle .track-controls {
+  display: none;
+}
+
+/* Streaming cognition: a blinking caret while an explanation forms (S-UCS, ADR-0028). */
+.stream-caret {
+  display: inline-block;
+  width: 0.5ch;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--stage-accent, var(--accent));
+  border-radius: 1px;
+  animation: caret-blink 1s steps(2, jump-none) infinite;
+}
+@keyframes caret-blink {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.stage-core.is-streaming .block-lede {
+  color: var(--ink);
+}
+
+/* Inline multimodal: illustrations beside the concept, not detached (S-UCS, F09 §4.1). */
+.stage-media {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--s-4);
+  margin-top: var(--s-6);
+}
+.stage-figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.stage-figure .media-slot {
+  border-radius: var(--r-md);
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+}
+.stage-figure-cap {
+  font-size: var(--t-2xs);
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+}
+
+/* Cognitive pipeline (activity timeline) — the workflow chips, now ordered + legible. */
+.activity-timeline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  padding-top: var(--s-2);
+}
+.activity-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+.activity-arrow {
+  color: var(--ink-ghost);
+  font-size: var(--t-2xs);
+}
+.activity-step {
+  --agent-accent: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--hairline);
+  background: var(--surface-1);
+  color: var(--ink-faint);
+  font-size: var(--t-2xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-soft),
+    border-color var(--dur-fast) var(--ease-soft);
+}
+.activity-step:hover {
+  color: var(--ink);
+  border-color: var(--hairline-strong);
+}
+.activity-step.is-active {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--agent-accent) 45%, var(--hairline));
+  background: color-mix(in oklab, var(--agent-accent) 10%, transparent);
+}
+.activity-sigil {
+  font-size: 0.85rem;
+}
+
+/* Accessibility: honor reduced-motion — keep the surface calm, never inert (F09 §10, web a11y). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Cognitive Frames + MCCR (UCS, ADR-0030)
+   The board holds only distilled anchors; the voice carries the teaching. One
+   frame fills one viewport and NEVER scrolls (overflow → a uniform downscale).
+   ─────────────────────────────────────────────────────────────────────────── */
+.frame-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden; /* the no-scroll guarantee — a frame is a complete thought */
+  padding: clamp(2rem, 5vh, 4rem) clamp(1.5rem, 5vw, 5rem);
+}
+.frame-stage--empty {
+  flex-direction: column;
+  gap: 1rem;
+}
+.frame-empty-pulse {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 var(--accent-glow);
+  animation: breathe 2.4s var(--ease-expo) infinite;
+}
+.frame-empty-text {
+  color: var(--ink-faint);
+  font-size: 0.95rem;
+}
+/* The deck layers the active frame, the outgoing frame (mid cross-dissolve), and an off-stage
+   N+1 buffer. Layers stack via the already-absolute .frame-stage; transitions are client projections. */
+.frame-deck {
+  position: absolute;
+  inset: 0;
+}
+.frame-stage--enter {
+  animation: frame-enter var(--dur-slow) var(--ease-expo) both;
+}
+.frame-stage--exit {
+  animation: frame-exit var(--dur-slow) var(--ease-expo) forwards;
+  pointer-events: none;
+}
+@keyframes frame-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes frame-exit {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.992);
+  }
+}
+/* N+1 pre-warm: present for the browser to fetch/decode, invisible + inert to the learner. */
+.frame-prewarm {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.frame-fit {
+  width: min(1100px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(1rem, 2.5vh, 1.75rem);
+  position: relative;
+}
+.frame-title {
+  font-family: var(--font-serif);
+  font-size: clamp(1.4rem, 3.2vw, 2.2rem);
+  line-height: 1.15;
+  color: var(--ink);
+  margin: 0;
+  text-align: center;
+  animation: rise var(--dur-slow) var(--ease-expo) both;
+}
+
+/* Density-aware grid; archetypes choose the composition. */
+.frame-grid {
+  display: grid;
+  gap: clamp(0.75rem, 1.8vw, 1.5rem);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+}
+.frame-grid[data-archetype="concept-first"] {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+}
+.frame-grid[data-archetype="image-led"] {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.frame-grid[data-archetype="compare"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (max-width: 720px) {
+  .frame-grid,
+  .frame-grid[data-archetype] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* An MCCR anchor — a card that earns its place on the board. Core/definition span full width. */
+.mccr-el {
+  position: relative;
+  margin: 0;
+  padding: clamp(0.85rem, 1.6vw, 1.25rem);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--ink) 2%, transparent);
+  animation: rise var(--dur-slow) var(--ease-expo) both;
+}
+.mccr-el--core_concept,
+.mccr-el--definition {
+  grid-column: 1 / -1;
+}
+.mccr-el-tag {
+  display: inline-block;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-ghost);
+  margin-bottom: 0.4rem;
+}
+.mccr-el--core_concept .mccr-text {
+  font-family: var(--font-serif);
+  font-size: clamp(1.3rem, 2.8vw, 1.9rem);
+  line-height: 1.1;
+  color: var(--ink);
+  margin: 0;
+}
+.mccr-text {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: clamp(0.95rem, 1.6vw, 1.1rem);
+  line-height: 1.45;
+}
+.mccr-formula {
+  display: block;
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  font-size: clamp(1rem, 1.8vw, 1.25rem);
+  color: var(--ink);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  overflow-x: auto;
+}
+.mccr-relationship {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--ink-soft);
+}
+.mccr-rel-node {
+  font-weight: 600;
+  color: var(--ink);
+}
+.mccr-rel-arrow {
+  color: var(--accent);
+}
+.mccr-rel-label {
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+}
+.mccr-rel-text {
+  flex-basis: 100%;
+  font-size: 0.9rem;
+  color: var(--ink-faint);
+}
+.mccr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.mccr-table th,
+.mccr-table td {
+  border: 1px solid var(--hairline);
+  padding: 0.35rem 0.55rem;
+  text-align: left;
+  color: var(--ink-soft);
+}
+.mccr-table th {
+  color: var(--ink);
+  background: color-mix(in oklab, var(--ink) 4%, transparent);
+}
+.mccr-image {
+  margin: 0;
+}
+.mccr-image img {
+  width: 100%;
+  max-height: 38vh;
+  object-fit: contain;
+  border-radius: 8px;
+  animation: rise var(--dur) var(--ease-expo) both;
+}
+.mccr-image figcaption {
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+  text-align: center;
+}
+.mccr-image--pending {
+  height: 22vh;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--ink) 4%, transparent);
+  overflow: hidden;
+  position: relative;
+}
+.mccr-image-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--ink) 8%, transparent),
+    transparent
+  );
+  animation: shimmer 1.6s linear infinite;
+}
+.mccr-diagram {
+  width: 100%;
+  height: auto;
+}
+.mccr-diagram-edge line {
+  stroke: var(--hairline-strong);
+  stroke-width: 1.25;
+}
+.mccr-diagram-edge-label {
+  fill: var(--ink-ghost);
+  font-size: 9px;
+  text-anchor: middle;
+}
+.mccr-diagram-node circle {
+  fill: var(--accent);
+}
+.mccr-diagram-node text {
+  fill: var(--ink-soft);
+  font-size: 11px;
+}
+
+/* The teacher's marker: one soft box that slides over the spotlit anchor as narration plays.
+   Under prefers-reduced-motion the global rule zeroes the transition, so it snaps instead. */
+.frame-highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  box-shadow:
+    0 0 0 1px var(--hairline-strong),
+    0 6px 24px -8px var(--accent-glow);
+  pointer-events: none;
+  transition:
+    transform var(--dur-slow) var(--ease-expo),
+    width var(--dur-slow) var(--ease-expo),
+    height var(--dur-slow) var(--ease-expo);
+  z-index: 1;
+}
+.mccr-el[data-active="true"] {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--hairline));
+}
+
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Observatory: Composition panel (UCS, ADR-0030) — the frame pipeline made inspectable.
+   ─────────────────────────────────────────────────────────────────────────── */
+.composition-panel {
+  margin-top: 1rem;
+}
+.composition-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.composition-item {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: 0.6rem 0.7rem;
+  background: color-mix(in oklab, var(--ink) 2%, transparent);
+}
+.composition-item--active {
+  border-color: color-mix(in oklab, var(--accent) 50%, var(--hairline));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 25%, transparent);
+}
+.composition-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.composition-ord {
+  font-size: 0.7rem;
+  width: 1.3rem;
+  height: 1.3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  color: var(--ink-soft);
+}
+.composition-title {
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+.composition-spacer {
+  flex: 1;
+}
+.composition-status {
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-ghost);
+}
+.composition-item[data-status="planned"] .composition-status {
+  color: var(--accent);
+}
+.composition-anchors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.45rem 0 0.35rem;
+}
+.composition-anchor {
+  font-size: 0.62rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--ink-soft);
+}
+.composition-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  font-size: 0.66rem;
+  color: var(--ink-ghost);
+}
+.composition-density--over {
+  color: var(--warn, #c2410c);
+}
+.composition-subtitle {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-ghost);
+  margin: 0.9rem 0 0.4rem;
+}
+.composition-lookahead {
+  border-top: 1px dashed var(--hairline);
+  padding-top: 0.6rem;
+}
+.composition-spec-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.composition-spec-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  opacity: 0.75;
+}
+.composition-assumption {
+  font-size: 0.62rem;
+  color: var(--ink-ghost);
+  font-style: italic;
 }

@@ -149,6 +149,33 @@ Choreographer uses the audio's `ended`/`currentTime` (or a reading-time estimate
 advance — it is never baked into the canonical log (ADR-0007). Durable cross-process media
 persistence is deferred; the event log still replays the structure and timing exactly.
 
+### 4.6 Streaming content deltas (S-UCS)
+
+To make generation visible as it happens, the runtime may emit `surface.block.delta` frames
+(`block_id`, `seq`, `text_delta`) over the **same** SSE channel before a block's whole-block
+`surface.block.generated`. They are ordinary `surface.*` frames — no new transport, no special-casing.
+The client fold accumulates them into a **transient** `streaming_blocks` buffer that the whole-block
+event clears, so the **settled** state is identical whether or not deltas were streamed:
+`fold([delta…, generated]) ≡ fold([generated])`. Replay equivalence (§6.2) therefore holds for every
+prefix — a prefix ending mid-stream renders the partial buffer; the completed prefix renders the
+canonical block. Deterministic/replay mode may omit deltas entirely (whole block only). See ADR-0028.
+
+### 4.7 Cognitive Frame frames & element deltas (UCS, ADR-0030)
+
+Cognitive Frames (SRF-001 §4.7) cross the same boundary as ordinary `surface.*` frames — no new
+transport. A frame's layout (`surface.frame.planned`), full MCCR (`surface.frame.composed`), separate
+narration script (`surface.narration.script.produced`), and image decision (`surface.image.decided`)
+are streamed verbatim and folded by the same `foldSurfaceEvents`. To make a frame *materialize*
+progressively, the runtime may emit `surface.frame.element.delta` (`frame_id`, `element_id`, `seq`,
+`text_delta`) before `surface.frame.composed`; the client fold accumulates them into a **transient**
+`streaming_frame_elements` buffer that the compose event clears, so the settled state is identical
+whether or not deltas streamed: `fold([element.delta…, composed]) ≡ fold([composed])` (mirrors §4.6).
+**Look-ahead** frames (`surface.frame.speculation.prepared`) are streamed for the Observatory but are
+folded into the separate `speculative_frames[]` slice — the viewport never renders them as on-screen
+state until a `surface.frame.promoted` frame copies them into `frames[]`; an
+`surface.frame.speculation.invalidated` frame leaves them provably absent from `frames[]`. **Which frame
+is on screen is a client projection** over the Choreographer cursor (ADR-0007), never a streamed pointer.
+
 ## 5. Protocols and Contracts
 
 - **Event envelope:** frames carry unmodified `CognitiveEvent`s (protocols/cognitive-event-protocol);
@@ -185,7 +212,10 @@ attach ──(snapshot frames)──▶ live ──(incremental frames)──▶
 For any surface and any prefix of its event log, the client computed
 `foldSurfaceEvents(receivedFrames, surfaceId)` MUST deep-equal the gateway's
 `session.state()` for the same prefix. Streaming is therefore replay across a boundary: the fold is
-the single shared truth function (SRF-001 §6.2). This is a tested invariant (§11).
+the single shared truth function (SRF-001 §6.2). This is a tested invariant (§11). It extends to
+Cognitive Frames (UCS, ADR-0030): `fold([planned, composed]) ≡ fold([composed])`,
+`fold([element.delta…, composed]) ≡ fold([composed])`, an invalidated speculative frame is absent from
+`frames[]` for every prefix, and a promoted speculative frame re-folds byte-identically.
 
 ### 6.3 Resume and gap handling
 
@@ -288,6 +318,10 @@ In-process (Node/Vitest) is the deterministic gate; no browser required:
   which model produced the blocks (block-type registry keys on `block_type`, never provider).
 - **Command envelope extensibility:** an unknown command `type` is rejected with a typed error
   without affecting state (forward-compatible boundary).
+- **Cognitive Frame replay (UCS, ADR-0030):** attach mid-composition and fold the received frames;
+  deep-equal the gateway's `session.state()`. Assert `fold([planned, composed]) ≡ fold([composed])` and
+  `fold([element.delta…, composed]) ≡ fold([composed])`; a prepared-then-invalidated speculative frame
+  is absent from `frames[]` for every prefix; resume across an `element.delta` boundary converges.
 
 ## 12. Evolution Strategy
 

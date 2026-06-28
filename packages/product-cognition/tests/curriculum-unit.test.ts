@@ -96,6 +96,43 @@ describe("parseCurriculumOutput", () => {
     expect(() => parseCurriculumOutput('{"focus_concept_id":"x"}')).toThrowError(/concepts/);
     expect(() => parseCurriculumOutput("not json")).toThrowError(/valid JSON/);
   });
+
+  test("parses layer, domain, and typed edges; clamps layer and drops invalid edge types (S2.4)", () => {
+    const enriched = JSON.stringify({
+      concepts: [
+        { id: "calculus", title: "Calculus", prerequisites: [], layer: 3, domain: "mathematics" },
+        {
+          id: "ml",
+          title: "Machine Learning",
+          prerequisites: ["calculus"],
+          layer: 2,
+          domain: "machine-learning",
+        },
+        {
+          id: "deep-learning",
+          title: "Deep Learning",
+          prerequisites: ["ml"],
+          layer: 99,
+          domain: "machine-learning",
+        },
+      ],
+      edges: [
+        { from: "calculus", to: "ml", type: "applies_to" },
+        { from: "ml", to: "deep-learning", type: "frontier_of" },
+        { from: "calculus", to: "ml", type: "invalid-type" },
+        { from: "calculus", to: "nonexistent", type: "applies_to" },
+      ],
+      focus_concept_id: "calculus",
+    });
+    const parsed = parseCurriculumOutput(enriched);
+    expect(parsed.concepts[0]?.layer).toBe(3);
+    expect(parsed.concepts[0]?.domain).toBe("mathematics");
+    expect(parsed.concepts[1]?.layer).toBe(2);
+    expect(parsed.concepts[2]?.layer).toBe(6);
+    expect(parsed.edges).toHaveLength(2);
+    expect(parsed.edges?.[0]).toEqual({ from: "calculus", to: "ml", type: "applies_to" });
+    expect(parsed.edges?.[1]).toEqual({ from: "ml", to: "deep-learning", type: "frontier_of" });
+  });
 });
 
 describe("deterministicCurriculum", () => {

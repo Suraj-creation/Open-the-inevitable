@@ -23,6 +23,21 @@ export type {
   NarrationVoice,
   AgentPresence,
   AgentPresenceState,
+  DisagreementRecord,
+  ProposalRecord,
+  SynthesisRecord,
+  InteractionRecord,
+  InteractionKind,
+  DepthGateRecord,
+  PrerequisiteDescentRecord,
+  ResearchFrontierRecord,
+  EvaluationRecord,
+  ProductMode,
+  ProjectionMode,
+  StreamingBlockBuffer,
+  AgentReasoningRecord,
+  AgentWorkTimingRecord,
+  AgentWorkStatus,
 } from "./projection";
 export type {
   CognitionBlock,
@@ -30,4 +45,29 @@ export type {
   BlockProvenance,
   BlockClassification,
 } from "./blocks";
-export type { TimelineProjection, SurfaceTimelineNode, TimelineNodeStatus } from "./timeline";
+export type {
+  CognitiveFrame,
+  CognitiveFrameStatus,
+  FrameLayout,
+  FrameLayoutSlot,
+  FrameProvenance,
+  ImageDecisionRecord,
+  Mccr,
+  MccrDiagram,
+  MccrElement,
+  MccrElementContent,
+  MccrElementType,
+  MccrImageArtifact,
+  NarrationIntent,
+  NarrationScriptRecord,
+  NarrationScriptSegment,
+  StreamingFrameElementBuffer,
+} from "./frames";
+export type {
+  TimelineProjection,
+  SurfaceTimelineNode,
+  TimelineNodeStatus,
+  SurfaceTimelineEdge,
+  TimelineEdgeType,
+  TimelineEntryPoint,
+} from "./timeline";
