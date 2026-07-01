@@ -93,8 +93,22 @@ function renderContent(element: MccrElementModel) {
     case "image":
       return content.artifact ? (
         <figure className="mccr-image">
-          <img src={content.artifact.content_ref} alt={content.alt} loading="eager" />
-          {content.alt ? <figcaption>{content.alt}</figcaption> : null}
+          <div className="mccr-image-frame">
+            <img src={content.artifact.content_ref} alt={content.alt} loading="eager" />
+            {/* Image-as-cognition (ADR-0030 Phase 4): callout labels annotate the illustration. */}
+            {content.labels.length > 0 ? (
+              <ul className="mccr-image-labels" aria-label="Illustration callouts">
+                {content.labels.map((label, i) => (
+                  <li key={`${label}-${i}`} className="mccr-image-label">
+                    {label}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+          {content.caption || content.alt ? (
+            <figcaption>{content.caption ?? content.alt}</figcaption>
+          ) : null}
         </figure>
       ) : (
         <div className="mccr-image mccr-image--pending" aria-label={content.alt}>

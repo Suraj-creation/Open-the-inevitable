@@ -38,7 +38,7 @@ import {
 import type { WorldStateGraph } from "@inevitable/world-state";
 
 import type { CognitionBlock } from "./blocks";
-import { MCCR_ELEMENT_TYPES, type MccrElementType } from "./frames";
+import { MCCR_ELEMENT_TYPES, type CognitiveFrame, type MccrElementType } from "./frames";
 import { AgentContributionRuntime, contributionFromDispatch } from "./contribution";
 import { SurfaceChoreographer, type VoiceSynthesizer } from "./narration";
 import type { MediaGenerator } from "./providers";
@@ -136,6 +136,39 @@ function readPlanEntries(raw: unknown): FramePlanEntry[] {
   return entries;
 }
 
+/** One look-ahead bet read from the planner's `frame_plan.lookahead` (UCS, ADR-0030; Phase 3). */
+interface LookaheadPlanEntry {
+  readonly title: string;
+  readonly sub_focus: string;
+  readonly archetype: string;
+  readonly slots: readonly string[];
+  readonly trigger_assumption: string;
+}
+
+/** Read the planner's `frame_plan.lookahead` bets from a response packet's content. */
+function readLookaheadEntries(raw: unknown): LookaheadPlanEntry[] {
+  const fp = (raw ?? {}) as Record<string, unknown>;
+  const list = Array.isArray(fp["lookahead"]) ? (fp["lookahead"] as unknown[]) : [];
+  const entries: LookaheadPlanEntry[] = [];
+  for (const e of list) {
+    const o = (e ?? {}) as Record<string, unknown>;
+    const title = typeof o["title"] === "string" ? o["title"].trim() : "";
+    const trigger =
+      typeof o["trigger_assumption"] === "string" ? o["trigger_assumption"].trim() : "";
+    if (!title || !trigger) continue;
+    entries.push({
+      title,
+      sub_focus: typeof o["sub_focus"] === "string" ? o["sub_focus"] : "",
+      archetype: typeof o["archetype"] === "string" ? o["archetype"] : "concept-first",
+      slots: Array.isArray(o["slots"])
+        ? (o["slots"] as unknown[]).filter((s): s is string => typeof s === "string")
+        : [...DEFAULT_PLAN_SLOTS],
+      trigger_assumption: trigger,
+    });
+  }
+  return entries;
+}
+
 /** Build a plain text MCCR element in the shape the surface fold (`readMccr`) expects. */
 function mccrTextSlot(
   slot: MccrElementType,
@@ -207,10 +240,23 @@ export interface SurfaceSessionDeps {
    */
   readonly framePlannerDispatcher?: GovernedDispatcher;
   /**
+   * Optional Image Agent dispatcher (UCS, ADR-0030; Phase 4). When present, the image-as-cognition
+   * decision is owned by a dedicated governed agent (decide/prompt/refine) that produces the prompt
+   * plus an explanatory caption + callout labels, replacing the composer's inline `image_plan` on the
+   * frame path. Absent ⇒ the composer's inline image decision drives generation (Phase 1–3 behaviour).
+   */
+  readonly imagePlannerDispatcher?: GovernedDispatcher;
+  /**
    * Look-ahead budget (UCS, ADR-0030; Phase 3): number of discardable speculative frames the planner
    * may pre-compose ahead of the learner. Default 0 (off) — deterministic, no speculation.
    */
   readonly lookaheadBudget?: number;
+  /**
+   * Live look-ahead budget (UCS, ADR-0030; Phase 3): when present, overrides `lookaheadBudget` per ask
+   * so a governed evolution rollout can raise/lower speculation without a restart (same direction-safe
+   * pattern as `getDepthBias` — the callback closes over `LiveEvolutionConfig`, no upward dependency).
+   */
+  readonly getLookaheadBudget?: () => number;
   /** CID stamped on supervisor routing blocks. */
   readonly supervisorCid?: string;
   /**
@@ -303,6 +349,15 @@ export class SurfaceSession {
   private interrupted = false;
   /** Last ask input, so reshaping interactions (depth/simplify/example) can re-frame it. */
   private lastAskInput: SurfaceAskInput | null = null;
+  /**
+   * The current ask's frame-planner look-ahead bets (UCS, ADR-0030; Phase 3), captured during
+   * `dispatchFramePlan` and consumed at the end of the ask to pre-compose speculative next-step
+   * frames within the governed budget. Reset at the start of every ask.
+   */
+  private pendingLookahead: {
+    entries: LookaheadPlanEntry[];
+    plannerPacketId: string | null;
+  } | null = null;
 
   constructor(private readonly deps: SurfaceSessionDeps) {
     this.world = deps.world;
@@ -414,6 +469,8 @@ export class SurfaceSession {
     // A fresh ask clears any prior interrupt and is the reshaping baseline (S1.3).
     this.interrupted = false;
     this.lastAskInput = input;
+    // A fresh ask re-plans look-ahead from scratch (UCS, ADR-0030; Phase 3).
+    this.pendingLookahead = null;
 
     // 1. Living timeline (one live timeline per surface; a new ask re-anchors it).
     this.timeline = new SurfaceTimelineBuilder({
@@ -813,6 +870,13 @@ export class SurfaceSession {
       await this.resolveEvaluation(surfaceId, input, cycle);
     }
 
+    // 11. UCS (ADR-0030; Phase 3) — Governed look-ahead: after clean forward progress (mastery ran,
+    // no confusion descent), pre-compose the likely NEXT frame within the budget. Recorded but never
+    // surfaced until a future ask promotes it. A descent means the learner struggled — no speculation.
+    if (onPlannerFramePath && !descentInfo && cycle.mastery) {
+      await this.prepareLookahead({ surfaceId, input });
+    }
+
     return ok({
       routing: cycle.routing,
       blocks,
@@ -847,8 +911,15 @@ export class SurfaceSession {
     focusTitle: string;
     conceptNodeId: string;
   }): Promise<Result<void, CosError>> {
+    // Reconcile any prior-ask speculation against what the learner actually asked (UCS, ADR-0030;
+    // Phase 3): a bet on THIS concept is promoted (its pre-composed opening frame surfaces + voices,
+    // skipping recompute); every other pending bet is invalidated. Never surfaces until promoted.
+    const promoted = await this.reconcileSpeculations(args);
     const { plannerPacketId, frames } = await this.dispatchFramePlan(args);
-    for (const entry of frames) {
+    // If a speculative opening frame was promoted for this concept, it already stands as frame 1 —
+    // compose only the remaining plan entries so the sequence never double-opens.
+    const toCompose = promoted ? frames.slice(1) : frames;
+    for (const entry of toCompose) {
       const composed = await this.composeFrameViaComposer({
         ...args,
         plan: { entry, plannerPacketId },
@@ -856,6 +927,36 @@ export class SurfaceSession {
       if (!composed.ok) return composed;
     }
     return ok(undefined);
+  }
+
+  /**
+   * Reconcile pending speculative frames against the current ask (UCS, ADR-0030; Phase 3). A
+   * still-speculative frame whose `concept_id` matches the focus is PROMOTED — copied into the
+   * canonical frame line with a final ordinal and voiced from its recorded script (skip-recompute);
+   * every other pending bet is INVALIDATED (the learner diverged). Returns true iff one was promoted.
+   */
+  private async reconcileSpeculations(args: {
+    surfaceId: string;
+    input: SurfaceAskInput;
+    conceptNodeId: string;
+  }): Promise<boolean> {
+    const state = this.state();
+    const pending = (state?.speculative_frames ?? []).filter((f) => f.status === "speculative");
+    if (pending.length === 0) return false;
+    let promoted = false;
+    for (const spec of pending) {
+      if (!promoted && spec.concept_id === args.input.focusConceptId) {
+        await this.promoteSpeculation(args.surfaceId, spec, args.conceptNodeId, args.input);
+        promoted = true;
+      } else {
+        await this.emit("surface.frame.speculation.invalidated", {
+          surface_id: args.surfaceId,
+          frame_id: spec.frame_id,
+          reason: `learner advanced to ${args.input.focusConceptId}, not the predicted ${spec.concept_id ?? "unknown"}`,
+        });
+      }
+    }
+    return promoted;
   }
 
   /**
@@ -889,6 +990,10 @@ export class SurfaceSession {
     const content = (response?.content ?? {}) as Record<string, unknown>;
     const frames = readPlanEntries(content["frame_plan"]);
     if (frames.length === 0) return fallback;
+
+    // Capture the planner's look-ahead bets (UCS, ADR-0030; Phase 3) for end-of-ask speculation.
+    const lookahead = readLookaheadEntries(content["frame_plan"]);
+    this.pendingLookahead = { entries: lookahead, plannerPacketId: response?.packet_id ?? null };
 
     // Observatory (ADR-0029): the planner's decomposition reasoning is inspectable.
     const trace = dispatched.value.emissions.trace;
@@ -949,53 +1054,123 @@ export class SurfaceSession {
       });
     }
 
-    const dispatched = await dispatcher.dispatch({
-      session: this.deps.session,
-      targetAgentId: "composer",
-      intent: `compose frame: ${frameTitle}`,
-      conceptIds: [input.focusConceptId],
-      content: {
-        concept_id: input.focusConceptId,
-        concept_title: focusTitle,
-        goal: input.goal,
-        ...(plan?.entry.sub_focus ? { sub_focus: plan.entry.sub_focus } : {}),
-        ...(plan ? { frame_focus: frameTitle } : {}),
-        ...(input.explanationPrompt ? { prompt: input.explanationPrompt } : {}),
-      },
+    const artifacts = await this.dispatchComposerForConcept({
+      surfaceId,
+      conceptId: input.focusConceptId,
+      conceptTitle: focusTitle,
+      goal: input.goal,
+      ...(plan?.entry.sub_focus ? { subFocus: plan.entry.sub_focus } : {}),
+      ...(plan ? { frameFocus: frameTitle } : {}),
+      ...(input.explanationPrompt ? { explanationPrompt: input.explanationPrompt } : {}),
     });
     // Degrade observably: a blocked dispatch (untrusted learner / scheduler rejection) yields no
     // composed frame, exactly as the legacy path yields no explanation block (SRF-001 §10).
-    if (!dispatched.ok) return ok(undefined);
+    if (!artifacts) return ok(undefined);
+
+    await this.emitFrameArtifacts({
+      surfaceId,
+      frameId,
+      ordinal,
+      conceptId: input.focusConceptId,
+      frameTitle,
+      conceptNodeId,
+      mccr: artifacts.mccr,
+      scriptSegments: artifacts.scriptSegments,
+      imagePlan: artifacts.imagePlan,
+      composerCid: artifacts.composerCid,
+      composerPacketId: artifacts.composerPacketId,
+      confidence: artifacts.confidence,
+      reasoning: artifacts.reasoning,
+      trace: artifacts.trace,
+      workId: artifacts.workId,
+      agentId: "composer",
+      role: "explainer",
+      reason: "surface composer distilled the focus concept into a Cognitive Frame",
+    });
+    return ok(undefined);
+  }
+
+  /**
+   * Dispatch the governed Surface Composer for one concept and return its distilled artifacts (UCS,
+   * ADR-0030): the MCCR (with an inline image folded in when the composer judged one helps and a
+   * generator is wired), the separate narration script segments, the image decision, and the
+   * reasoning trace. Shared by the on-screen frame path and Phase 3 speculative pre-composition — the
+   * caller decides whether to voice + surface (a real frame) or record silently (a speculation).
+   * Returns null when the dispatch is blocked or the composer produced no MCCR (observable degradation).
+   */
+  private async dispatchComposerForConcept(args: {
+    surfaceId: string;
+    conceptId: string;
+    conceptTitle: string;
+    goal: string;
+    subFocus?: string;
+    frameFocus?: string;
+    explanationPrompt?: string;
+  }): Promise<{
+    mccr: Record<string, unknown>;
+    scriptSegments: Record<string, unknown>[];
+    imagePlan: { helps: boolean; modality: string; prompt: string | null; rationale: string };
+    composerCid: string;
+    composerPacketId: string | null;
+    confidence: number;
+    reasoning: string;
+    trace: ReasoningTrace | null;
+    workId: string | null;
+  } | null> {
+    const dispatcher = this.deps.composerDispatcher;
+    if (!dispatcher) return null;
+    const { surfaceId, conceptId, conceptTitle } = args;
+
+    const dispatched = await dispatcher.dispatch({
+      session: this.deps.session,
+      targetAgentId: "composer",
+      intent: `compose frame: ${args.frameFocus ?? conceptTitle}`,
+      conceptIds: [conceptId],
+      content: {
+        concept_id: conceptId,
+        concept_title: conceptTitle,
+        goal: args.goal,
+        ...(args.subFocus ? { sub_focus: args.subFocus } : {}),
+        ...(args.frameFocus ? { frame_focus: args.frameFocus } : {}),
+        ...(args.explanationPrompt ? { prompt: args.explanationPrompt } : {}),
+      },
+    });
+    if (!dispatched.ok) return null;
     const response = dispatched.value.responsePackets[0];
     const content = (response?.content ?? {}) as Record<string, unknown>;
     const mccr = content["mccr"] as Record<string, unknown> | undefined;
-    if (!mccr || typeof mccr !== "object") return ok(undefined);
+    if (!mccr || typeof mccr !== "object") return null;
 
     const composerCid = response?.source_cid ?? "agent.composer";
     const script = (content["narration_script"] as { segments?: unknown } | undefined) ?? {};
     const scriptSegments = Array.isArray(script.segments)
       ? (script.segments as Record<string, unknown>[])
       : [];
-    const imagePlanRaw = (content["image_plan"] as Record<string, unknown> | undefined) ?? {};
-    const helps = imagePlanRaw["helps"] === true;
-    const prompt =
-      typeof imagePlanRaw["prompt"] === "string" ? (imagePlanRaw["prompt"] as string) : null;
-    const modality =
-      typeof imagePlanRaw["modality"] === "string" ? imagePlanRaw["modality"] : "none";
-    const rationale =
-      typeof imagePlanRaw["rationale"] === "string" ? (imagePlanRaw["rationale"] as string) : "";
+    // The image-as-cognition decision (UCS, ADR-0030; Phase 4): a dedicated Image Agent owns it when
+    // wired (decide/prompt + explanatory caption + callout labels), replacing the composer's inline
+    // image_plan; otherwise the composer's inline decision drives generation (Phase 1–3 behaviour).
+    const composerPlan = (content["image_plan"] as Record<string, unknown> | undefined) ?? {};
+    const plan =
+      (await this.dispatchImagePlanner({
+        surfaceId,
+        conceptId,
+        conceptTitle,
+        ...(args.subFocus ? { subFocus: args.subFocus } : {}),
+        anchors: Object.keys(mccr),
+      })) ?? this.composerImagePlan(composerPlan);
 
-    // Image-as-cognition: when the composer judged an image helps and a generator is wired, generate
-    // it and fold it into the MCCR as the `image` element (in the concept's region).
+    // When an image earns its place and a generator is wired, generate it and fold it into the MCCR
+    // as the `image` element (in the concept's region), with its caption + labels. Pre-warming a
+    // speculative frame's image here means promotion is a true skip-recompute.
     let mccrForEvent: Record<string, unknown> = mccr;
-    if (helps && prompt && this.deps.media) {
+    if (plan.helps && plan.prompt && this.deps.media) {
       const ref = await this.deps.media.generate({
         request_id: `med-${this.idGenerator.hex(8)}`,
         surface_id: surfaceId,
         block_id: null,
         modality: "image",
-        prompt,
-        concept_ids: [input.focusConceptId],
+        prompt: plan.prompt,
+        concept_ids: [conceptId],
       });
       if (ref) {
         await this.emit("surface.visual.generated", {
@@ -1012,7 +1187,7 @@ export class SurfaceSession {
             type: "image",
             slot: "image",
             reveal_order: 9,
-            concept_id: input.focusConceptId,
+            concept_id: conceptId,
             content: {
               kind: "image",
               artifact: {
@@ -1021,24 +1196,25 @@ export class SurfaceSession {
                 mime_type: ref.mime_type,
                 provider_id: ref.provider_id,
               },
-              alt: `Illustration of ${focusTitle}`,
-              prompt,
+              alt: `Illustration of ${conceptTitle}`,
+              prompt: plan.prompt,
+              caption: plan.caption,
+              labels: plan.labels,
             },
           },
         };
       }
     }
 
-    await this.emitFrameArtifacts({
-      surfaceId,
-      frameId,
-      ordinal,
-      conceptId: input.focusConceptId,
-      frameTitle,
-      conceptNodeId,
+    return {
       mccr: mccrForEvent,
       scriptSegments,
-      imagePlan: { helps, modality, prompt, rationale },
+      imagePlan: {
+        helps: plan.helps,
+        modality: plan.modality,
+        prompt: plan.prompt,
+        rationale: plan.rationale,
+      },
       composerCid,
       composerPacketId: response?.packet_id ?? null,
       confidence: response?.confidence ?? 0.5,
@@ -1046,11 +1222,102 @@ export class SurfaceSession {
         typeof content["response_kind"] === "string" ? (content["response_kind"] as string) : "",
       trace: dispatched.value.emissions.trace ?? null,
       workId: dispatched.value.workItem.work_id,
-      agentId: "composer",
-      role: "explainer",
-      reason: "surface composer distilled the focus concept into a Cognitive Frame",
+    };
+  }
+
+  /** Normalize the composer's inline `image_plan` into the effective image-decision shape. */
+  private composerImagePlan(raw: Record<string, unknown>): {
+    helps: boolean;
+    modality: string;
+    prompt: string | null;
+    rationale: string;
+    caption: string | null;
+    labels: string[];
+  } {
+    const prompt = typeof raw["prompt"] === "string" ? (raw["prompt"] as string) : null;
+    const helps = raw["helps"] === true && prompt !== null;
+    return {
+      helps,
+      modality: helps ? "image" : "none",
+      prompt: helps ? prompt : null,
+      rationale: typeof raw["rationale"] === "string" ? (raw["rationale"] as string) : "",
+      caption: null,
+      labels: [],
+    };
+  }
+
+  /**
+   * Dispatch the governed Image Agent (UCS, ADR-0030; Phase 4) to own the image-as-cognition decision:
+   * whether an image helps, its prompt, and the explanatory caption + callout labels. Surfaces the
+   * agent's reasoning to the Observatory (ADR-0029). Returns null when no image planner is wired or the
+   * dispatch is blocked/empty — the caller then falls back to the composer's inline decision.
+   */
+  private async dispatchImagePlanner(args: {
+    surfaceId: string;
+    conceptId: string;
+    conceptTitle: string;
+    subFocus?: string;
+    anchors: string[];
+  }): Promise<{
+    helps: boolean;
+    modality: string;
+    prompt: string | null;
+    rationale: string;
+    caption: string | null;
+    labels: string[];
+  } | null> {
+    const dispatcher = this.deps.imagePlannerDispatcher;
+    if (!dispatcher) return null;
+    const dispatched = await dispatcher.dispatch({
+      session: this.deps.session,
+      targetAgentId: "imageplanner",
+      intent: `plan image: ${args.conceptTitle}`,
+      conceptIds: [args.conceptId],
+      content: {
+        concept_id: args.conceptId,
+        concept_title: args.conceptTitle,
+        ...(args.subFocus ? { sub_focus: args.subFocus } : {}),
+        anchors: args.anchors,
+        mode: "decide",
+      },
     });
-    return ok(undefined);
+    if (!dispatched.ok) return null;
+    const response = dispatched.value.responsePackets[0];
+    const content = (response?.content ?? {}) as Record<string, unknown>;
+    const raw = content["image_plan"] as Record<string, unknown> | undefined;
+    if (!raw) return null;
+
+    // Observatory (ADR-0029): the image agent's decide/refine reasoning is inspectable.
+    const trace = dispatched.value.emissions.trace;
+    if (trace) {
+      await this.emit("surface.agent.reasoning.summary", {
+        surface_id: args.surfaceId,
+        agent_cid: response?.source_cid ?? "agent.imageplanner",
+        agent_id: "imageplanner",
+        packet_id: response?.packet_id ?? null,
+        work_id: dispatched.value.workItem.work_id,
+        task_interpretation: trace.task_interpretation,
+        strategy: trace.strategy,
+        decision: trace.decision,
+        self_critique: trace.self_critique ?? null,
+        confidence: response?.confidence ?? 0.5,
+        determinism_level: trace.determinism_level,
+      });
+    }
+
+    const prompt = typeof raw["prompt"] === "string" ? (raw["prompt"] as string) : null;
+    const helps = raw["helps"] === true && prompt !== null;
+    const labels = Array.isArray(raw["labels"])
+      ? (raw["labels"] as unknown[]).filter((l): l is string => typeof l === "string")
+      : [];
+    return {
+      helps,
+      modality: helps ? "image" : "none",
+      prompt: helps ? prompt : null,
+      rationale: typeof raw["rationale"] === "string" ? (raw["rationale"] as string) : "",
+      caption: helps && typeof raw["caption"] === "string" ? (raw["caption"] as string) : null,
+      labels: helps ? labels : [],
+    };
   }
 
   /**
@@ -1151,34 +1418,14 @@ export class SurfaceSession {
       world_state_nodes: [args.conceptNodeId],
     });
 
-    // The image decision is recorded whether or not an image was generated (observable rationale).
-    await this.emit("surface.image.decided", {
-      surface_id: surfaceId,
-      frame_id: frameId,
-      helps: args.imagePlan.helps,
-      modality: args.imagePlan.modality,
-      prompt: args.imagePlan.prompt,
-      rationale: args.imagePlan.rationale,
-    });
-
-    // The SEPARATE narration script is recorded (the spoken teaching, off the board).
-    const scriptId = `nsc-${this.idGenerator.hex(8)}`;
-    const recordedSegments = args.scriptSegments.map((s, i) => {
-      const anchorRef = typeof s["anchor_ref"] === "string" ? (s["anchor_ref"] as string) : null;
-      return {
-        segment_id: `${scriptId}-s${i}`,
-        anchor_ref: anchorRef,
-        intent: typeof s["intent"] === "string" ? (s["intent"] as string) : "build",
-        text: typeof s["text"] === "string" ? (s["text"] as string) : "",
-        reveal_ids: anchorRef ? [this.elementIdFor(mccr, anchorRef)].filter(Boolean) : [],
-        pause_after: s["pause_after"] === true,
-      };
-    });
-    await this.emit("surface.narration.script.produced", {
-      surface_id: surfaceId,
-      frame_id: frameId,
-      script_id: scriptId,
-      segments: recordedSegments,
+    // The image decision + the SEPARATE narration script are recorded (the spoken teaching, off the
+    // board). Shared with Phase 3 speculation — a prepared frame records these too, but is not voiced.
+    await this.recordFrameArtifacts({
+      surfaceId,
+      frameId,
+      mccr,
+      scriptSegments: args.scriptSegments,
+      imagePlan: args.imagePlan,
     });
 
     // Observability (ADR-0029): the composer's reasoning is inspectable in the Agent Observatory.
@@ -1216,6 +1463,162 @@ export class SurfaceSession {
         };
       }),
     });
+  }
+
+  /**
+   * Record a frame's off-board artifacts (UCS, ADR-0030): the image decision (always, so the rationale
+   * is observable whether or not an image was generated) and the SEPARATE narration script keyed to the
+   * frame. Shared by composed frames (which then voice) and Phase 3 speculative frames (which do not).
+   */
+  private async recordFrameArtifacts(args: {
+    surfaceId: string;
+    frameId: string;
+    mccr: Record<string, unknown>;
+    scriptSegments: Record<string, unknown>[];
+    imagePlan: { helps: boolean; modality: string; prompt: string | null; rationale: string };
+  }): Promise<void> {
+    await this.emit("surface.image.decided", {
+      surface_id: args.surfaceId,
+      frame_id: args.frameId,
+      helps: args.imagePlan.helps,
+      modality: args.imagePlan.modality,
+      prompt: args.imagePlan.prompt,
+      rationale: args.imagePlan.rationale,
+    });
+    const scriptId = `nsc-${this.idGenerator.hex(8)}`;
+    const recordedSegments = args.scriptSegments.map((s, i) => {
+      const anchorRef = typeof s["anchor_ref"] === "string" ? (s["anchor_ref"] as string) : null;
+      return {
+        segment_id: `${scriptId}-s${i}`,
+        anchor_ref: anchorRef,
+        intent: typeof s["intent"] === "string" ? (s["intent"] as string) : "build",
+        text: typeof s["text"] === "string" ? (s["text"] as string) : "",
+        reveal_ids: anchorRef ? [this.elementIdFor(args.mccr, anchorRef)].filter(Boolean) : [],
+        pause_after: s["pause_after"] === true,
+      };
+    });
+    await this.emit("surface.narration.script.produced", {
+      surface_id: args.surfaceId,
+      frame_id: args.frameId,
+      script_id: scriptId,
+      segments: recordedSegments,
+    });
+  }
+
+  /**
+   * Promote a speculative frame to the canonical line (UCS, ADR-0030; Phase 3). The pre-composed MCCR
+   * was folded at prepare time under this `frame_id`, so `surface.frame.promoted` copies it into
+   * `frames[]` with a final ordinal (a true skip-recompute). It is voiced now from its recorded
+   * narration script — the FIRST moment a speculative frame ever surfaces to the learner.
+   */
+  private async promoteSpeculation(
+    surfaceId: string,
+    spec: CognitiveFrame,
+    conceptNodeId: string,
+    _input: SurfaceAskInput,
+  ): Promise<void> {
+    const ordinal = this.nextFrameOrdinal();
+    await this.emit("surface.frame.promoted", {
+      surface_id: surfaceId,
+      frame_id: spec.frame_id,
+      ordinal,
+      concept_id: spec.concept_id,
+      title: spec.title,
+      producer_cid: spec.provenance.producer_cid || "agent.composer",
+      reason: "speculative frame promoted — the look-ahead bet held",
+      world_state_nodes: [conceptNodeId],
+    });
+    const script = (this.state()?.narration_scripts ?? []).find(
+      (s) => s.frame_id === spec.frame_id,
+    );
+    if (script) {
+      await this.choreographer.narrateScript({
+        surface_id: surfaceId,
+        frame_id: spec.frame_id,
+        agent_cid: spec.provenance.producer_cid || "agent.composer",
+        agent_id: "composer",
+        role: "explainer",
+        concept_id: spec.concept_id,
+        segments: script.segments.map((s) => ({
+          text: s.text,
+          anchor_ref: s.anchor_ref,
+          element_id: s.reveal_ids[0] ?? null,
+          intent: s.intent,
+        })),
+      });
+    }
+  }
+
+  /**
+   * Pre-compose look-ahead frames within the governed budget (UCS, ADR-0030; Phase 3). After a clean
+   * mastery, the planner's look-ahead bet is bound to the actual NEXT concept in the path and the
+   * composer distills its opening frame (pre-warming any image). The result is RECORDED
+   * (`speculation.prepared` + script + image decision) but NEVER voiced or surfaced — it waits in
+   * `speculative_frames[]` until a future ask promotes it. Budget 0 ⇒ no speculation (the default).
+   */
+  private async prepareLookahead(args: {
+    surfaceId: string;
+    input: SurfaceAskInput;
+  }): Promise<void> {
+    const budget = this.deps.getLookaheadBudget?.() ?? this.deps.lookaheadBudget ?? 0;
+    if (budget <= 0) return;
+    const nextConcept = this.nextConceptAfter(args.input);
+    if (!nextConcept) return; // end of the path — nothing to look ahead to
+
+    const bet = this.pendingLookahead?.entries[0];
+    const plannerPacketId = this.pendingLookahead?.plannerPacketId ?? null;
+    const triggerAssumption =
+      bet?.trigger_assumption ??
+      `learner masters ${args.input.focusConceptId} and advances to ${nextConcept.id}`;
+    const archetype = bet?.archetype ?? "concept-first";
+
+    const artifacts = await this.dispatchComposerForConcept({
+      surfaceId: args.surfaceId,
+      conceptId: nextConcept.id,
+      conceptTitle: nextConcept.title,
+      goal: args.input.goal,
+      ...(bet?.sub_focus ? { subFocus: bet.sub_focus } : {}),
+      frameFocus: bet?.title ?? `Next — ${nextConcept.title}`,
+    });
+    if (!artifacts) return; // blocked/empty ⇒ nothing prepared (observable degradation)
+
+    const frameId = `cfr-${this.idGenerator.hex(12)}`;
+    const ordinal = this.nextFrameOrdinal();
+    const nextConceptNodeId = `concept:${nextConcept.id}`;
+    const slots = bet?.slots ?? Object.keys(artifacts.mccr);
+
+    // The pre-composed MCCR lands in speculative_frames[] (never frames[]) with the bet it rests on.
+    await this.emit("surface.frame.speculation.prepared", {
+      surface_id: args.surfaceId,
+      frame_id: frameId,
+      ordinal,
+      speculative_of: null,
+      concept_id: nextConcept.id,
+      title: bet?.title ?? nextConcept.title,
+      trigger_assumption: triggerAssumption,
+      mccr_layout: this.buildFrameLayout(archetype, slots),
+      mccr: artifacts.mccr,
+      planner_packet_id: plannerPacketId,
+      producer_cid: artifacts.composerCid,
+      reason: "frame planner pre-composed a discardable look-ahead frame",
+      world_state_nodes: [nextConceptNodeId],
+    });
+    // Record the script + image decision under the speculative frame_id (resolvable at promotion) —
+    // but DO NOT voice: a speculative frame never surfaces until promoted.
+    await this.recordFrameArtifacts({
+      surfaceId: args.surfaceId,
+      frameId,
+      mccr: artifacts.mccr,
+      scriptSegments: artifacts.scriptSegments,
+      imagePlan: artifacts.imagePlan,
+    });
+  }
+
+  /** The concept immediately after the focus in the ask's ordered concept list, or null at the end. */
+  private nextConceptAfter(input: SurfaceAskInput): ConceptSeed | null {
+    const index = input.concepts.findIndex((c) => c.id === input.focusConceptId);
+    if (index < 0 || index + 1 >= input.concepts.length) return null;
+    return input.concepts[index + 1] ?? null;
   }
 
   /** Allocate the next sparse, monotone frame ordinal (UCS, ADR-0030 risk #2). */

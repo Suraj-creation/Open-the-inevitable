@@ -139,6 +139,53 @@ describe("parseFramePlan", () => {
     );
     expect(() => parseFramePlan("not json", "X", 5)).toThrowError(/valid JSON/);
   });
+
+  test("parses a single look-ahead bet with its trigger assumption (UCS Phase 3)", () => {
+    const plan = parseFramePlan(
+      JSON.stringify({
+        frames: [{ title: "F", slots: ["core_concept"] }],
+        lookahead: [
+          {
+            title: "Opening: the inverse transform",
+            sub_focus: "reversing the transform to recover the signal",
+            archetype: "formal",
+            slots: ["core_concept", "key_formula"],
+            trigger_assumption: "learner masters the forward transform and advances to the inverse",
+          },
+        ],
+      }),
+      "Fourier transform",
+      5,
+    );
+    expect(plan.lookahead).toHaveLength(1);
+    expect(plan.lookahead[0]?.title).toBe("Opening: the inverse transform");
+    expect(plan.lookahead[0]?.archetype).toBe("formal");
+    expect(plan.lookahead[0]?.slots).toEqual(["core_concept", "key_formula"]);
+    expect(plan.lookahead[0]?.trigger_assumption).toContain("inverse");
+  });
+
+  test("drops look-ahead bets without a title or trigger, and caps at one (UCS Phase 3)", () => {
+    const plan = parseFramePlan(
+      JSON.stringify({
+        frames: [{ title: "F", slots: ["core_concept"] }],
+        lookahead: [
+          { title: "no trigger" }, // dropped — no trigger_assumption
+          { trigger_assumption: "no title" }, // dropped — no title
+          { title: "Bet A", trigger_assumption: "learner advances to A" },
+          { title: "Bet B", trigger_assumption: "learner advances to B" },
+        ],
+      }),
+      "X",
+      5,
+    );
+    expect(plan.lookahead).toHaveLength(1);
+    expect(plan.lookahead[0]?.title).toBe("Bet A");
+  });
+
+  test("a plan with no lookahead yields an empty bet list", () => {
+    const plan = parseFramePlan(GOOD_PLAN, "Fourier transform", 5);
+    expect(plan.lookahead).toEqual([]);
+  });
 });
 
 describe("deterministicPlan", () => {

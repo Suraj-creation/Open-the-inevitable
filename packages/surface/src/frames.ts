@@ -76,6 +76,10 @@ export type MccrElementContent =
       readonly artifact: MccrImageArtifact | null;
       readonly alt: string;
       readonly prompt: string | null;
+      /** One-line caption shown beneath the image (image-as-cognition, ADR-0030 Phase 4). */
+      readonly caption: string | null;
+      /** Callout labels annotating the illustration's salient parts (image-as-cognition). */
+      readonly labels: readonly string[];
     };
 
 /** One distilled visual anchor. `element_id` is stable so a narration segment can spotlight it. */
@@ -277,7 +281,16 @@ function readElementContent(type: MccrElementType, raw: Raw | undefined): MccrEl
           provider_id: str(artRaw["provider_id"]),
         }
       : null;
-    return { kind: "image", artifact, alt: str(c["alt"]), prompt: strOrNull(c["prompt"]) };
+    return {
+      kind: "image",
+      artifact,
+      alt: str(c["alt"]),
+      prompt: strOrNull(c["prompt"]),
+      caption: strOrNull(c["caption"]),
+      labels: Array.isArray(c["labels"])
+        ? (c["labels"] as unknown[]).map((l) => str(l)).filter((l) => l.length > 0)
+        : [],
+    };
   }
   return { kind: "text", text: str(c["text"]) };
 }

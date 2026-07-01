@@ -88,8 +88,26 @@ export interface PlannerFrameEntry {
   readonly intent: PlannerFrameIntent;
 }
 
+/**
+ * A discardable look-ahead bet (UCS, ADR-0030; Phase 3): the opening frame the planner *predicts*
+ * the learner will need NEXT (after mastering this concept), plus the `trigger_assumption` the bet
+ * rests on. The surface session may speculatively pre-compose it within the governed look-ahead
+ * budget; it is recorded but never surfaced until a real signal promotes it, and invalidated the
+ * moment the learner diverges. The session binds the entry to the actual next concept in the path.
+ */
+export interface LookaheadEntry {
+  readonly title: string;
+  readonly sub_focus: string;
+  readonly archetype: FrameArchetype;
+  readonly slots: readonly PlannableSlot[];
+  /** The bet this speculation rests on, e.g. "learner masters X and advances to Y". */
+  readonly trigger_assumption: string;
+}
+
 export interface FramePlan {
   readonly frames: readonly PlannerFrameEntry[];
+  /** Speculative next-step frames (Phase 3). Empty in the deterministic fallback. */
+  readonly lookahead: readonly LookaheadEntry[];
   readonly pacing: { readonly strategy: string; readonly notes: string };
 }
 
@@ -126,6 +144,20 @@ const OUTPUT_CONTRACT_SCHEMA: Record<string, unknown> = {
           archetype: { type: "string" },
           slots: { type: "array", items: { type: "string" } },
           intent: { type: "string" },
+        },
+      },
+    },
+    lookahead: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["title", "trigger_assumption"],
+        properties: {
+          title: { type: "string" },
+          sub_focus: { type: "string" },
+          archetype: { type: "string" },
+          slots: { type: "array", items: { type: "string" } },
+          trigger_assumption: { type: "string" },
         },
       },
     },
@@ -186,7 +218,27 @@ export function deterministicPlan(packet: CognitionPacket): FramePlan {
         intent: "introduce",
       },
     ],
+    lookahead: [],
     pacing: { strategy: "single-frame", notes: "deterministic fallback — one frame per concept" },
+  };
+}
+
+/** Parse + validate one look-ahead bet; returns null when it lacks a title or trigger assumption. */
+function parseLookaheadEntry(entry: unknown): LookaheadEntry | null {
+  const e = (entry ?? {}) as Record<string, unknown>;
+  const title = typeof e["title"] === "string" ? e["title"].trim() : "";
+  const trigger = typeof e["trigger_assumption"] === "string" ? e["trigger_assumption"].trim() : "";
+  if (!title || !trigger) return null;
+  const archetypeRaw = typeof e["archetype"] === "string" ? e["archetype"].trim() : "";
+  const archetype = (
+    VALID_ARCHETYPES.has(archetypeRaw) ? archetypeRaw : "concept-first"
+  ) as FrameArchetype;
+  return {
+    title,
+    sub_focus: typeof e["sub_focus"] === "string" ? e["sub_focus"].trim() : "",
+    archetype,
+    slots: sanitizeSlots(e["slots"]),
+    trigger_assumption: trigger,
   };
 }
 
@@ -233,9 +285,20 @@ export function parseFramePlan(text: string, conceptTitle: string, maxFrames: nu
       concept: conceptTitle,
     });
   }
+  const lookaheadRaw = Array.isArray((obj as { lookahead?: unknown }).lookahead)
+    ? (obj as { lookahead: unknown[] }).lookahead
+    : [];
+  const lookahead: LookaheadEntry[] = [];
+  for (const entry of lookaheadRaw) {
+    const parsed = parseLookaheadEntry(entry);
+    if (parsed) lookahead.push(parsed);
+    // Look-ahead is a bounded buffer, not a lesson — one bet is enough to pre-warm the next step.
+    if (lookahead.length >= 1) break;
+  }
   const pacingRaw = (obj.pacing ?? {}) as Record<string, unknown>;
   return {
     frames,
+    lookahead,
     pacing: {
       strategy: typeof pacingRaw["strategy"] === "string" ? pacingRaw["strategy"] : "progressive",
       notes: typeof pacingRaw["notes"] === "string" ? pacingRaw["notes"] : "",
@@ -338,11 +401,14 @@ export class FramePlannerUnit implements CognitiveUnit {
       "→ connection/edge-cases, but adapt to the concept. Each frame names a `sub_focus` (the exact",
       "slice it teaches) so a downstream composer can distill DIFFERENT anchors for each.",
       "Respond with JSON only (no markdown fences) matching:",
-      '{"frames":[{"title":"short frame title","sub_focus":"the precise slice this frame teaches","archetype":"concept-first|image-led|compare|formal|example-led","slots":["core_concept","definition","key_formula","diagram","relationship","mental_model","table","key_example","memory_cue"],"intent":"introduce|build|illustrate|connect|deepen|summarize"}],"pacing":{"strategy":"progressive","notes":"why this sequence"}}',
+      '{"frames":[{"title":"short frame title","sub_focus":"the precise slice this frame teaches","archetype":"concept-first|image-led|compare|formal|example-led","slots":["core_concept","definition","key_formula","diagram","relationship","mental_model","table","key_example","memory_cue"],"intent":"introduce|build|illustrate|connect|deepen|summarize"}],"lookahead":[{"title":"opening frame of the likely NEXT step","sub_focus":"what that next step introduces","archetype":"concept-first","slots":["core_concept"],"trigger_assumption":"learner masters this concept and advances"}],"pacing":{"strategy":"progressive","notes":"why this sequence"}}',
       `Rules: 1–${this.maxFrames} frames (fewer is better — never pad). Each frame's \`slots\` lists ONLY`,
       "the MCCR anchors that frame will actually fill (≤ 5 per frame so it fits one screen); always",
       "include core_concept. Order frames so understanding compounds. The FIRST frame introduces; the",
       "LAST consolidates. Distinct sub_focus per frame — no two frames teach the same slice.",
+      "`lookahead` (0 or 1 entries): the OPENING frame you predict the learner will need NEXT once they",
+      "master this concept, with the `trigger_assumption` behind the bet. Omit it if the next step is",
+      "unclear. It is discardable — a pre-warm hint, never part of this lesson.",
       depthGuidance,
     ].join("\n");
     return {

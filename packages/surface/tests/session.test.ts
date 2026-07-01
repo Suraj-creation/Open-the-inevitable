@@ -12,6 +12,7 @@ import {
   DeterministicMvpUnit,
   FiberedLearningLoop,
   FramePlannerUnit,
+  ImagePlannerUnit,
   LearningPathProjector,
   MVP_AGENT_MANIFESTS,
   MasteryCheckpointRecorder,
@@ -90,7 +91,7 @@ function onboarding(userId = "user-surface", trustLevel = 5): OnboardingSession 
 }
 
 function agentIdentity(
-  kind: "supervisor" | "explanation" | "practice" | "composer" | "frameplanner",
+  kind: "supervisor" | "explanation" | "practice" | "composer" | "frameplanner" | "imageplanner",
   cid: string,
 ): CognitiveIdentity {
   const manifest = MVP_AGENT_MANIFESTS.find((m) => m.id === `agent.${kind}`)!;
@@ -222,9 +223,44 @@ function fakeFramePlannerModel(): ModelRuntime {
               intent: "deepen",
             },
           ],
+          lookahead: [
+            {
+              title: "Opening: descending the gradient",
+              sub_focus: "following the slope downhill to minimize error",
+              archetype: "concept-first",
+              slots: ["core_concept", "mental_model"],
+              trigger_assumption: "learner masters linear algebra and advances to gradient descent",
+            },
+          ],
           pacing: { strategy: "progressive", notes: "intuition → formal" },
         }),
         model: "fake-frameplanner-model",
+        finishReason: "stop",
+      };
+    },
+    async embed() {
+      return [0, 0, 0, 0, 0, 0, 0, 0];
+    },
+  };
+}
+
+/**
+ * A fake image agent (UCS, ADR-0030 Phase 4): decides an image helps and returns a prompt + an
+ * explanatory caption + callout labels — distinct from the composer's inline plan so a test can
+ * prove the dedicated agent's decision drives the folded image element. Deterministic per call.
+ */
+function fakeImagePlannerModel(): ModelRuntime {
+  return {
+    async generate() {
+      return {
+        text: JSON.stringify({
+          helps: true,
+          prompt: "arrows on a plane being stretched and rotated by a matrix grid",
+          rationale: "the spatial reshaping is the whole point and is hard to say in words",
+          caption: "A matrix reshapes every vector in the space at once",
+          labels: ["input vector", "transformed grid", "output vector"],
+        }),
+        model: "fake-imageplanner-model",
         finishReason: "stop",
       };
     },
@@ -242,8 +278,11 @@ function makeFixture(
     explanationModel?: ModelRuntime;
     composerModel?: ModelRuntime;
     framePlannerModel?: ModelRuntime;
+    imagePlannerModel?: ModelRuntime;
     media?: MediaGenerator;
     motivationDispatcher?: GovernedDispatcher;
+    /** Look-ahead budget (UCS, ADR-0030; Phase 3). Absent/0 ⇒ no speculation (the default). */
+    lookaheadBudget?: number;
   } = {},
 ): Fixture {
   const clock = new ManualClock(Date.UTC(2026, 5, 11));
@@ -365,6 +404,25 @@ function makeFixture(
       })
     : undefined;
 
+  const imagePlannerManifest = MVP_AGENT_MANIFESTS.find((m) => m.id === "agent.imageplanner")!;
+  const imagePlannerDispatcher = options.imagePlannerModel
+    ? new ProductRuntimeDispatcher({
+        bus,
+        clock,
+        idGenerator,
+        nodeId: "surface-imageplanner",
+        agent: {
+          identity: agentIdentity("imageplanner", "cog-img-surface"),
+          unit: new ImagePlannerUnit({
+            manifest: imagePlannerManifest,
+            model: options.imagePlannerModel,
+            idGenerator,
+          }),
+        },
+        governance,
+      })
+    : undefined;
+
   const surface = new SurfaceSession({
     session,
     world,
@@ -378,6 +436,8 @@ function makeFixture(
     ...(options.motivationDispatcher ? { motivationDispatcher: options.motivationDispatcher } : {}),
     ...(composerDispatcher ? { composerDispatcher } : {}),
     ...(framePlannerDispatcher ? { framePlannerDispatcher } : {}),
+    ...(imagePlannerDispatcher ? { imagePlannerDispatcher } : {}),
+    ...(options.lookaheadBudget !== undefined ? { lookaheadBudget: options.lookaheadBudget } : {}),
   });
 
   return { surface, world, bus };
@@ -417,6 +477,17 @@ function teachMeNeuralNetworks(): SurfaceAskInput {
         { kind: "edge_case", passed: true, confidence: 0.8, evidence: "handled edge case" },
       ],
     },
+  };
+}
+
+/** The same lesson refocused on a later concept in the path (UCS Phase 3 promote/invalidate tests). */
+function askForConcept(focusConceptId: string): SurfaceAskInput {
+  const base = teachMeNeuralNetworks();
+  return {
+    ...base,
+    focusConceptId,
+    explanationPrompt: `Explain ${focusConceptId}`,
+    practicePrompt: `Practice ${focusConceptId}`,
   };
 }
 
@@ -674,6 +745,75 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
     );
   });
 
+  test("UCS Phase 4: the Image Agent owns the image-as-cognition decision (caption + labels)", async () => {
+    const { surface } = makeFixture("surface-image-agent", {
+      composerModel: fakeComposerModel(),
+      imagePlannerModel: fakeImagePlannerModel(),
+      media: {
+        async generate(request) {
+          return {
+            artifact_id: `art-${request.request_id}`,
+            modality: request.modality,
+            content_ref: `/api/surface/${request.surface_id}/media/art-${request.request_id}`,
+            mime_type: "image/svg+xml",
+            provider_id: "test-null",
+            deterministic: true,
+          };
+        },
+      },
+    });
+    await surface.start("Teach me Neural Networks");
+    const asked = await surface.ask(teachMeNeuralNetworks());
+    expect(asked.ok).toBe(true);
+    if (!asked.ok) throw asked.error;
+    const state = asked.value.state;
+
+    // The image element carries the Image Agent's caption + callout labels (image-as-cognition),
+    // NOT the composer's inline decision.
+    const image = state.frames[0]?.mccr?.image?.content;
+    expect(image?.kind).toBe("image");
+    if (image?.kind !== "image") throw new Error("expected image content");
+    expect(image.caption).toBe("A matrix reshapes every vector in the space at once");
+    expect(image.labels).toEqual(["input vector", "transformed grid", "output vector"]);
+    expect(image.prompt).toContain("matrix grid");
+
+    // The image agent's reasoning reaches the Observatory (ADR-0029), distinct from the composer's.
+    expect(state.agent_reasoning.some((r) => r.agent_id === "imageplanner")).toBe(true);
+    expect(state.agent_reasoning.some((r) => r.agent_id === "composer")).toBe(true);
+    // The decision is recorded as helping.
+    expect(state.image_decisions[0]?.helps).toBe(true);
+  });
+
+  test("UCS Phase 4 image-agent path replays deterministically (deep-equal folded state)", async () => {
+    const run = async () => {
+      const { surface, bus } = makeFixture("surface-image-agent-replay", {
+        composerModel: fakeComposerModel(),
+        imagePlannerModel: fakeImagePlannerModel(),
+        media: {
+          async generate(request) {
+            return {
+              artifact_id: `art-${request.request_id}`,
+              modality: request.modality,
+              content_ref: `/api/surface/${request.surface_id}/media/art-${request.request_id}`,
+              mime_type: "image/svg+xml",
+              provider_id: "test-null",
+              deterministic: true,
+            };
+          },
+        },
+      });
+      await surface.start("Teach me Neural Networks");
+      const asked = await surface.ask(teachMeNeuralNetworks());
+      expect(asked.ok).toBe(true);
+      await surface.close();
+      return { state: surface.state(), events: bus.replay({ subject: "surface.>" }) };
+    };
+    const [a, b] = await Promise.all([run(), run()]);
+    expect(a.state).toEqual(b.state);
+    const refolded = foldSurfaceEvents(a.events, a.state?.surface_id);
+    expect(refolded).toEqual(a.state);
+  });
+
   test("UCS frame path replays deterministically (deep-equal folded state)", async () => {
     const run = async () => {
       const { surface, bus } = makeFixture("surface-frame-replay", {
@@ -752,6 +892,124 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
       await surface.start("Teach me Neural Networks");
       const asked = await surface.ask(teachMeNeuralNetworks());
       expect(asked.ok).toBe(true);
+      await surface.close();
+      return { state: surface.state(), events: bus.replay({ subject: "surface.>" }) };
+    };
+    const [a, b] = await Promise.all([run(), run()]);
+    expect(a.state).toEqual(b.state);
+    const refolded = foldSurfaceEvents(a.events, a.state?.surface_id);
+    expect(refolded).toEqual(a.state);
+  });
+
+  test("UCS Phase 3: mastery pre-composes the next frame as discardable speculation, then a matching ask promotes it", async () => {
+    const { surface, bus } = makeFixture("surface-lookahead-promote", {
+      composerModel: fakeComposerModel(),
+      framePlannerModel: fakeFramePlannerModel(),
+      lookaheadBudget: 1,
+    });
+    await surface.start("Teach me Neural Networks");
+
+    // Ask 1: teach linear-algebra. After clean mastery the NEXT concept (gradient-descent) is
+    // pre-composed as a speculative frame — recorded but NEVER surfaced.
+    const first = await surface.ask(teachMeNeuralNetworks());
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw first.error;
+    const afterFirst = first.value.state;
+
+    const spec = afterFirst.speculative_frames;
+    expect(spec).toHaveLength(1);
+    expect(spec[0]?.status).toBe("speculative");
+    expect(spec[0]?.concept_id).toBe("gradient-descent");
+    expect(spec[0]?.trigger_assumption).toContain("gradient descent");
+    expect(spec[0]?.mccr).not.toBeNull(); // full MCCR pre-composed ⇒ promotion skips recompute
+    const specFrameId = spec[0]!.frame_id;
+    // Provably absent from the on-screen frame line, and not voiced (never surfaced).
+    expect(afterFirst.frames.some((f) => f.concept_id === "gradient-descent")).toBe(false);
+    expect(afterFirst.narration.some((s) => s.frame_id === specFrameId)).toBe(false);
+    // But its script + image decision WERE recorded (Observatory / N+1 buffer).
+    expect(afterFirst.narration_scripts.some((s) => s.frame_id === specFrameId)).toBe(true);
+    expect(afterFirst.image_decisions.some((d) => d.frame_id === specFrameId)).toBe(true);
+
+    // Ask 2: the learner advances to gradient-descent — the bet held.
+    const second = await surface.ask(askForConcept("gradient-descent"));
+    expect(second.ok).toBe(true);
+    if (!second.ok) throw second.error;
+    const afterSecond = second.value.state;
+
+    // The speculative entry is now promoted, and a promoted frame stands on the canonical line.
+    expect(afterSecond.speculative_frames.find((f) => f.frame_id === specFrameId)?.status).toBe(
+      "promoted",
+    );
+    const promoted = afterSecond.frames.find((f) => f.frame_id === specFrameId);
+    expect(promoted?.status).toBe("promoted");
+    expect(promoted?.concept_id).toBe("gradient-descent");
+    expect(promoted?.mccr).not.toBeNull();
+    // The promoted frame is voiced now (surfaced) — its recorded script drives narration.
+    expect(afterSecond.narration.some((s) => s.frame_id === specFrameId)).toBe(true);
+
+    const types = bus.replay({ subject: "surface.>" }).map((e) => e.event_type);
+    // Two prepares (ask1 → gradient-descent, ask2 → perceptron); exactly one promotion.
+    expect(types.filter((t) => t === "surface.frame.speculation.prepared")).toHaveLength(2);
+    expect(types.filter((t) => t === "surface.frame.promoted")).toHaveLength(1);
+  });
+
+  test("UCS Phase 3: a speculative frame is invalidated when the learner diverges, never surfacing", async () => {
+    const { surface, bus } = makeFixture("surface-lookahead-invalidate", {
+      composerModel: fakeComposerModel(),
+      framePlannerModel: fakeFramePlannerModel(),
+      lookaheadBudget: 1,
+    });
+    await surface.start("Teach me Neural Networks");
+
+    const first = await surface.ask(teachMeNeuralNetworks()); // focus linear-algebra ⇒ speculate gradient-descent
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw first.error;
+    const specFrameId = first.value.state.speculative_frames[0]!.frame_id;
+    expect(first.value.state.speculative_frames[0]?.concept_id).toBe("gradient-descent");
+
+    // Ask 2: the learner jumps to perceptron instead — the bet failed.
+    const second = await surface.ask(askForConcept("perceptron"));
+    expect(second.ok).toBe(true);
+    if (!second.ok) throw second.error;
+    const afterSecond = second.value.state;
+
+    // The gradient-descent speculation is invalidated and NEVER copied into the frame line.
+    const invalidated = afterSecond.speculative_frames.find((f) => f.frame_id === specFrameId);
+    expect(invalidated?.status).toBe("invalidated");
+    expect(invalidated?.invalidation_reason).toContain("perceptron");
+    expect(afterSecond.frames.some((f) => f.frame_id === specFrameId)).toBe(false);
+    expect(afterSecond.frames.some((f) => f.concept_id === "gradient-descent")).toBe(false);
+
+    const types = bus.replay({ subject: "surface.>" }).map((e) => e.event_type);
+    expect(types).toContain("surface.frame.speculation.invalidated");
+    expect(types.filter((t) => t === "surface.frame.promoted")).toHaveLength(0);
+  });
+
+  test("UCS Phase 3: budget 0 emits no speculation (deterministic default)", async () => {
+    const { surface, bus } = makeFixture("surface-lookahead-off", {
+      composerModel: fakeComposerModel(),
+      framePlannerModel: fakeFramePlannerModel(),
+      // no lookaheadBudget ⇒ 0
+    });
+    await surface.start("Teach me Neural Networks");
+    const asked = await surface.ask(teachMeNeuralNetworks());
+    expect(asked.ok).toBe(true);
+    if (!asked.ok) throw asked.error;
+    expect(asked.value.state.speculative_frames).toEqual([]);
+    const types = bus.replay({ subject: "surface.>" }).map((e) => e.event_type);
+    expect(types.some((t) => t.startsWith("surface.frame.speculation"))).toBe(false);
+  });
+
+  test("UCS Phase 3 speculation lifecycle replays deterministically (deep-equal folded state)", async () => {
+    const run = async () => {
+      const { surface, bus } = makeFixture("surface-lookahead-replay", {
+        composerModel: fakeComposerModel(),
+        framePlannerModel: fakeFramePlannerModel(),
+        lookaheadBudget: 1,
+      });
+      await surface.start("Teach me Neural Networks");
+      await surface.ask(teachMeNeuralNetworks());
+      await surface.ask(askForConcept("gradient-descent"));
       await surface.close();
       return { state: surface.state(), events: bus.replay({ subject: "surface.>" }) };
     };

@@ -1038,3 +1038,42 @@ composed-before-narration ordering) + its replay-equivalence twin; web `frames`/
 deck helpers + Composition panel. Gateway/continuity/durable-persistence integration tests pass unchanged
 with the planner live (more frames, same invariants). `pnpm verify` 25/25 green. Deferred: Phase 3 (governed
 look-ahead speculation + `lookaheadBudget` live-config), Phase 4 (`ImagePlannerUnit`), `expand()`-on-frames.
+
+## UCS — Phase 3 (governed look-ahead) + Phase 4 (Image Agent) (2026-06-29)
+
+Closed the two remaining UCS phases (ADR-0030), completing the Cognitive Frames redesign end to end.
+
+**Phase 3 — governed look-ahead speculation.** The `FramePlannerUnit` now emits a discardable
+`lookahead[]` bet alongside its frame plan — one entry carrying a `trigger_assumption` (the prediction
+the speculation rests on). `LiveEvolutionConfig` gains a governed `lookaheadBudget` (raised/lowered only
+by an evolution rollout carrying a numeric `lookaheadBudget` parameter; `0` in tests/CLI, seeded to `1`
+at the gateway, read live via an injected `getLookaheadBudget` callback — the same direction-safe pattern
+as `getDepthBias`). After a clean forward step (mastery ran, no confusion descent), `SurfaceSession`
+binds the bet to the next concept in the path and speculatively pre-composes its opening frame through
+the SAME governed composer dispatch (`dispatchComposerForConcept`, extracted so the on-screen and
+speculative paths share one code path). The full MCCR + narration script + image decision are recorded
+under `surface.frame.speculation.prepared` (into the `speculative_frames[]` slice) but **never voiced or
+surfaced**. On the next ask, `reconcileSpeculations` runs first: a still-speculative frame whose
+`concept_id` matches the focus is **promoted** (`surface.frame.promoted` with a final sparse ordinal — a
+true skip-recompute, since the promoted frame keeps its `frame_id` so its recorded script + image resolve,
+then it is voiced), and `planAndComposeFrames` skips the plan's opening entry so the sequence never
+double-opens; every diverging bet is **invalidated** (`surface.frame.speculation.invalidated`, provably
+never copied into `frames[]`). Budget 0 emits no speculation events at all (byte-identical to Phase 2).
+
+**Phase 4 — the Image Agent.** New `ImagePlannerUnit` (`@inevitable/product-cognition`,
+`agent.imageplanner`; capabilities `image.decide`/`image.prompt`/`image.refine`) owns the
+image-as-cognition decision, promoted out of the composer's inline `image_plan`. One model call decides
+`{ helps, prompt, rationale, caption, labels[] }`: an image earns its place only when spatial structure
+carries meaning the board's anchors cannot; when it does the agent produces the generation prompt, a
+one-line caption, and 2–6 callout labels that make it an *explanatory* image; `refine` mode re-plans from
+feedback. Deterministic fallback is `helps=false` (offline/seeded runs never fabricate media). Wired at
+the gateway (`imagePlanner:true`), it drives generation via the SRF-004 `MediaGenerator` seam and folds
+the image (with caption + labels) into the MCCR `image` element in the concept's region; the web
+`MccrElement` renders the caption + labels as absolutely-positioned callouts. Absent the agent, the
+composer's inline decision remains the fallback (Phase 1–3 parity). The MCCR image content type gained
+optional `caption`/`labels` (additive, defaulted in the fold — replay-safe).
+
+New tests: 3 planner look-ahead-parsing cases; 4 surface session Phase 3 cases (prepare→promote,
+prepare→invalidate, budget-0 no-op, and a two-ask replay-equivalence twin); 8 `ImagePlannerUnit` cases;
+2 surface session Phase 4 cases (Image Agent drives caption/labels + a replay-equivalence twin). Spec:
+`inline-multimodal-artifacts.md` §4.1 documents the Image Agent. `pnpm verify` 25/25 green.

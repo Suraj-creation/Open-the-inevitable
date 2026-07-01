@@ -74,6 +74,7 @@ export type {
   FrameArchetype,
   FramePlan,
   FramePlannerUnitDeps,
+  LookaheadEntry,
   PlannableSlot,
   PlannerFrameEntry,
   PlannerFrameIntent,
@@ -86,6 +87,8 @@ export {
   deterministicPlan,
   parseFramePlan,
 } from "./frame-planner-unit";
+export type { ImagePlan, ImagePlannerUnitDeps } from "./image-planner-unit";
+export { ImagePlannerUnit, deterministicImagePlan, parseImagePlan } from "./image-planner-unit";
 export type { InferredIntent, IntentInferenceUnitDeps } from "./intent-inference-unit";
 export {
   IntentInferenceUnit,

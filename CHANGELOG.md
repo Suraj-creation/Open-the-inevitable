@@ -37,10 +37,14 @@ paragraph or a few bullets per milestone. Implementation detail lives in the own
 - **Scope shipped:** Phase 0 (spec law: ADR-0030 + SRF-001/002/004/005 + F16/F09), Phase 1 (vertical slice:
   substrate + `SurfaceComposerUnit` + session frame path with element-targeted narration + frontend
   `FrameStage`/`MccrElement`/`HighlightLayer`, no-scroll, deterministic replay, graceful legacy fallback),
-  the **gateway cutover** (the live product renders the frame path), and **Phase 2** (`FramePlannerUnit` +
+  the **gateway cutover** (the live product renders the frame path), **Phase 2** (`FramePlannerUnit` +
   multi-frame decomposition + practice/assessment frames + `FrameDeck` transitions/N+1 buffering + Observatory
-  Composition panel). `pnpm verify` green (25/25). Phase 3 (governed look-ahead) and Phase 4 (image agent) are
-  the active frontier.
+  Composition panel), **Phase 3** (governed look-ahead: the planner's discardable `lookahead[]` bet, budgeted
+  speculative pre-composition of the next concept's opening frame under a live-governed `lookaheadBudget`,
+  `surface.frame.speculation.prepared`/`.invalidated`/`.promoted` — never surfaced until promoted, provably
+  absent from `frames[]` when invalidated, replay-equivalent), and **Phase 4** (`ImagePlannerUnit` — a governed
+  Image Agent owning image-as-cognition: decide/prompt/refine → prompt + caption + callout labels folded into
+  the MCCR `image` element, rendered by the web `MccrElement`). `pnpm verify` green (25/25).
 
 > **The Universal Cognitive Surface (S-UCS) became an immersive, observable, agent-driven environment** —
 > the whiteboard is now the product; everything else is overlay, HUD, and launcher.

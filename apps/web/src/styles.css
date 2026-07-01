@@ -2263,6 +2263,33 @@
   color: var(--ink-faint);
   text-align: center;
 }
+/* Image-as-cognition (ADR-0030 Phase 4): callout labels annotate the illustration. */
+.mccr-image-frame {
+  position: relative;
+}
+.mccr-image-labels {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-width: 60%;
+}
+.mccr-image-label {
+  font-size: 0.7rem;
+  line-height: 1.25;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  color: var(--ink);
+  background: color-mix(in oklab, var(--surface, #fff) 82%, transparent);
+  border: 1px solid color-mix(in oklab, var(--ink) 14%, transparent);
+  backdrop-filter: blur(4px);
+  animation: rise var(--dur) var(--ease-expo) both;
+}
 .mccr-image--pending {
   height: 22vh;
   border-radius: 8px;

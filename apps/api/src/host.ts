@@ -244,6 +244,12 @@ export class SurfaceHost {
       // UCS (ADR-0030; Phase 2): decompose each concept into a progressive sequence of Cognitive
       // Frames (and render practice/assessment as frames), instead of a single composed frame.
       framePlanner: true,
+      // UCS (ADR-0030; Phase 3): a base look-ahead budget of 1 — after clean mastery the surface
+      // pre-composes the likely next frame (recorded, never surfaced until promoted). Live-governable.
+      lookaheadBudget: 1,
+      // UCS (ADR-0030; Phase 4): the Image Agent owns the image-as-cognition decision (prompt +
+      // caption + callout labels), replacing the composer's inline image_plan on the frame path.
+      imagePlanner: true,
       ...(provider === "gemini"
         ? { evaluationModel: inner, embedFn: (t: string) => inner.embed(t) }
         : {}),
@@ -469,6 +475,10 @@ export class SurfaceHost {
       // UCS (ADR-0030; Phase 2): decompose each concept into a progressive sequence of Cognitive
       // Frames (and render practice/assessment as frames), instead of a single composed frame.
       framePlanner: true,
+      // UCS (ADR-0030; Phase 3): base look-ahead budget of 1 (governed; matches create()).
+      lookaheadBudget: 1,
+      // UCS (ADR-0030; Phase 4): the Image Agent owns image-as-cognition (matches create()).
+      imagePlanner: true,
       ...(provider === "gemini"
         ? { evaluationModel: inner, embedFn: (t: string) => inner.embed(t) }
         : {}),

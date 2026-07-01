@@ -22,6 +22,7 @@ import {
   DeterministicMvpUnit,
   FiberedLearningLoop,
   FramePlannerUnit,
+  ImagePlannerUnit,
   LearningPathProjector,
   MVP_AGENT_MANIFESTS,
   IntentInferenceUnit,
@@ -329,6 +330,7 @@ const DISPATCH_CAPABILITIES = [
   "research",
   "composer",
   "frameplanner",
+  "imageplanner",
 ].map((id) => `dispatch.${id}`);
 
 export interface DemoOptions {
@@ -355,6 +357,20 @@ export interface DemoOptions {
    * single composed frame. Requires `composer` to be on. The gateway sets this; the CLI leaves it off.
    */
   readonly framePlanner?: boolean;
+  /**
+   * Enable the UCS image agent (UCS, ADR-0030; Phase 4): a dedicated governed agent owns the
+   * image-as-cognition decision (decide/prompt + caption + callout labels), replacing the composer's
+   * inline image_plan on the frame path. Requires `composer`. The gateway sets this; the CLI leaves
+   * it off. Absent ⇒ the composer's inline image decision drives generation.
+   */
+  readonly imagePlanner?: boolean;
+  /**
+   * Look-ahead budget (UCS, ADR-0030; Phase 3): how many discardable speculative frames the surface
+   * may pre-compose ahead of the learner per ask. Seeds `LiveEvolutionConfig.lookaheadBudget` (a
+   * governed evolution rollout may then raise/lower it live). 0/absent ⇒ no speculation (the
+   * deterministic default the CLI/tests use). Requires `composer` + `framePlanner`. The gateway sets 1.
+   */
+  readonly lookaheadBudget?: number;
   /**
    * Live progressive-reveal pacing (ms) for the explanation block (S-UCS, ADR-0028). When > 0, the
    * explanation streams as paced `surface.block.delta` chunks before the whole block. Absent/0 ⇒ the
@@ -520,7 +536,12 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
 
   const manifest = (id: string) => MVP_AGENT_MANIFESTS.find((m) => m.id === `agent.${id}`)!;
   // Live evolution config (P5.2, DPS-010 §5): rollout callbacks mutate this; modelUnit reads it.
+  // Seed the look-ahead budget (UCS, ADR-0030; Phase 3) from options so the gateway's base budget is
+  // live-governable (a rolled-out proposal may raise/lower it without a restart).
   const liveConfig = new LiveEvolutionConfig();
+  if (typeof options.lookaheadBudget === "number") {
+    liveConfig.lookaheadBudget = Math.max(0, Math.floor(options.lookaheadBudget));
+  }
   const modelUnit = (role: ModelBackedRole) =>
     new ModelBackedUnit({
       manifest: manifest(role),
@@ -583,6 +604,17 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
       getDepthBias: () => liveConfig.depthBias,
     }),
   );
+  // UCS (ADR-0030; Phase 4) — Image Agent: owns the image-as-cognition decision (decide/prompt/refine),
+  // producing the prompt + an explanatory caption + callout labels, off the composer's shoulders.
+  const imagePlannerDispatcher = dispatcher(
+    "imageplanner",
+    "cog-img-demo",
+    new ImagePlannerUnit({
+      manifest: manifest("imageplanner"),
+      model,
+      idGenerator,
+    }),
+  );
 
   const loop = new FiberedLearningLoop({
     learningPaths: new LearningPathProjector(world),
@@ -635,6 +667,11 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     nodeId: "demo-surface",
     ...(options.composer ? { composerDispatcher } : {}),
     ...(options.composer && options.framePlanner ? { framePlannerDispatcher } : {}),
+    ...(options.composer && options.imagePlanner ? { imagePlannerDispatcher } : {}),
+    // Look-ahead budget (UCS, ADR-0030; Phase 3) is read live from the governed config each ask.
+    ...(options.composer && options.framePlanner
+      ? { getLookaheadBudget: () => liveConfig.lookaheadBudget }
+      : {}),
     ...(options.voice ? { voice: options.voice } : {}),
     ...(options.media ? { media: options.media } : {}),
     ...(options.streamRevealMs ? { streamRevealMs: options.streamRevealMs } : {}),

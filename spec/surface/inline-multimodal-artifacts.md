@@ -111,6 +111,26 @@ Two visual paths, by determinism:
   (no generation, no recording). SRF-006 keeps the two paths distinct: generation is recorded;
   structured rendering is pure.
 
+### 4.1 The Image Agent — image-as-cognition (UCS, ADR-0030 Phase 4)
+
+On the Cognitive Frame path (ADR-0030) the *decision* to generate an image is owned by a dedicated
+governed unit, the **Image Agent** (`agent.imageplanner`, capabilities `image.decide`/`image.prompt`/
+`image.refine`), promoted out of the Surface Composer's inline `image_plan`. In one reasoning pass it
+decides `{ helps, prompt, rationale, caption, labels[] }`:
+
+- `helps` is true only when spatial/visual structure carries meaning the board's text/diagram anchors
+  cannot — an image must **complement** the anchors, never restate them. `helps=false` still records
+  the rationale (why text/diagram sufficed) for observability.
+- When it helps, the agent produces the generation `prompt`, a one-line `caption`, and 2–6 callout
+  `labels` naming the parts a learner should notice — turning a picture into an **explanatory** image.
+- `refine` mode re-plans the prompt from learner/quality feedback after a first generation.
+
+The decision is recorded as `surface.image.decided` (frame-scoped); the caption + labels live on the
+MCCR `image` element (folded into the concept's region). Absent an Image Agent, the composer's inline
+`image_plan` drives generation (Phase 1–3 parity). Generation itself still flows through the SRF-004
+`MediaGenerator` seam below — the agent decides and prompts; it never touches a provider. Deterministic
+fallback: `helps=false` (offline/seeded runs never fabricate media), keeping replay byte-identical.
+
 ## 5. Protocols and Contracts
 
 - Generation uses the SRF-004 `MediaRequest` → `MediaArtifact` contract; the surface never calls a

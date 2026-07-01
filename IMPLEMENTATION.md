@@ -454,8 +454,23 @@ gap from a deterministic single-agent playback to a living cognitive environment
     frame off-stage** (image pre-warm); Observatory `CompositionPanel` surfaces the frame queue (status, MCCR
     anchors, density budget, image decision, look-ahead). Planner wired at the gateway (`framePlanner:true`);
     CLI stays single-frame/legacy. `pnpm verify` 25/25 green.
-    *Active frontier:* Phase 3 (governed look-ahead speculation + `lookaheadBudget` live-config),
-    Phase 4 (Image agent), and `expand()`-on-frames (deferred decision).
+  - *Phase 3 (governed look-ahead)* ✓ — the `FramePlannerUnit` emits a discardable `lookahead[]` bet (each with
+    a `trigger_assumption`); after clean forward progress (mastery ran, no confusion descent) `SurfaceSession`
+    binds it to the next concept in the path and speculatively pre-composes its opening frame within a governed
+    `lookaheadBudget` (`LiveEvolutionConfig` field, raised only by an evolution rollout; `0` in tests/CLI, `1` at
+    the gateway). The full MCCR + narration script + image decision are recorded under `surface.frame.speculation.prepared`
+    but **never voiced or surfaced**; on the next ask a matching focus **promotes** it (`surface.frame.promoted`, a true
+    skip-recompute — the frame keeps its id so its script/image resolve — then voiced), and every diverging bet is
+    **invalidated** (`surface.frame.speculation.invalidated`, provably never copied into `frames[]`). Replay-equivalent
+    (deep-equal folded state across two-ask promote runs).
+  - *Phase 4 (Image agent)* ✓ — `ImagePlannerUnit` (`@inevitable/product-cognition`, `agent.imageplanner`;
+    decide/prompt/refine → `{helps, prompt, rationale, caption, labels[]}`, deterministic `helps=false` fallback)
+    owns the **image-as-cognition** decision, promoted out of the composer's inline `image_plan`. When wired
+    (`imagePlanner:true` at the gateway) it drives generation via the SRF-004 `MediaGenerator` seam and folds an
+    explanatory image (prompt + caption + callout labels) into the MCCR `image` element in the concept's region;
+    the web `MccrElement` renders the caption + labels. Absent the agent, the composer's inline decision is the
+    fallback (Phase 1–3 parity). `pnpm verify` 25/25 green.
+    *Active frontier:* `expand()`-on-frames (deferred decision); richer look-ahead (budget > 1, multi-concept).
 
 These layers are the manifestation of `spec/architecture/Cognitive-Architecture.md` (ADR-0023). Deferred
 research tier (consciously off the critical path): federation, cognitive-ir/isa/compiler, query-engine,
