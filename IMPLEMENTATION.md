@@ -277,6 +277,35 @@ activity timeline) are complete. `pnpm verify` is green across the whole monorep
     `LivingTimeline`; `EnsemblePanel` (proposals + confidence + disagreement + synthesis); in-stream interaction
     controls in `NarrationTrack`; coherent `SurfaceView` layout. **Phase S1 is complete.**
 
+- **The Cognitive Source Environment (CSE) — M1–M10 COMPLETE** — *turning any knowledge artifact into a
+  living, anchored, agent-orchestrated cognitive environment.* Spec domain `spec/source-environment/`
+  (CSE-001…016, ADR-0032…0048); blueprint `spec/implementation-roadmaps/cse-implementation-blueprint.md`.
+  Every capability that reasons is model-backed (real Gemini, D3-recorded), deterministic where it can be,
+  and **gateway-on / CLI-untouched** (a website capability). Two new packages: `@inevitable/source-environment`,
+  `@inevitable/intelligence`; the evaluation package (S4) is the 25th. `pnpm verify` green (28 tasks).
+  - **Substrate (M1–M3.5).** `@inevitable/source-environment`: the **Source Anchor** (≥2 selectors, pure
+    resolution, cross-version migration), content-addressed versions, the eight-layer artifact model,
+    progressive canonicalization behind modality adapters, the `source.*` family, the replay fold.
+    **M3** made canonicalization governed cognition (privileged `canonicalizer` agent → semantic + citation
+    layers, grounded at the parser). **M3.5 (ADR-0035)** — the **Cognitive Intelligence Persistence** plane
+    (`@inevitable/intelligence`): chronicle + governed distillers turn reasoning into durable, re-derivable
+    intelligence artifacts. **M2 (ADR-0034)** — Supabase adapters behind the eight-contract seam.
+  - **Modalities.** **PDF** (M4, ADR-0036, binary seam, client-native fidelity by hash); **code** (M10 T1,
+    ADR-0046), **web** (M10 T2, ADR-0047, client-supplied HTML), **video** (M10 T3, ADR-0048 — a timed
+    transcript → the **L4 temporal layer**, its first implementation). One `parse`/`parseBinary` seam; the
+    whole pipeline works over each unchanged. **M10 complete.**
+  - **Learner-visible surface (M5–M6).** The **Living Reference** (M5) — source viewports + semantic
+    highlight grammar + the attention contract; the **Meaning Representation Layer** + episodes + resume
+    cards + Understanding Map (M6, ADR-0037).
+  - **The Cognitive Theater (M7–M8, ADR-0038/0039).** The **Director** (authored pedagogy FSM), the
+    **Scene** (frames as living spaces), **Cinematography** (shot grammar, reduced-motion conformant), the
+    **Interaction Grammar** (learner-as-actor reshaping the Scene).
+  - **Living knowledge (M9).** **Source Fusion** — deterministic reconciliation (T1, ADR-0040), the **Claim
+    Graph** + cross-source contradiction detection (T2, ADR-0041), the model-woven **fused explanation**
+    (T3, ADR-0042); **frontier overlays** via real governed web grounding (ADR-0043), the **Temporal
+    Knowledge Model** (ADR-0044), and the **grounded proactive frontier** (ADR-0045 — the S3 readiness gate
+    now surfaces the real, cited frontier). CSE-006 living knowledge is complete.
+
 ## Traceability Map
 
 Every package derives from its governing spec; code that violates spec contracts is invalid
@@ -300,8 +329,11 @@ implementation even if it works locally.
 | `@inevitable/world-state` | world-state/world-state-graph, DPS-006 | delta protocol, materialized graph, acyclicity, snapshots, **`KnowledgeGraphEngine`** (concept seeding, prereq decomposition, learner-state queries, cross-domain bridges, ADR-0015) |
 | `@inevitable/context` | persistence/context-lease-bounded-retrieval (DPS-005), kernel/context-lease, memory/memory-tiers | `ContextAssembler` (VectorStore-backed, lease-bounded working-memory assembly), deterministic local embedding |
 | `@inevitable/adapters` | interop/infrastructure-adapters (ADR-0005), protocols/model-invocation, surface/multimodal-provider-abstraction, persistence/durable-cognitive-persistence (ADR-0008), ADR-0019 | in-memory reference adapters + conformance harness; NATS/Qdrant/Neo4j/Postgres (edge-provisioned); **`FileEventTransport`** (durable JSONL event log); Null/Gemini/Recording model runtimes (D3 seam); Null/Gemini **voice runtimes** (SRF-004, out-of-band WAV); **`InMemoryToolRuntime`** (governed `tool.*` invocation with capability check + event emission, ADR-0019) |
-| `@inevitable/product-cognition` | product/product-cognition-runtime, agents/supervisor-agent, protocols/model-invocation, kernel/intent-inference + capability-registry, features F01–F07/F13/F14, ADR-0016, DPS-009 | onboarding, path projection, manifests, governed dispatch (GOV-P01/P02/**P03 capability gate**), supervisor routing, fibered learning loop, mastery checkpoints, **ModelBackedUnit (F04 all 7 layers 0–6; adaptive depth from KG; assembled context in prompts)**, CurriculumUnit (goal → concept DAG, PCR §12), **IntentInferenceUnit** (goal → intent lease), **`TwinRegistry`** (consent-scoped digital twin lifecycle; create/branch/export/terminate; `twin.*` events, ADR-0020) |
-| `@inevitable/surface` | surface/ (SRF-001…004), features F09/F16 | cognition blocks, surface.\* events, timeline projection, contribution runtime, fold/replay, trace capture, provider registry, SurfaceSession (+ expand), **`SurfaceChoreographer`** (narration/focus/presence choreography, ADR-0007) |
+| `@inevitable/product-cognition` | product/product-cognition-runtime, agents/supervisor-agent, protocols/model-invocation, kernel/intent-inference + capability-registry, features F01–F07/F13/F14, ADR-0016, DPS-009 | onboarding, path projection, manifests, governed dispatch (GOV-P01/P02/**P03 capability gate**), supervisor routing, fibered learning loop, mastery checkpoints, **ModelBackedUnit (F04 all 7 layers 0–6; adaptive depth from KG; assembled context in prompts)**, CurriculumUnit (goal → concept DAG, PCR §12), **IntentInferenceUnit** (goal → intent lease), **`TwinRegistry`** (consent-scoped digital twin lifecycle; `twin.*` events, ADR-0020); **the CSE cognition units + privileged agents** — `canonicalizer` (semantic/citation, M3), `meaning` (MRL, M6), `claim` (extract/contrast, M9 T2), `synthesis` (fused explanation, M9 T3), `frontier` + `temporal` (web-grounded frontier/timeline, M9); `Source{Canonicalization,Meaning}`/`ClaimGraph` services |
+| `@inevitable/surface` | surface/ (SRF-001…004), features F09/F16 | cognition blocks, surface.\* events, timeline projection, contribution runtime, fold/replay, trace capture, provider registry, SurfaceSession (+ expand), **`SurfaceChoreographer`** (narration/focus/presence, ADR-0007); **the Cognitive Theater** (Director FSM, Scene, Cinematography, Interaction Grammar; CSE-011…014, ADR-0038/0039); **Cognitive Frames + MCCR** (ADR-0030); **source–surface projection** (Living Reference, CSE-008); the **grounded-frontier readiness seam** (`SurfaceFrontierProvider`, ADR-0045) |
+| `@inevitable/source-environment` | source-environment/CSE-001…016 (ADR-0032/0036/0040/0041/0042/0043/0044/0046/0047/0048) | the **Source Anchor** (multi-selector, pure resolution, migration), content-addressed versions, eight-layer artifacts, progressive canonicalization, the `source.*` family + replay fold; modality adapters (**markdown/text**, **PDF** binary, **code**, **web** HTML, **video** transcript + **L4 temporal layer**); **Source Fusion** primitives + `reconcileConcept`/`detectContradictions`; the **Claim Graph**, **Frontier Overlay**, and **Temporal (ConceptTimeline)** types |
+| `@inevitable/intelligence` | intelligence/CIP-001/002 (ADR-0035) | the **Cognitive Intelligence Persistence** plane: 7 deterministic distillers (episode/understanding-delta/misconception/intervention/strategy/collaboration/consolidation) as pure folds, `distillSession` orchestrator, `intelligence.*` family, learner/shared regimes + redaction |
+| `@inevitable/evaluation` | evaluation/ (ADR-0027), Cognitive-Architecture Layer 2 | `CognitiveEvaluationEngine` (UALRCI explanation scorecard, research scorecard, `evaluation.reasoning.completed`), `BenchmarkRunner` (D0), `EVALUATION_PASS_THRESHOLD`; the evolution/ surface evaluation gate |
 | `@inevitable/cli` (app) | surface/, product/product-cognition-runtime, protocols/model-invocation | demo composition root: full governed substrate wired into one terminal surface (`pnpm demo`) |
 | `@inevitable/api` (app) | surface/surface-streaming-sync-protocol (SRF-005), ADR-0006…0014, product/product-cognition-runtime §12, persistence/{durable-cognitive-persistence, cognitive-continuity-and-rehydration, durable-learner-identity, shared-learner-cognition, context-lease-bounded-retrieval}, kernel/{intent-inference, capability-registry} | Surface Gateway: node:http SSE stream + typed command envelope, governed boundary, `gateway.*` observability, per-goal curriculum generation, `.env`/Gemini, out-of-band media route + Gemini/Null voice wiring, durable persistence + cross-process resume (`COS_PERSIST_DIR`; `ServedSurface` seam, `File{EventTransport,MediaStore}`), live rehydration, **durable `LearnerRegistry`** (resume-by-learner via `GET /api/learner/:id`; per-learner cognition profile seeds prior mastery); each ask runs **intent inference** + **lease-bounded context assembly** under the **capability gate** |
 | `@inevitable/web` (app) | surface/surface-streaming-sync-protocol (SRF-005), surface/ (SRF-001), ADR-0007, F09/F16 | Vite + React **Cognitive Stage**: folds the live stream (`@inevitable/surface/client`); `useChoreographer` playback (narration/focus/presence, audio); block-renderer registry (provider-agnostic) |
@@ -309,7 +341,232 @@ implementation even if it works locally.
 | `@inevitable/mcp` (app) | cognitive-developer-platform/SDK-001, ADR-0022 | **MCP stdio server** — only COS dep is `@inevitable/sdk`; pure JSON-RPC 2.0 router (~70 lines, no external MCP SDK); 4 tools (`cos_create_surface`, `cos_ask`, `cos_expand`, `cos_get_state`); `COS_API_URL` env-var configured |
 | `@inevitable/data-plane` (service) | telemetry/otel-edge, data-plane/ | OTel SDK bootstrap (edge) + bus→OTel observability sink |
 
-## Active Frontier — the architectural roadmap (gap analysis → phased build)
+## Active Frontier — CSE production readiness (R0 integrity + R1 Source Dock shipped, 2026-07-18)
+
+A production-readiness audit (`spec/research/cse-production-readiness-audit-2026-07.md`) found the
+CSE substrate real (9/10) but the learner experience missing (3/10): no acquisition UI, a volatile
+source plane, a web app that never closed sessions, and title-string practice heuristics. The audit's
+roadmap R0 (integrity) + R1 (the front door) are now shipped:
+
+- **R0 — integrity & durability (ADR-0055).** The source plane is durable under `COS_PERSIST_DIR`:
+  a pure-`node:fs` `SourcePlanePersistence` (atomic catalog + content-addressed bytes) persists every
+  mutation, and `SourceHub.rehydrate()` replays registrations under their ORIGINAL ids
+  (`registerVersion` gained an explicit `version_id`) — so a **consent revocation survives a restart**
+  (content route still 410 Gone; commons stays delisted), and a rehydrated surface rebinds its sources
+  from its own event log. The web now **closes the session on `pagehide`** (keepalive fetch) so
+  intelligence distillation (episodes/deltas/resume cards) fires for web learners. Contribution emits
+  `surface.source.attached` (fold/server agree). Frames carry a typed `kind`
+  (`teach|practice|assessment|checkpoint`; SRF-002 schema 1.10.0) — the retired
+  `title.startsWith("practice")` heuristic is now a pre-1.10.0 replay fallback only.
+- **R1 — the Source Dock (CSE-017, ADR-0056).** A learner brings a source in-product: the `＋ Source`
+  affordance opens a dock with file drag/drop + picker (PDF bytes / markdown / text / code / transcript),
+  a URL field (governed crawl), and a paste path — with extension-based modality inference, **honest
+  refusal before upload** for unadaptered formats (epub/pptx/ipynb/docx/audio/image), a canonicalization
+  narrative built from the registration summary's own `layers_available`/`degraded_layers`/`usable`,
+  and auto-attach so the Living Reference appears. The gateway caps uploads at 25 MiB (413). The
+  audit's severest gap — zero web callers of `/api/sources` — is closed.
+
+- **R2 — source-anchored teaching (the pipeline inversion; ADR-0057, CSE-008 §15, CSE-011 §11).** The
+  heart of the vision: the source is now the medium of teaching, not a witness beside it. Every
+  sub-phase falls back to today's goal-mode when no source is bound, so nothing regresses.
+  - **R2a** — source evidence flows INTO the frame-planner + composer prompts (`sourceExcerptsFor`
+    resolves the concept's anchored passages *before* dispatch → `source_excerpts` in the packet;
+    both units engage a "SOURCE MODE" directive and teach *from* the passage, quoting it).
+  - **R2b** — the Director selects the source region: `focus.source_anchor_ref` is populated (was
+    structurally `null`), fulfilling CSE-011 §4.
+  - **R2c** — "Teach this source" mode: `SourceHub.curriculumFor` derives the curriculum from the
+    document's own L2 concepts (prerequisite-ordered) or L1 heading outline; `POST
+    /api/surface/:id/teach-source` walks it — **the document becomes the timeline**.
+  - **R2d** — semantic narration↔anchor sync replacing positional `min(i, n−1)`: each segment binds
+    to the anchor its text discusses (lexical entailment), the highlight role is typed from the MCCR
+    slot (definition/misconception/mathematical-focus…), and an **entailment gate** degrades a
+    non-supported segment to NO highlight — never a wrong pointer (the audit's visual-authority risk).
+  - **R2e** — source-as-stage: when actively teaching from a source (viewport plans present), the
+    document takes the stage and the MCCR board recedes to a companion gloss column (spatial
+    contiguity). A source merely attached for fusion stays an aside.
+  - Proven end-to-end deterministically (`apps/api/tests/teach-source.test.ts`: register → attach →
+    teach-source → the timeline is the document's sections, a viewport plan exists, and the Director's
+    focus anchor is populated) plus unit tests for the source-fed prompt, the Director anchor, the
+    semantic binder + gate, and the source-stage layout. `pnpm verify` green.
+
+- **R3 — render the Theater (COMPLETE; ADR-0057; CSE-011 §11, CSE-012 §-impl, CSE-013 §-impl).** The
+  shot grammar, Director pacing, Scene lighting, and derivations were emitted/folded but dead at
+  render; R3 wires the web consumers + the one missing producer (no new architecture; all
+  reduced-motion-safe).
+  - **R3a** progressive derivation — a multi-line `key_formula` stages its lines in sequence while it
+    is the spoken element (the whiteboard feel); all lines present at once under reduced-motion.
+  - **R3b** Director pacing — the inter-segment playback hold derives from the directive's `pacing`
+    (tempo scales the pause; `silence` holds the surface still), replacing the fixed 1400 ms constant.
+  - **R3c** cinematography shots — the active Scene's latest shot realizes as a subtle board move
+    (`data-shot` → per-kind CSS), gated under `prefers-reduced-motion: no-preference`.
+  - **R3d** Scene lighting — receded actors dim gently (the focus reads first; the spoken element is
+    never dimmed; readability preserved).
+  - **R3e** attention budget + affect — the theater path now PRODUCES `surface.attention.budgeted`
+    (a folded-but-unemitted slice, session-time heuristic); the sensed affect + a low budget render
+    as a learner-visible, opt-out chip (CSE-005 §3.5 — sensing legible, never a hidden score).
+
+- **R4 — Representation Intelligence (Production Goal II; spec + R4a foundation; CSE-018, ADR-0058).**
+  Representation becomes a governed cognitive capability. The full design is spec law (CSE-018: the
+  `RepresentationPlan`, ten representation laws, MCCR 2.0 grammars, deterministic-fallback rollout).
+  - **R4a** the safe foundation: `surface.representation.planned` (SRF-002 1.11.0) folds into a
+    `representations` slice; a deterministic `planRepresentation` maps each frame element onto a
+    hierarchy (primary/supporting/residue) + epistemic role (canonical/definition/misconception/…).
+    Parity metadata over the same elements — a frame with no plan renders identically, so the RIA
+    can never regress a frame.
+  - **R4b** the roles render — each element carries `data-epistemic-role`/`data-hierarchy`; the CDL
+    tints its kind-tag by role (a separate semantic layer from element type).
+  - **R4c** the derivation grammar — `key_formula.line_labels[]` (transformation captions) flow
+    composer → fold → render → deck; a derivation reads as constructed reasoning (Law 2).
+  - **R4d** the density verdict — `{count, budget: 8, within_budget}` (Law 3); over-budget frames
+    flagged (the split-upstream signal).
+  - **R4-model** the model-backed `agent.representation` unit (mirrors `ImagePlannerUnit`): assigns
+    each element's epistemic role + hierarchy, grounded to the composer's actual elements, with an
+    exclusion list + adaptivity note; **degraded-empty fallback → the deterministic floor** so a
+    model failure never regresses a frame. Wired end-to-end (manifest, dispatcher, session dep,
+    `buildDemoSession` option, gateway `representation: true`).
+  - **R4e** the MCCR 2.0 render-grammar set completes (all additive/replay-safe/reduced-motion-safe):
+    **misconception-dissolve** (composer `{wrong, correction}` → `misconception` content kind; wrong
+    struck-through resolving into the correction, Law 2), **image rationale** (Law 9 — the recorded
+    "why this image" surfaced as a web disclosure), **process/algorithm** (new `process` element,
+    step-by-step reveal), **code** (new `code` element, language-tagged, taught lines annotated).
+    algorithm/process ✓ + code ✓ + graph/structure (already served by `diagram` kinds).
+  - **Law 8 (expertise-reversal)** closes R4: `planRepresentation` takes an optional `expertise` —
+    an expert recedes pure-scaffold supporting anchors (worked examples, analogies) to `residue`;
+    novice/intermediate keep the floor; absent ⇒ un-adapted parity (`adaptivity: null`). The plan
+    carries `adaptivity` (folded + exported) and `planRepresentationFor` now keeps the model RIA's
+    adaptivity note (previously discarded). Threaded via an optional `getExpertise` session dep
+    (live mastery-derived signal deferred). **R4 = all of Production Goal II delivered.**
+
+**Next:** **R5** compounding & breadth. Deferrals carried:
+model-backed "expert-gaze" anchor
+ranking (lexical today); per-segment shot binding + 14-kind motion tuning (live visual); the full
+attention-depletion model; a Gemini-live E2E; Supabase-first source-plane persistence; server-side
+idle-close; retroactive downstream redaction; DNS-rebinding hardening; the missing adapters
+(epub/notebook/presentation/audio/dataset/image); video ASR + concept scrubber.
+
+## Prior Frontier — UCS production hardening (ADR-0031, 2026-07-09, complete)
+
+The surface's production-hardening pass (ADR-0031, answering the July review's remaining gaps)
+shipped across all layers, `pnpm verify` green:
+
+- **Exactly-once narration** — audio lifecycle extracted into `NarrationPlayer`
+  (`apps/web/src/narration-player.ts`): one session per segment_id, epoch + AbortController guards
+  on every async edge, text-pacing degradation on any audio failure, `readyState`-gated
+  audio-clock progress, and a leaf-subscribed progress store (word caption re-renders one line,
+  never the tree). The playback effect keys on segment identity — fold churn can no longer restart
+  audio (the "narration repeats" root cause). 13 deterministic fake-clock tests pin the state
+  machine. SSE ingestion batches per animation frame with event-id watermark dedupe.
+- **Density law + MCCR 1.5.0** — composer contract rewritten (5–7 anchors typical, ≤8; worked
+  examples; complete definitions; never filler, never a dropped formula/diagram/misconception);
+  new `misconception` element type end-to-end (contract → planner → composer → fold → board with
+  ember identity → deck export); `key_formula.lines[]` multi-line derivations; `diagram.kind:
+  "cycle"` with edge-chain ring layout.
+- **KaTeX** — publication-grade math behind the `latexToHtml` seam: lazy chunk, in-place upgrade
+  via `useSyncExternalStore`, dependency-free instant fallback retained for first paint/SSR/tests.
+- **Semantic visual grammar** — per-role identity from the 8 CDL state hues at structural
+  amplitude (formula/example/mental-model/misconception/memory-cue/table role tags + edges);
+  diagram node `group` → deterministic palette; real axis lines on `axes` diagrams; table rows
+  beyond 8 disclose on the focus plane (never silently truncated); synchronized `breathe`.
+- **Ask pipeline** — `surface.ask.progress` events + `ask_progress` fold slice + Voice Line phase
+  display (an ask is never silent); one-ahead compose/voice pipeline in `planAndComposeFrames`
+  (frame N+1 composes while N is voiced; interrupt honored between frames); speculation detached
+  from the ask's critical path with a `settle()` quiescence law; one-ask-at-a-time guard.
+- **Truthful degradation** — `E_MODEL_OUTPUT_TRUNCATED` on `max_tokens` in composer/planner/image
+  units; image generation retry + full planner prompt reaching the provider (was truncated to 120
+  chars); failed image artifacts keep caption+labels on the board.
+- **Observatory as OS inspector** — cognition-health panel (per-unit fallback counts), playback
+  diagnostics, and a searchable raw event inspector (`EventInspector`) over the streamed log.
+- **Downloadable session** — `buildDeckModel` (pure, tested) + lazy pptxgenjs renderer
+  (`apps/web/src/export/`): one frame ⇒ one slide in the CDL language, native vector diagrams,
+  narration as speaker notes, path cover; Deck button in the top bar.
+
+Spec artifacts: `spec/architecture-decisions/ADR-0031-ucs-production-hardening.md`; SRF-002 §12
+records schema 1.5.0. **Next:** live gateway pass with real Gemini to validate density/pipeline
+behavior under real latency; persona-differentiated composition; cross-session return.
+
+## Prior Frontier — Cognitive Design Language rollout
+
+**CDL v1 shipped (2026-07):** the permanent design language (`spec/design/cognitive-design-language-v1.md`)
+is live across the web surface — token layer rewritten (warm graphite field, 7 depth planes,
+8 cognitive-state hues at 3 amplitudes, type roles, motion vocabulary), the floating transport HUD
+replaced by the **Voice Line + Thread of Understanding** (ambient→available chrome, ≤2.5rem steady
+state), the top-bar status cluster + red DEGRADED banner replaced by the **System Gem** (calm
+light; ember ring for degradation), fixed-bottom collisions eliminated via **stage-owned slots**
+(practice answer / frontier / continue live in the layout), scale-to-fit replaced by **density
+recomposition** (fold→disclosure chips→focus plane; bidirectional with anti-oscillation;
+`useDensityRecomposition`), anchor hierarchy (Canon/Gloss/Working/Whisper roles), focus recession,
+form/continue frame transitions, collision-safe graph labels, and glass (P5) overlays.
+Audit + rationale: `spec/design/proposals/`. Verified: `pnpm verify` green; visual pass at
+1536/834/500 viewports.
+
+**CDL v1.1 shipped (Phase 7 first tranche, 2026-07-04):** shared-element FLIP continuity (the core
+concept morphs across a continuing frame; `FrameDeck` + Web Animations API), a deterministic
+force-directed **constellation** Path view (seeded, replay-safe, hard overlap resolution;
+`TimelineGraph`), the **`consolidate`** motion (a mastered concept crystallizes into a gold mote
+that drifts into the Path; `ConsolidationLayer`), and **self-hosted fonts** (woff2 latin subset in
+`apps/web/public/fonts/`, preloaded — no Google Fonts CDN). CDL spec §13 updated. `pnpm verify`
+green.
+
+**CDL v2 + the public landing shipped (Phase 6, 2026-07-04):** the design language evolved into the
+**cinematic cognitive world** (`spec/design/cognitive-design-language-v2.md`, ACTIVE — continuous
+space not screens, evolved Liquid Glass with lens tier, camera/morph motion vocabulary, always-on
+living-cognition substrate, hybrid WebGL+video+glass rendering, animation hierarchy). The landing
+(`apps/web/src/landing/`, route `/`) is **one continuous journey** — a single WebGL particle system
+(deterministic seeded morph targets, `formTargets.ts`) that transforms mote → curiosity → neuron →
+knowledge graph (real surface capture in lens glass) → companion → ascent → civilization → the
+paradigm ending ("…Universal Cognitive Infrastructure scales understanding" → The Inevitable),
+scroll-scrubbed by one clock (`cdl/world.ts` anchors + `landing/progress.ts`), with legibility
+scrims, a full static reduced-motion/no-WebGL narrative fallback, and code-split three.js (main
+bundle 90KB gz; World lazy 230KB gz). Spatial `descend`/`ascend` + responsive unfold also landed
+(Phase 7 close). Storyboard: `spec/design/proposals/landing-experience-storyboard.md`.
+**Blocked externally:** the 7 Higgsfield cinematic loops await a workspace plan upgrade
+(`job_minimum_basic_plan_required`); composition slots ready.
+
+**The public ecosystem shipped (2026-07):** the site is now the complete company website of UCI on
+one design language — Home (the journey) + eight regions (`/vision /philosophy /surface /source
+/infrastructure /research /roadmap /about`) built from corpus-grounded copy and CDL primitives
+(`apps/web/src/site/`: Page scaffold with per-page state grade + deterministic 2D Ambient
+substrate, whisper-glass SiteNav with state-light locator + mobile disclosure, SiteFooter, Reveal/
+PageHero/Section/GlassCard/Quote/LensFigure/NextStep, law-list/pipeline/ladder/stat treatments).
+react-router-dom with route-level code-splitting (pages ~2–3KB gz); `?s=` surface links enter
+cognition from any path; enter flow at `/enter`; journey ends into the ecosystem footer (spacer-
+scoped progress); SEO meta + og + SVG favicon. Verified: `pnpm verify` green (66 web tests),
+production build clean, visual pass at 1440/500 incl. mobile nav. **Next:** generate + composite
+the film when credits exist; CDL v2 §19.3 surface uplift; SSG/prerender for page SEO if the site
+is deployed publicly.
+
+## Prior Frontier — UCS experience alignment (review-driven, complete)
+
+The comprehensive implementation review (`spec/research/ucs-implementation-review-2026-07.md`) established
+that the **architecture is faithful but the learner experience is not** (4.5/10). The current frontier is
+closing that gap, subsystem by subsystem. **Three hardening passes shipped** (see CHANGELOG /
+implementation-log): **(1) model reliability** — `thinkingBudget` + 60s timeouts + higher budgets +
+schema sanitize + partial-MCCR salvage, so the Frame Planner / Image Agent / composer stop silently
+falling back; **(2) demo fixture killed at the gateway** — real `SystemClock`, clock-relative leases,
+real frame-path work timings, record-honest image decisions; **(3) visual cognition** — dependency-free
+math rendering, per-kind diagram layouts, table-overflow cue, sparse-frame composition, title-dedup;
+**(4) narration/highlight/choreography** — `pause_after` honored end-to-end, highlight geometry + scale
+fixed, audio-failure fallback (no more permanent stall); **(5) the learning loop** — path-scoped
+`advance` (teach next concept on the same path, no curriculum regen; continue ribbon; path-clicks teach),
+learner identity (bearer token) + dev persistence so understanding compounds across sessions; **(6)
+honest pedagogy** — the real practice problem on the board, no fabricated 5/5 gate, honest checkpoint
+labels; **(7) cognitive color language** + stranded-token repair + ask-echo/error states; **(8)
+correctness** — narration fold dedupe, SSE subscribe-before-replay, per-surface command serialization;
+**(9) earned mastery** — a Grader agent (`AssessmentUnit`) grades the learner's real answer into
+evidence-bearing depth tests + an honest gate (offline → recorded/ungraded, never fabricated), with an
+answer panel on practice frames; **(10) fallback health** — `surface.cognition.degraded` folded into a
+health slice + a "degraded" HUD badge; **(11) staged reveal** — MCCR elements arrive as the narration
+reaches them; **(12) Observatory truth + a11y** — image prompts surfaced, friendly agent names,
+keyboard-activatable timeline nodes; **(13) UI/UX last mile** — overlay focus-trap + restore, persistent
+HUD, touch targets, non-blocking fonts, type/motion floor (§17/§23); frame-level transport + named ticks,
+research-frontier nudge, URL resume/share (§21/§24); a **manipulable board** (per-anchor Simpler/Deeper/
+Why? reshaping), mastered-concept gold-leaf identity, "another view" for disagreement (§11/§12/§16);
+pipeline-phase progress narration, reshaping-verb ack, Observatory learner/operator split (§9/§18).
+**Remaining (needs external assets / non-UI, own passes):** vendored woff2 self-host; live image
+generation end-to-end; incremental client fold (perf, touches replay-equivalence); hard-gating
+advancement on a passed answer.
+
+## Prior Frontier — the architectural roadmap (gap analysis → phased build)
 
 A Chief-Architect gap analysis (three parallel substrate/spec/product audits) established the
 sequencing: the substrate's cognitive path is PRODUCTION-grade, but everything was in-memory. **P1

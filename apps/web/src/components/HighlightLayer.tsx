@@ -17,36 +17,46 @@ interface Rect {
 }
 
 export function HighlightLayer({
-  stageRef,
+  containerRef,
   elementId,
+  scale = 1,
 }: {
-  readonly stageRef: React.RefObject<HTMLElement | null>;
+  /** The marker's positioned ancestor (`.frame-fit`) — measurements are relative to THIS box, and
+   *  the target is queried within it, so the marker sits exactly over the anchor. */
+  readonly containerRef: React.RefObject<HTMLElement | null>;
   readonly elementId: string | null;
+  /** The fit-to-viewport scale applied to the container; measured screen deltas are divided by it so
+   *  the marker's local transform is not scaled twice. */
+  readonly scale?: number;
 }) {
   const [rect, setRect] = useState<Rect | null>(null);
 
   useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage || !elementId) {
+    const container = containerRef.current;
+    if (!container || !elementId) {
       setRect(null);
       return;
     }
-    const target = stage.querySelector<HTMLElement>(`[data-element-id="${cssEscape(elementId)}"]`);
+    const target = container.querySelector<HTMLElement>(
+      `[data-element-id="${cssEscape(elementId)}"]`,
+    );
     if (!target) {
       setRect(null);
       return;
     }
 
     const measure = (): void => {
-      const s = stage.getBoundingClientRect();
+      const c = container.getBoundingClientRect();
       const t = target.getBoundingClientRect();
-      // Pad slightly so the marker reads as "around" the anchor.
+      // getBoundingClientRect is post-transform (scaled) screen space; the marker lives INSIDE the
+      // scaled container, so convert the delta back to the container's local (unscaled) coordinates.
+      const k = scale > 0 ? scale : 1;
       const pad = 6;
       setRect({
-        top: t.top - s.top - pad,
-        left: t.left - s.left - pad,
-        width: t.width + pad * 2,
-        height: t.height + pad * 2,
+        top: (t.top - c.top) / k - pad,
+        left: (t.left - c.left) / k - pad,
+        width: t.width / k + pad * 2,
+        height: t.height / k + pad * 2,
       });
     };
 
@@ -55,7 +65,7 @@ export function HighlightLayer({
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== "undefined") {
       ro = new ResizeObserver(measure);
-      ro.observe(stage);
+      ro.observe(container);
       ro.observe(target);
     }
     const raf = typeof requestAnimationFrame !== "undefined" ? requestAnimationFrame(measure) : 0;
@@ -63,7 +73,7 @@ export function HighlightLayer({
       ro?.disconnect();
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [stageRef, elementId]);
+  }, [containerRef, elementId, scale]);
 
   if (!rect) return null;
   return (

@@ -1,0 +1,333 @@
+/*
+ * The cinematic cognitive journey (CDL v2). The World (WebGL) and the still-point stage are fixed;
+ * a tall spacer scrolls "time". Text always sits on a legibility gradient over the cinema; nothing
+ * hard-cuts. The static variant (reduced-motion / no-WebGL) flows normally and reads fully.
+ */
+
+.landing {
+  position: relative;
+  width: 100%;
+  background: var(--void);
+}
+
+/* The fixed WebGL world + its grade + vignette. */
+.landing-world {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.world-canvas {
+  position: absolute !important;
+  inset: 0;
+  display: block;
+}
+/* Documentary cinema beneath the transparent world — surfaces at the movements it belongs to. */
+.landing-cinema {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.06);
+  will-change: opacity;
+}
+/* The world layer itself provides the void now that the canvas is transparent. */
+.landing-world {
+  background: var(--void);
+}
+/* Atmospheric grade wash driven by journey progress (--p); a whisper of warmth over the cinema. */
+.landing-grade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    120% 90% at 50% calc(120% - var(--p, 0) * 90%),
+    color-mix(in oklab, var(--state-mastery) 10%, transparent),
+    transparent 60%
+  );
+  opacity: 0.6;
+  mix-blend-mode: screen;
+}
+/* Cinematic vignette — focuses the eye, deepens the void at the edges. */
+.landing-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 120% at 50% 50%, transparent 52%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+/* Whisper top bar — wordmark + skip-to-surface, always reachable. */
+.landing-topbar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s-4) clamp(var(--s-4), 4vw, var(--s-7));
+  pointer-events: none;
+}
+.landing-topbar > * {
+  pointer-events: auto;
+}
+.landing-wordmark {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  font-size: var(--t-sm);
+}
+.landing-wordmark .brand-mark {
+  color: var(--accent);
+}
+.landing-skip {
+  border: var(--glass-edge);
+  background: var(--glass-tint);
+  -webkit-backdrop-filter: var(--glass-blur-whisper);
+  backdrop-filter: var(--glass-blur-whisper);
+  color: var(--ink-soft);
+  border-radius: var(--r-pill);
+  padding: 0.35rem 0.9rem;
+  font-size: var(--t-2xs);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition:
+    color var(--t-quick) var(--ease-soft),
+    border-color var(--t-quick) var(--ease-soft);
+}
+.landing-skip:hover {
+  color: var(--ink);
+  border-color: var(--hairline-strong);
+}
+
+/* The fixed stage — still-points layered; the driver toggles their opacity. */
+.landing-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.still-point {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: clamp(1.5rem, 6vw, 6rem);
+  will-change: opacity, transform;
+}
+/* Legibility scrim (CDL v2 §9): text never sits on full-brightness cinema. The scrim rides the
+   still-point's own opacity, so it dims the world only while an idea is legible. */
+.still-point::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    58% 52% at 50% 50%,
+    color-mix(in oklab, var(--void) 78%, transparent) 0%,
+    color-mix(in oklab, var(--void) 45%, transparent) 55%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+.still-inner {
+  position: relative;
+}
+.still-inner {
+  max-width: min(760px, 92vw);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-4);
+  pointer-events: auto;
+}
+.still-eyebrow {
+  font-size: var(--t-2xs);
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--state-tint, var(--accent)) 60%, var(--ink-faint));
+}
+.still-canon {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-weight: 480;
+  font-size: var(--t-cine-canon);
+  line-height: 1.04;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  text-shadow: 0 2px 40px rgba(0, 0, 0, 0.5);
+  max-width: 20ch;
+}
+.still-canon--wordmark {
+  font-size: clamp(2.8rem, 8vw, 6rem);
+  letter-spacing: -0.02em;
+  color: transparent;
+  background: linear-gradient(
+    180deg,
+    var(--ink),
+    color-mix(in oklab, var(--state-mastery) 60%, var(--ink))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.still-gloss {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: clamp(1.05rem, 1.9vw, 1.3rem);
+  line-height: 1.55;
+  color: var(--ink-soft);
+  max-width: 54ch;
+}
+/* Ladder rungs (M5). */
+.still-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-4);
+  justify-content: center;
+}
+.still-label {
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--state-tint, var(--accent)) 55%, var(--ink-soft));
+}
+/* Paradigm reveal (M7). */
+.still-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: var(--s-3);
+}
+.still-line {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: clamp(1rem, 1.8vw, 1.25rem);
+  color: var(--ink-faint);
+}
+.still-line--key {
+  color: var(--ink);
+  font-style: italic;
+}
+
+/* The real product, framed in lens glass (M3): the landing shows the true surface, not a fiction. */
+.still-lens {
+  margin: var(--s-2) 0 0;
+  width: min(720px, 88vw);
+  padding: 0.5rem;
+  border-radius: var(--r-lg);
+  border: var(--lens-edge);
+  background: var(--lens-tint);
+  -webkit-backdrop-filter: var(--lens-blur);
+  backdrop-filter: var(--lens-blur);
+  box-shadow: var(--lens-thickness), var(--lens-caustic), var(--shadow-e4);
+}
+.still-lens img {
+  display: block;
+  width: 100%;
+  border-radius: calc(var(--r-lg) - 6px);
+}
+
+/* CTA — lens glass that responds with light. */
+.still-cta-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  margin-top: var(--s-3);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.still-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 0.7rem 1.5rem;
+  border-radius: var(--r-pill);
+  border: var(--lens-edge);
+  background: var(--lens-tint);
+  -webkit-backdrop-filter: var(--lens-blur);
+  backdrop-filter: var(--lens-blur);
+  color: var(--ink);
+  font-size: var(--t-base);
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: var(--lens-thickness), var(--lens-caustic);
+  transition:
+    transform var(--t-quick) var(--ease-spring),
+    box-shadow var(--t-quick) var(--ease-soft);
+}
+.still-cta:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    var(--lens-thickness),
+    0 0 90px -14px color-mix(in oklab, var(--state-tint, var(--accent)) 60%, transparent);
+}
+.still-cta--final {
+  background: color-mix(in oklab, var(--state-mastery) 20%, var(--lens-tint));
+}
+.still-scrollhint {
+  font-size: var(--t-2xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  animation: scrollhint 2.6s var(--ease-soft) infinite;
+}
+@keyframes scrollhint {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 0.85;
+    transform: translateY(3px);
+  }
+}
+
+.landing-spacer {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+}
+/* Past the journey's end: the ecosystem footer rises OVER the settled fixed stage (opaque, above). */
+.landing-after {
+  position: relative;
+  z-index: 5;
+}
+.landing-after .site-footer {
+  margin-top: 0;
+  background: var(--void);
+}
+
+/* ── Static narrative (reduced-motion / no-WebGL) — the full story, flowing, legible. ── */
+.landing--static {
+  background:
+    radial-gradient(
+      100% 60% at 50% 0%,
+      color-mix(in oklab, var(--accent) 6%, transparent),
+      transparent 60%
+    ),
+    var(--void);
+}
+.static-movement {
+  min-height: 82vh;
+  display: grid;
+  place-items: center;
+  padding: clamp(2rem, 8vw, 7rem) clamp(1.5rem, 6vw, 5rem);
+  border-bottom: 1px solid var(--hairline);
+}
+.static-movement:last-child {
+  border-bottom: none;
+}
+.landing--static .still-inner {
+  animation: rise var(--dur-slow) var(--ease-expo) both;
+}
+
+@media (max-width: 720px) {
+  .still-canon {
+    font-size: var(--t-cine-canon-sm);
+  }
+  .landing-topbar {
+    padding: var(--s-3) var(--s-4);
+  }
+}

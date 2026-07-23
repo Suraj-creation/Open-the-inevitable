@@ -27,14 +27,18 @@ export const MCCR_ELEMENT_TYPES = [
   "table",
   "key_example",
   "memory_cue",
+  "misconception",
   "image",
+  "source_viewport",
+  "process",
+  "code",
 ] as const;
 
 export type MccrElementType = (typeof MCCR_ELEMENT_TYPES)[number];
 
-/** A node-graph/flow/axes/tree diagram rendered by a pure client function (no provider). */
+/** A node-graph/flow/axes/tree/cycle diagram rendered by a pure client function (no provider). */
 export interface MccrDiagram {
-  readonly kind: "node-graph" | "flow" | "axes" | "tree" | "none";
+  readonly kind: "node-graph" | "flow" | "axes" | "tree" | "cycle" | "none";
   readonly nodes: readonly {
     readonly id: string;
     readonly label: string;
@@ -57,7 +61,18 @@ export interface MccrImageArtifact {
 
 export type MccrElementContent =
   | { readonly kind: "text"; readonly text: string }
-  | { readonly kind: "formula"; readonly latex: string; readonly plain: string }
+  | {
+      readonly kind: "formula";
+      readonly latex: string;
+      readonly plain: string;
+      /** A multi-line derivation (each entry one LaTeX line, top-to-bottom) — empty for a single
+       *  formula. Rendered as a stacked derivation, closer to a textbook than a web page. */
+      readonly lines: readonly string[];
+      /** R4c (ADR-0058; CSE-018 §6 derivation grammar): optional transformation label per line
+       *  ("substitute", "factor", …) — the step's cognitive reason, shown beside the line. Aligned
+       *  by index with `lines`; a shorter/absent array leaves later lines unlabeled. */
+      readonly line_labels?: readonly string[];
+    }
   | {
       readonly kind: "relationship";
       readonly from: string;
@@ -65,7 +80,46 @@ export type MccrElementContent =
       readonly relation: string;
       readonly text: string;
     }
+  | {
+      /**
+       * R4e (ADR-0058; CSE-018 §6 / CSE-013 dissolve grammar): a misconception rendered as a
+       * *dissolve*, not a flat equals. `wrong` is the false belief stated exactly as the learner
+       * holds it; `correction` is what is actually true. The surface shows wrong → correction (Law 2
+       * Progressive Construction) so the learner watches the wrong model recede into the right one.
+       * A legacy/degraded misconception (no structure) reads as plain `text` instead (back-compat).
+       */
+      readonly kind: "misconception";
+      readonly wrong: string;
+      readonly correction: string;
+    }
   | { readonly kind: "diagram"; readonly diagram: MccrDiagram }
+  | {
+      /**
+       * R4e (ADR-0058; CSE-018 §6 process/algorithm grammar): an ordered procedure the learner
+       * follows — each step a concrete action, optionally with a clarifying `detail`. Rendered as a
+       * numbered sequence that reveals one step at a time while spoken (like the derivation), so the
+       * learner watches the process unfold rather than facing a wall of instructions.
+       */
+      readonly kind: "process";
+      readonly steps: readonly {
+        readonly text: string;
+        readonly detail: string | null;
+      }[];
+    }
+  | {
+      /**
+       * R4e (ADR-0058; CSE-018 §6 code grammar): real source the learner reads. `lines` preserves
+       * indentation; a line's `note` is the annotation for a salient line (only the lines that carry
+       * the lesson are annotated). Rendered as a monospace block that spotlights the annotated lines
+       * as the narration reaches them — code as a first-class anchor, not prose in a box.
+       */
+      readonly kind: "code";
+      readonly language: string;
+      readonly lines: readonly {
+        readonly text: string;
+        readonly note: string | null;
+      }[];
+    }
   | {
       readonly kind: "table";
       readonly headers: readonly string[];
@@ -80,6 +134,28 @@ export type MccrElementContent =
       readonly caption: string | null;
       /** Callout labels annotating the illustration's salient parts (image-as-cognition). */
       readonly labels: readonly string[];
+      /** R4e (ADR-0058; CSE-018 Law 9): the recorded reason this image earns its place — surfaced
+       *  to the learner as causal transparency (F16). Null when no rationale was recorded. */
+      readonly rationale?: string | null;
+    }
+  | {
+      /**
+       * An anchored evidence region from a bound Canonical Source Environment (CSE M5,
+       * CSE-008 §3.2): the source's actual words on the board beside the distilled anchors,
+       * in its own provenance channel. Bytes stay out-of-band; the region carries geometry
+       * (page/bbox) for the Living Reference and the exact quote for preserved rendering.
+       */
+      readonly kind: "source_viewport";
+      readonly source_version_id: string;
+      readonly anchor_ref: string;
+      readonly quote: string;
+      readonly region: {
+        readonly path: string;
+        readonly page: number | null;
+        readonly bbox: readonly [number, number, number, number] | null;
+        readonly char_start: number;
+        readonly char_end: number;
+      };
     };
 
 /** One distilled visual anchor. `element_id` is stable so a narration segment can spotlight it. */
@@ -104,7 +180,15 @@ export interface Mccr {
   readonly table: MccrElement | null;
   readonly key_example: MccrElement | null;
   readonly memory_cue: MccrElement | null;
+  /** The common misconception this concept attracts, named so the learner can defuse it (F04). */
+  readonly misconception: MccrElement | null;
   readonly image: MccrElement | null;
+  /** Anchored source evidence on the board — the source's own words beside the distilled anchors (CSE M5). */
+  readonly source_viewport: MccrElement | null;
+  /** An ordered procedure/algorithm the learner follows, revealed step by step (R4e; CSE-018 §6). */
+  readonly process: MccrElement | null;
+  /** Real source the learner reads, annotated on its salient lines (R4e; CSE-018 §6). */
+  readonly code: MccrElement | null;
   /** Flat, reveal-order index for O(1) targeting + rendering. */
   readonly elements: readonly MccrElement[];
 }
@@ -137,6 +221,13 @@ export type CognitiveFrameStatus =
   | "invalidated"
   | "promoted";
 
+/**
+ * The pedagogical role of a frame (ADR-0055 D6) — a typed contract replacing the fragile
+ * `title.startsWith("practice")` heuristic. `teach` is the default (an explanatory frame);
+ * `practice`/`assessment`/`checkpoint` carry the answer affordance + grading semantics.
+ */
+export type FrameKind = "teach" | "practice" | "assessment" | "checkpoint";
+
 export interface FrameProvenance {
   readonly planner_packet_id: string | null;
   readonly composer_packet_id: string | null;
@@ -152,6 +243,8 @@ export interface CognitiveFrame {
   readonly surface_id: string;
   readonly ordinal: number; // logical progression order (sparse — promotion-friendly)
   readonly status: CognitiveFrameStatus;
+  /** Pedagogical role (ADR-0055 D6). Defaults to `teach` for pre-1.7.0 logs (title-heuristic era). */
+  readonly kind: FrameKind;
   readonly concept_id: string | null;
   readonly title: string;
   /** The reserved layout (present from `planned`; carried through compose). */
@@ -246,7 +339,47 @@ function readElementContent(type: MccrElementType, raw: Raw | undefined): MccrEl
   const c = raw ?? {};
   const kind = str(c["kind"]);
   if (kind === "formula" || type === "key_formula") {
-    return { kind: "formula", latex: str(c["latex"]), plain: str(c["plain"]) };
+    const lineLabels = Array.isArray(c["line_labels"])
+      ? (c["line_labels"] as unknown[]).map((l) => str(l))
+      : undefined;
+    return {
+      kind: "formula",
+      latex: str(c["latex"]),
+      plain: str(c["plain"]),
+      lines: Array.isArray(c["lines"])
+        ? (c["lines"] as unknown[]).map((l) => str(l)).filter((l) => l.length > 0)
+        : [],
+      ...(lineLabels ? { line_labels: lineLabels } : {}),
+    };
+  }
+  if (kind === "misconception") {
+    // Only a composer that emitted the structured dissolve carries kind:"misconception"; a legacy
+    // element is type:"misconception" with kind:"text" and falls through to the plain-text return.
+    return { kind: "misconception", wrong: str(c["wrong"]), correction: str(c["correction"]) };
+  }
+  if (kind === "process" || type === "process") {
+    const stepsRaw = Array.isArray(c["steps"]) ? (c["steps"] as unknown[]) : [];
+    return {
+      kind: "process",
+      steps: stepsRaw
+        .map((s) => {
+          const so = (s ?? {}) as Raw;
+          return { text: str(so["text"]), detail: strOrNull(so["detail"]) };
+        })
+        .filter((s) => s.text.length > 0),
+    };
+  }
+  if (kind === "code" || type === "code") {
+    const linesRaw = Array.isArray(c["lines"]) ? (c["lines"] as unknown[]) : [];
+    return {
+      kind: "code",
+      language: str(c["language"], "text"),
+      // Blank lines are preserved (code spacing); only non-object/non-string entries drop out.
+      lines: linesRaw.map((l) => {
+        const lo = (l ?? {}) as Raw;
+        return { text: str(lo["text"]), note: strOrNull(lo["note"]) };
+      }),
+    };
   }
   if (kind === "relationship" || type === "relationship") {
     return {
@@ -271,6 +404,32 @@ function readElementContent(type: MccrElementType, raw: Raw | undefined): MccrEl
       rows: rowsRaw.map((r) => (Array.isArray(r) ? (r as unknown[]).map((cell) => str(cell)) : [])),
     };
   }
+  if (kind === "source_viewport" || type === "source_viewport") {
+    const regionRaw = (c["region"] ?? {}) as Raw;
+    const bboxRaw = Array.isArray(regionRaw["bbox"]) ? (regionRaw["bbox"] as unknown[]) : null;
+    const bbox =
+      bboxRaw && bboxRaw.length === 4 && bboxRaw.every((n) => typeof n === "number")
+        ? ([bboxRaw[0], bboxRaw[1], bboxRaw[2], bboxRaw[3]] as readonly [
+            number,
+            number,
+            number,
+            number,
+          ])
+        : null;
+    return {
+      kind: "source_viewport",
+      source_version_id: str(c["source_version_id"]),
+      anchor_ref: str(c["anchor_ref"]),
+      quote: str(c["quote"]),
+      region: {
+        path: str(regionRaw["path"]),
+        page: typeof regionRaw["page"] === "number" ? (regionRaw["page"] as number) : null,
+        bbox,
+        char_start: num(regionRaw["char_start"]),
+        char_end: num(regionRaw["char_end"]),
+      },
+    };
+  }
   if (kind === "image" || type === "image") {
     const artRaw = c["artifact"] as Raw | undefined;
     const artifact: MccrImageArtifact | null = artRaw
@@ -290,6 +449,7 @@ function readElementContent(type: MccrElementType, raw: Raw | undefined): MccrEl
       labels: Array.isArray(c["labels"])
         ? (c["labels"] as unknown[]).map((l) => str(l)).filter((l) => l.length > 0)
         : [],
+      rationale: strOrNull(c["rationale"]),
     };
   }
   return { kind: "text", text: str(c["text"]) };
@@ -322,7 +482,11 @@ export function readMccr(raw: Raw | undefined, frameId: string): Mccr {
   const table = slot("table");
   const key_example = slot("key_example");
   const memory_cue = slot("memory_cue");
+  const misconception = slot("misconception");
   const image = slot("image");
+  const source_viewport = slot("source_viewport");
+  const process = slot("process");
+  const code = slot("code");
   const elements = [
     core_concept,
     definition,
@@ -333,7 +497,11 @@ export function readMccr(raw: Raw | undefined, frameId: string): Mccr {
     table,
     key_example,
     memory_cue,
+    misconception,
     image,
+    source_viewport,
+    process,
+    code,
   ]
     .filter((e): e is MccrElement => e !== null)
     .sort((a, b) => a.reveal_order - b.reveal_order);
@@ -348,7 +516,11 @@ export function readMccr(raw: Raw | undefined, frameId: string): Mccr {
     table,
     key_example,
     memory_cue,
+    misconception,
     image,
+    source_viewport,
+    process,
+    code,
     elements,
   };
 }

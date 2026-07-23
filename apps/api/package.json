@@ -11,16 +11,19 @@
     "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "backfill:intelligence": "tsx src/backfill-intelligence.ts"
   },
   "dependencies": {
     "@inevitable/adapters": "workspace:*",
     "@inevitable/cli": "workspace:*",
     "@inevitable/contracts": "workspace:*",
     "@inevitable/events": "workspace:*",
+    "@inevitable/intelligence": "workspace:*",
     "@inevitable/product-cognition": "workspace:*",
     "@inevitable/protocols": "workspace:*",
     "@inevitable/shared": "workspace:*",
+    "@inevitable/source-environment": "workspace:*",
     "@inevitable/surface": "workspace:*"
   },
   "devDependencies": {

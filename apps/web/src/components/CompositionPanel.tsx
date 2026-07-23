@@ -13,8 +13,8 @@ import type {
   NarrationScriptRecord,
 } from "@inevitable/surface/client";
 
-/** The anchor budget that keeps one frame to one viewport (ADR-0030 density law). */
-const DENSITY_BUDGET = 6;
+/** The anchor budget that keeps one frame to one viewport (ADR-0030 density law: 5–7 typical, 8 max). */
+const DENSITY_BUDGET = 8;
 
 export interface CompositionPanelProps {
   readonly frames: readonly CognitiveFrame[];
@@ -85,6 +85,13 @@ export function CompositionPanel({
                   <span className="composition-image">{img.helps ? "image ✓" : "no image"}</span>
                 ) : null}
               </div>
+              {/* The image decision's reasoning is inspectable, not hidden (review §18): the prompt
+                  when an image was planned, else why the board's anchors sufficed. */}
+              {img && (img.prompt || img.rationale) ? (
+                <p className="composition-image-note" title={img.prompt ?? img.rationale}>
+                  {img.helps && img.prompt ? `prompt: ${img.prompt}` : img.rationale}
+                </p>
+              ) : null}
             </li>
           );
         })}

@@ -13,15 +13,33 @@
  *   GET  /api/surface/:id/state            folded SurfaceState snapshot (convenience)
  *   GET  /api/surface/:id/trace/:blockId   full provenance chain for a block
  *   GET  /api/surface/:id/media/:artifactId  out-of-band narration audio (bytes, not on the stream)
+ *   POST /api/sources?modality=&title=     register + canonicalize a source (raw bytes body; CSE M5)
+ *   POST /api/sources/crawl { url }        governed SSRF-safe fetch → web source (ADR-0052)
+ *   GET  /api/sources/commons              the knowledge commons — contributed creations (ADR-0053)
+ *   GET  /api/sources/cognition            deep-transparency read of the source plane (CSE M12 T1)
+ *   GET  /api/sources/:versionId/content   canonical source bytes + X-Content-Hash (fidelity proof)
+ *   POST /api/surface/:id/sources          bind a registered source { source_version_id } (CSE M5)
+ *   POST /api/surface/:id/fuse             reconcile bound sources over { concept_refs } (CSE M9 T1)
+ *   POST /api/surface/:id/frontier         research a concept's living frontier { concept_ref } (M9)
+ *   POST /api/surface/:id/timeline         research a concept's temporal model { concept_ref } (M9)
+ *   POST /api/surface/:id/creation         open a learner creation { kind, title, concept_refs } (M11)
+ *   POST /api/surface/:id/creation/:cid/assist    offer a disclosed assist { mode, draft? } (M11)
+ *   POST /api/surface/:id/creation/:cid/complete  complete with the learner's final { draft? } (M11)
+ *   POST /api/surface/:id/creation/:cid/contribute  consent it into the substrate as a source (ADR-0051)
+ *   POST /api/surface/:id/creation/:cid/revoke       revoke consent + cascade a redaction (ADR-0054)
  *
- * Spec: spec/surface/surface-streaming-sync-protocol.md, spec/architecture-decisions/ADR-0006.
+ * Spec: spec/surface/surface-streaming-sync-protocol.md, spec/architecture-decisions/ADR-0006;
+ * source routes: spec/source-environment/CSE-008-source-surface-projection.md §3, ADR-0036;
+ * creative cognition: spec/source-environment/CSE-016-creative-cognition.md, ADR-0049.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { CognitiveEvent } from "@inevitable/protocols";
 import { type CosError } from "@inevitable/shared";
 import { SurfaceHost, gatewayError, type ServedSurface } from "./host";
 
-/** The only mutation channel into a living surface. Additive by design (SRF-005 §4.3). */
+/** The only mutation channel into a living surface. Additive by design (SRF-005 §4.3). The
+ * CSE-014 grammar (M8 T2) extends the original ADR-0024 seven — the surface session's grammar
+ * registry is the single source of truth for classification/routing. */
 export type SurfaceInteractionKind =
   | "interrupt"
   | "jump"
@@ -29,10 +47,22 @@ export type SurfaceInteractionKind =
   | "challenge"
   | "request_depth"
   | "request_simplify"
-  | "request_example";
+  | "request_example"
+  | "annotate"
+  | "circle"
+  | "highlight"
+  | "pin"
+  | "ask_why"
+  | "ask_again"
+  | "ask_simpler"
+  | "ask_deeper"
+  | "ask_example"
+  | "define";
 
 export type SurfaceCommand =
   | { type: "ask"; goal?: string }
+  | { type: "advance"; concept_id?: string }
+  | { type: "answer"; concept_id: string; text: string }
   | { type: "expand"; block_id: string; layer: number }
   | { type: "close"; reason?: string }
   | { type: "interact"; kind: SurfaceInteractionKind; target_id?: string; note?: string };
@@ -44,6 +74,8 @@ function cors(): Record<string, string> {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Last-Event-ID, Authorization",
+    // The client's fidelity proof (ADR-0036) hashes fetched bytes against this header.
+    "Access-Control-Expose-Headers": "X-Content-Hash",
   };
 }
 
@@ -74,6 +106,26 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
 }
 
+/** Upload body cap (ADR-0056 D2): a learner-facing source upload is bounded; past it → 413. */
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+/** Sentinel thrown by `readBytes` when the body exceeds the cap; the route maps it to 413. */
+class PayloadTooLargeError extends Error {}
+
+async function readBytes(req: IncomingMessage): Promise<Uint8Array> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += (chunk as Buffer).byteLength;
+    if (total > MAX_UPLOAD_BYTES) {
+      req.destroy();
+      throw new PayloadTooLargeError();
+    }
+    chunks.push(chunk as Buffer);
+  }
+  return new Uint8Array(Buffer.concat(chunks));
+}
+
 function writeFrame(res: ServerResponse, event: CognitiveEvent): void {
   res.write(`id: ${event.sequence ?? 0}\n`);
   res.write(`event: surface\n`);
@@ -94,18 +146,36 @@ function streamSurface(served: ServedSurface, req: IncomingMessage, res: ServerR
   const lastId = Number(Array.isArray(header) ? header[0] : header);
   const fromSequence = Number.isFinite(lastId) ? lastId + 1 : 0;
 
-  for (const event of served.surfaceStream(fromSequence)) {
+  // Subscribe-before-replay (N11): buffer live events while the snapshot replays, then flush them —
+  // deduped by sequence — so no event published mid-attach is dropped and none is sent twice.
+  let lastSent = fromSequence - 1;
+  let flushed = false;
+  const buffer: CognitiveEvent[] = [];
+  const emit = (event: CognitiveEvent): void => {
+    const seq = event.sequence ?? lastSent + 1;
+    if (seq <= lastSent) return; // already sent (dedupe)
     writeFrame(res, event);
-  }
-  res.write(SNAPSHOT_COMPLETE);
-
+    lastSent = seq;
+  };
   const sub = served.subscribeStream((event) => {
+    if (!flushed) {
+      buffer.push(event);
+      return;
+    }
     try {
-      writeFrame(res, event);
+      emit(event);
     } catch {
       sub.unsubscribe();
     }
   });
+
+  for (const event of served.surfaceStream(fromSequence)) emit(event);
+  res.write(SNAPSHOT_COMPLETE);
+  // Flush anything that streamed in during replay, then switch to live pass-through.
+  for (const event of buffer) emit(event);
+  buffer.length = 0;
+  flushed = true;
+
   req.on("close", () => {
     sub.unsubscribe();
     served.onDetach();
@@ -124,6 +194,29 @@ async function handleCommand(
       const result = await served.ask(goal);
       if (!result.ok) return sendError(res, 422, result.error);
       return sendJson(res, 200, { ok: true, blocks: result.value.blocks.length });
+    }
+    case "advance": {
+      // Teach the next (or a requested) concept on the existing path — no curriculum regeneration.
+      const conceptId =
+        typeof command.concept_id === "string" && command.concept_id.trim()
+          ? command.concept_id.trim()
+          : undefined;
+      const result = await served.advance(conceptId);
+      if (!result.ok) return sendError(res, 422, result.error);
+      return sendJson(res, 200, { ok: true, blocks: result.value.blocks.length });
+    }
+    case "answer": {
+      // Grade a learner's real answer into earned mastery (F14).
+      if (typeof command.concept_id !== "string" || typeof command.text !== "string") {
+        return sendError(
+          res,
+          400,
+          gatewayError("answer requires concept_id (string) and text (string)"),
+        );
+      }
+      const result = await served.answer(command.concept_id, command.text);
+      if (!result.ok) return sendError(res, 422, result.error);
+      return sendJson(res, 200, { ok: true, effect: result.value.effect });
     }
     case "expand": {
       if (typeof command.block_id !== "string" || typeof command.layer !== "number") {
@@ -155,6 +248,17 @@ async function handleCommand(
         "request_depth",
         "request_simplify",
         "request_example",
+        // CSE-014 grammar (M8 T2): Mark (evolve the Scene) + Ask (re-frame cognition).
+        "annotate",
+        "circle",
+        "highlight",
+        "pin",
+        "ask_why",
+        "ask_again",
+        "ask_simpler",
+        "ask_deeper",
+        "ask_example",
+        "define",
       ];
       if (typeof command.kind !== "string" || !valid.includes(command.kind)) {
         return sendError(res, 400, gatewayError("interact requires a valid kind"));
@@ -188,10 +292,14 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
     return;
   }
 
+  // ADR-0055 D1: never serve a route over a half-rehydrated source plane. Resolves immediately
+  // when persistence is off (the offline default), so this is a no-op cost there.
+  await host.ready;
+
   const url = new URL(req.url ?? "/", "http://localhost");
   const parts = url.pathname.split("/").filter(Boolean); // ["api","surface"|"learner",id?,action?,blockId?]
 
-  // GET /api/learner/:id — resume-by-learner: the learner profile + the surfaces they own (DPS-003).
+  // GET /api/learner/:id[/understanding] — learner-scoped reads (DPS-003; CSE M6 ADR-0037).
   // Requires a valid bearer token that belongs to the requested learner (callers only read their own).
   if (parts[0] === "api" && parts[1] === "learner" && method === "GET") {
     const learnerId = parts[2];
@@ -205,6 +313,24 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
       return sendError(res, 403, gatewayError("api key does not belong to this learner"));
     const learner = host.getLearner(learnerId);
     if (!learner) return sendError(res, 404, gatewayError("unknown learner", { learnerId }));
+
+    // CSE M6 — the Understanding Map's read path: a projection over the learner's intelligence
+    // plane (episodes + understanding deltas). Evidence, never a score (CSE-005 §3.4); disclosed
+    // and learner-visible by construction (this route IS the disclosure).
+    if (parts[3] === "understanding") {
+      const artifacts = await host.intelligence.learnerArtifacts(learner.cid);
+      return sendJson(res, 200, {
+        ok: true,
+        learner_id: learner.learnerId,
+        episodes: artifacts
+          .filter((a) => a.kind === "learner.episode")
+          .map((a) => ({ artifact_id: a.artifact_id, distilled_hlc: a.distilled_hlc, ...a.body })),
+        deltas: artifacts
+          .filter((a) => a.kind === "learner.understanding-delta")
+          .map((a) => ({ artifact_id: a.artifact_id, distilled_hlc: a.distilled_hlc, ...a.body })),
+      });
+    }
+
     return sendJson(res, 200, {
       ok: true,
       learner: {
@@ -216,6 +342,80 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
       },
       surfaces: learner.surfaces,
     });
+  }
+
+  // CSE M5 — Canonical Source Environment routes (CSE-008 §3; ADR-0036).
+  if (parts[0] === "api" && parts[1] === "sources") {
+    // POST /api/sources?modality=pdf|markdown|text&title=… — raw bytes body, register + canonicalize.
+    if (parts.length === 2 && method === "POST") {
+      const modality = url.searchParams.get("modality") ?? "";
+      const title = url.searchParams.get("title") ?? "Untitled source";
+      let bytes: Uint8Array;
+      try {
+        bytes = await readBytes(req);
+      } catch (cause) {
+        if (cause instanceof PayloadTooLargeError) {
+          return sendError(
+            res,
+            413,
+            gatewayError("source exceeds the 25 MiB upload limit", { maxBytes: MAX_UPLOAD_BYTES }),
+          );
+        }
+        throw cause;
+      }
+      if (bytes.byteLength === 0) return sendError(res, 400, gatewayError("empty source body"));
+      // Text modalities canonicalize from UTF-8 text; binary (PDF) from bytes (ADR-0036 seam).
+      const content = modality === "pdf" ? bytes : Buffer.from(bytes).toString("utf8");
+      const registered = await host.sources.register({ content, modality, title });
+      if (!registered.ok) return sendError(res, 422, registered.error);
+      return sendJson(res, 201, { ok: true, source: registered.value });
+    }
+    // ADR-0052 — POST /api/sources/crawl { url }: governed server-side fetch → web-modality source.
+    // The SSRF policy gates the URL before any byte is fetched (deny-by-default).
+    if (parts.length === 3 && parts[2] === "crawl" && method === "POST") {
+      const body = await readJson(req);
+      const url = typeof body["url"] === "string" ? body["url"].trim() : "";
+      if (!url) return sendError(res, 400, gatewayError("crawl requires a url (string)"));
+      const crawled = await host.sources.crawl(url);
+      if (!crawled.ok) return sendError(res, 422, crawled.error);
+      return sendJson(res, 201, { ok: true, source: crawled.value });
+    }
+    // ADR-0053 — GET /api/sources/commons: the knowledge commons (consented contributed creations,
+    // discoverable by any learner). Host-level; only what was explicitly contributed appears.
+    if (parts.length === 3 && parts[2] === "commons" && method === "GET") {
+      return sendJson(res, 200, { ok: true, commons: host.sources.commons() });
+    }
+    // CSE M12 T1 (ADR-0050) — GET /api/sources/cognition: the deep-transparency read of the source
+    // plane (host-level; the source substrate is shared cross-surface). Read-only, best-effort.
+    if (parts.length === 3 && parts[2] === "cognition" && method === "GET") {
+      const limitRaw = Number(url.searchParams.get("recent"));
+      const recentLimit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 30;
+      return sendJson(res, 200, { ok: true, cognition: host.sources.cognition(recentLimit) });
+    }
+    // GET /api/sources/:versionId/content — canonical bytes; X-Content-Hash is the fidelity proof.
+    if (parts.length === 4 && parts[3] === "content" && method === "GET") {
+      // ADR-0054: a redacted version returns 410 Gone (honestly "was here, withdrawn"), not a 404.
+      if (host.sources.isRedacted(parts[2] ?? "")) {
+        return sendError(
+          res,
+          410,
+          gatewayError("source withdrawn by consent revocation", { versionId: parts[2] }),
+        );
+      }
+      const served = host.sources.content(parts[2] ?? "");
+      if (!served) {
+        return sendError(res, 404, gatewayError("unknown source version", { versionId: parts[2] }));
+      }
+      res.writeHead(200, {
+        "Content-Type": served.mimeType,
+        "X-Content-Hash": served.contentHash,
+        "Cache-Control": "public, max-age=31536000, immutable", // content-addressed: immutable
+        ...cors(),
+      });
+      res.end(Buffer.from(served.bytes));
+      return;
+    }
+    return sendError(res, 404, gatewayError("no such route", { path: url.pathname, method }));
   }
 
   if (parts[0] !== "api" || parts[1] !== "surface") {
@@ -306,6 +506,144 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
     });
     res.end(Buffer.from(media.bytes));
     return;
+  }
+
+  // CSE M5 — POST /api/surface/:id/sources { source_version_id }: bind a registered source.
+  if (action === "sources" && method === "POST") {
+    const body = await readJson(req);
+    const versionId = body["source_version_id"];
+    if (typeof versionId !== "string" || !versionId.trim()) {
+      return sendError(res, 400, gatewayError("attach requires source_version_id (string)"));
+    }
+    const attached = await served.attachSource(versionId.trim());
+    if (!attached.ok) return sendError(res, 422, attached.error);
+    return sendJson(res, 200, { ok: true, source: attached.value });
+  }
+
+  // R2c (ADR-0057 D3) — POST /api/surface/:id/teach-source { source_version_id? }: teach FROM a
+  // bound source; the document's own concepts/sections become the curriculum (the timeline).
+  if (action === "teach-source" && method === "POST") {
+    const body = await readJson(req);
+    const versionId =
+      typeof body["source_version_id"] === "string" && body["source_version_id"].trim()
+        ? body["source_version_id"].trim()
+        : undefined;
+    const taught = await served.teachSource(versionId);
+    if (!taught.ok) return sendError(res, 422, taught.error);
+    return sendJson(res, 200, { ok: true, blocks: taught.value.blocks.length });
+  }
+
+  // CSE M9 T1 — POST /api/surface/:id/fuse { concept_refs }: reconcile the surface's bound sources
+  // over a concept set into one cognitive environment (Source Fusion, CSE-015).
+  if (action === "fuse" && method === "POST") {
+    const body = await readJson(req);
+    const conceptRefs = Array.isArray(body["concept_refs"])
+      ? (body["concept_refs"] as unknown[]).filter((c): c is string => typeof c === "string")
+      : [];
+    if (conceptRefs.length === 0) {
+      return sendError(res, 400, gatewayError("fuse requires a non-empty concept_refs (string[])"));
+    }
+    const fused = await served.fuse(conceptRefs);
+    if (!fused.ok) return sendError(res, 422, fused.error);
+    return sendJson(res, 200, { ok: true, fusion: fused.value });
+  }
+
+  // CSE M9 Frontier T1 — POST /api/surface/:id/frontier { concept_ref }: research a concept's
+  // living-knowledge frontier via governed web search (CSE-006 §3.2).
+  if (action === "frontier" && method === "POST") {
+    const body = await readJson(req);
+    const conceptRef = typeof body["concept_ref"] === "string" ? body["concept_ref"].trim() : "";
+    if (!conceptRef) {
+      return sendError(res, 400, gatewayError("frontier requires a concept_ref (string)"));
+    }
+    const overlay = await served.researchFrontier(conceptRef);
+    if (!overlay.ok) return sendError(res, 422, overlay.error);
+    return sendJson(res, 200, { ok: true, frontier: overlay.value });
+  }
+
+  // CSE M9 TKM T1 — POST /api/surface/:id/timeline { concept_ref }: research a concept's Temporal
+  // Knowledge Model (its trajectory through time) via governed web search (CSE-006 §3.3).
+  if (action === "timeline" && method === "POST") {
+    const body = await readJson(req);
+    const conceptRef = typeof body["concept_ref"] === "string" ? body["concept_ref"].trim() : "";
+    if (!conceptRef) {
+      return sendError(res, 400, gatewayError("timeline requires a concept_ref (string)"));
+    }
+    const timeline = await served.researchTimeline(conceptRef);
+    if (!timeline.ok) return sendError(res, 422, timeline.error);
+    return sendJson(res, 200, { ok: true, timeline: timeline.value });
+  }
+
+  // CSE M11 T1 — Creative Cognition (CSE-016). The learner authors; the system only ever attaches
+  // disclosed assists (scaffold|critique|provocation|reference) — never the artifact (no-ghostwriter law).
+  if (action === "creation" && method === "POST") {
+    const creationId = parts[4];
+    const sub = parts[5];
+    const body = await readJson(req);
+    // POST /api/surface/:id/creation — open a creation.
+    if (!creationId) {
+      const kind = typeof body["kind"] === "string" ? body["kind"].trim() : "";
+      const title = typeof body["title"] === "string" ? body["title"].trim() : "";
+      if (!kind || !title) {
+        return sendError(
+          res,
+          400,
+          gatewayError("creation requires kind (string) and title (string)"),
+        );
+      }
+      const conceptRefs = Array.isArray(body["concept_refs"])
+        ? (body["concept_refs"] as unknown[]).filter((c): c is string => typeof c === "string")
+        : [];
+      const draft = typeof body["draft"] === "string" ? body["draft"] : undefined;
+      const created = await served.startCreation({ kind, title, conceptRefs, draft });
+      if (!created.ok) return sendError(res, 422, created.error);
+      return sendJson(res, 201, { ok: true, creation: created.value });
+    }
+    // POST /api/surface/:id/creation/:cid/assist { mode, draft? } — offer a disclosed assist.
+    if (sub === "assist") {
+      const mode = typeof body["mode"] === "string" ? body["mode"].trim() : "";
+      if (!mode) {
+        return sendError(
+          res,
+          400,
+          gatewayError("assist requires mode (scaffold|critique|provocation|reference)"),
+        );
+      }
+      const draft = typeof body["draft"] === "string" ? body["draft"] : undefined;
+      const assisted = await served.assistCreation(creationId, mode, draft);
+      if (!assisted.ok) return sendError(res, 422, assisted.error);
+      return sendJson(res, 200, { ok: true, creation: assisted.value });
+    }
+    // POST /api/surface/:id/creation/:cid/complete { draft? } — mark complete with final draft.
+    if (sub === "complete") {
+      const draft = typeof body["draft"] === "string" ? body["draft"] : undefined;
+      const completed = await served.completeCreation(creationId, draft);
+      if (!completed.ok) return sendError(res, 422, completed.error);
+      return sendJson(res, 200, { ok: true, creation: completed.value });
+    }
+    // POST /api/surface/:id/creation/:cid/contribute { consent } — consent it into the substrate as a
+    // Cognitive Source (ADR-0051). Requires explicit consent; refuses an incomplete/unconsented share.
+    if (sub === "contribute") {
+      const consent = body["consent"] === true;
+      const contributed = await served.contributeCreation(creationId, consent);
+      if (!contributed.ok) return sendError(res, 422, contributed.error);
+      return sendJson(res, 200, {
+        ok: true,
+        creation: contributed.value.creation,
+        source: contributed.value.source,
+      });
+    }
+    // POST /api/surface/:id/creation/:cid/revoke — revoke consent + cascade a redaction (ADR-0054).
+    if (sub === "revoke") {
+      const revoked = await served.revokeCreation(creationId);
+      if (!revoked.ok) return sendError(res, 422, revoked.error);
+      return sendJson(res, 200, {
+        ok: true,
+        creation: revoked.value.creation,
+        redacted_counts: revoked.value.redacted_counts,
+      });
+    }
+    return sendError(res, 404, gatewayError("no such creation route", { path: url.pathname }));
   }
 
   if (action === "command" && method === "POST") {

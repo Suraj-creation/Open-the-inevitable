@@ -20,6 +20,14 @@ describe("MVP agent catalog", () => {
       "composer",
       "frameplanner",
       "imageplanner",
+      "representation",
+      "canonicalizer",
+      "meaning",
+      "claim",
+      "synthesis",
+      "frontier",
+      "temporal",
+      "creation",
     ]);
 
     for (const manifest of MVP_AGENT_MANIFESTS) {

@@ -74,6 +74,9 @@ export function SceneCanvas({ blocks, focus: _focus, focusedBlockId, onSelect }:
   const [scale, setScale] = useState(1);
   const blockDragRef = useRef<BlockDrag | null>(null);
   const panDragRef = useRef<PanDrag | null>(null);
+  // True once a block drag moves beyond a small threshold — used to suppress the trailing click so a
+  // drag no longer selects the block (and closes the whole overlay). Fixes review issue 15.
+  const blockMovedRef = useRef(false);
 
   const getPos = useCallback(
     (blockId: string, index: number) => positions[blockId] ?? autoPos(index),
@@ -85,6 +88,7 @@ export function SceneCanvas({ blocks, focus: _focus, focusedBlockId, onSelect }:
       e.preventDefault();
       e.stopPropagation();
       const pos = getPos(blockId, index);
+      blockMovedRef.current = false;
       blockDragRef.current = {
         blockId,
         startMouseX: e.clientX,
@@ -112,8 +116,11 @@ export function SceneCanvas({ blocks, focus: _focus, focusedBlockId, onSelect }:
   const onMouseMove = useCallback(
     (e: React.MouseEvent) => {
       if (blockDragRef.current) {
-        const dx = (e.clientX - blockDragRef.current.startMouseX) / scale;
-        const dy = (e.clientY - blockDragRef.current.startMouseY) / scale;
+        const rawDx = e.clientX - blockDragRef.current.startMouseX;
+        const rawDy = e.clientY - blockDragRef.current.startMouseY;
+        if (Math.abs(rawDx) > 3 || Math.abs(rawDy) > 3) blockMovedRef.current = true;
+        const dx = rawDx / scale;
+        const dy = rawDy / scale;
         const { blockId, origX, origY } = blockDragRef.current;
         setPositions((prev) => ({ ...prev, [blockId]: { x: origX + dx, y: origY + dy } }));
         return;
@@ -212,7 +219,14 @@ export function SceneCanvas({ blocks, focus: _focus, focusedBlockId, onSelect }:
                     className={`scene-block${isFocused ? " scene-block--focus" : ""}`}
                     transform={`translate(${pos.x},${pos.y})`}
                     onMouseDown={(e) => onBlockMouseDown(e, block.block_id, i)}
-                    onClick={() => onSelect(block.block_id)}
+                    onClick={() => {
+                      // A drag must not be read as a click (which would select + close the overlay).
+                      if (blockMovedRef.current) {
+                        blockMovedRef.current = false;
+                        return;
+                      }
+                      onSelect(block.block_id);
+                    }}
                     filter={isFocused ? "url(#scene-glow)" : undefined}
                     role="button"
                     aria-label={block.title}

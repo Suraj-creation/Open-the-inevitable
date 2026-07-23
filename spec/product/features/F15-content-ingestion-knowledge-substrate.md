@@ -22,6 +22,7 @@ spec:
     - product/features/F09-living-universe-experience
     - product/features/F10-research-innovation-acceleration
     - product/features/F11-institutional-collective-intelligence
+    - source-environment/CSE-002-canonical-source-representation
   related_protocols: [cognition-packet-protocol, cognitive-event-protocol, memory-mutation-protocol, reasoning-trace-protocol]
   related_events: [artifact.ingested, artifact.parsed, artifact.graph.constructed, source.attributed, provenance.recorded, ingestion.rejected]
   related_runtime_systems: [world-state-graph, cognitive-unit-runtime, cognitive-scheduler, deterministic-execution-engine]
@@ -51,7 +52,10 @@ decomposed, linked, explained, remembered, and governed.
   construction, select-to-expand semantics, deduplication, conflict detection, and governed web
   ingestion.
 - **Out of scope:** explanation delivery (F04), visual artifact surface (F09), long-term memory
-  consolidation policy (F05), and research synthesis beyond source grounding (F10).
+  consolidation policy (F05), and research synthesis beyond source grounding (F10). The
+  architectural depth downstream of acquisition — canonical source representation, Source
+  Anchors, progressive canonicalization, and source–surface projection — is owned by
+  `spec/source-environment/` (CSE-001…CSE-010, ADR-0032).
 - **Non-goals:** storing raw content without provenance, scraping without policy, or treating
   ingestion as a simple file upload.
 

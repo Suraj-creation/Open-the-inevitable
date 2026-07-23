@@ -9,8 +9,10 @@ import {
   activeFrameIndex,
   elementForFocus,
   frameElements,
+  frameRole,
   framesByOrdinal,
   hasFrames,
+  isPracticeFrame,
   nextFrame,
 } from "../src/frames";
 
@@ -39,7 +41,11 @@ function mccr(frameId: string): Mccr {
     table: null,
     key_example: null,
     memory_cue: null,
+    misconception: null,
     image: null,
+    source_viewport: null,
+    process: null,
+    code: null,
     elements: [core, def],
   };
 }
@@ -50,6 +56,7 @@ function frame(id: string, ordinal: number): CognitiveFrame {
     surface_id: "srf-1",
     ordinal,
     status: "composed",
+    kind: "teach",
     concept_id: "fourier",
     title: `Frame ${id}`,
     layout: null,
@@ -119,5 +126,30 @@ describe("frame projection helpers", () => {
     expect(hasFrames(stateWith([frame("cfr-a", 1000)]))).toBe(true);
     expect(hasFrames(stateWith([]))).toBe(false);
     expect(hasFrames(null)).toBe(false);
+  });
+
+  test("frameRole/isPracticeFrame trust the typed kind, not the title (ADR-0055 D6)", () => {
+    // A practice frame whose title does NOT start with "Practice" is still classified by kind —
+    // the exact case the retired title heuristic silently mislabeled.
+    const practice = { ...frame("cfr-p", 1000), kind: "practice", title: "Make it your own" };
+    expect(frameRole(practice as CognitiveFrame)).toBe("practice");
+    expect(isPracticeFrame(practice as CognitiveFrame)).toBe(true);
+
+    // Checkpoint + assessment collapse to the assessment role; teach stays teach.
+    expect(frameRole({ ...frame("cfr-c", 1), kind: "checkpoint" } as CognitiveFrame)).toBe(
+      "assessment",
+    );
+    expect(frameRole({ ...frame("cfr-a", 1), kind: "assessment" } as CognitiveFrame)).toBe(
+      "assessment",
+    );
+    expect(isPracticeFrame(frame("cfr-t", 1))).toBe(false); // kind: "teach"
+
+    // Pre-1.7.0 replay: no `kind` ⇒ fall back to the title heuristic.
+    const legacy = { ...frame("cfr-l", 1), title: "Practice — perceptrons" } as unknown as Record<
+      string,
+      unknown
+    >;
+    delete legacy["kind"];
+    expect(isPracticeFrame(legacy as unknown as CognitiveFrame)).toBe(true);
   });
 });

@@ -16,7 +16,7 @@ import {
 
 const plannerManifest = MVP_AGENT_MANIFESTS.find((m) => m.id === "agent.frameplanner")!;
 
-function stubModel(text: string, finishReason?: "stop" | "refusal"): ModelRuntime {
+function stubModel(text: string, finishReason?: "stop" | "refusal" | "max_tokens"): ModelRuntime {
   return {
     async generate() {
       return { text, model: "stub-model", finishReason: finishReason ?? ("stop" as const) };
@@ -244,6 +244,18 @@ describe("FramePlannerUnit", () => {
     const content = emissions.packets?.[0]?.content as Record<string, unknown>;
     expect(content["response_kind"]).toBe("deterministic-plan");
     expect(content["fallback_reason"]).toBe("E_MODEL_REFUSAL");
+  });
+
+  test("a truncated response degrades with the truthful E_MODEL_OUTPUT_TRUNCATED reason", async () => {
+    const unit = new FramePlannerUnit({
+      manifest: plannerManifest,
+      model: stubModel(GOOD_PLAN.slice(0, 40), "max_tokens"),
+      idGenerator: new SeededIdGenerator("plan-trunc"),
+    });
+    const emissions = await unit.execute(packet({ concept_title: "Entropy", goal: "Physics" }));
+    const content = emissions.packets?.[0]?.content as Record<string, unknown>;
+    expect(content["response_kind"]).toBe("deterministic-plan");
+    expect(content["fallback_reason"]).toBe("E_MODEL_OUTPUT_TRUNCATED");
   });
 
   test("maxFrames is enforced end-to-end through the unit", async () => {

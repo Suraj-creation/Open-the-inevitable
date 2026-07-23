@@ -18,11 +18,13 @@ import { GovernanceEngine } from "@inevitable/governance";
 import { CapabilityRegistry } from "@inevitable/kernel";
 import { TieredMemoryStore, type MemoryLayer } from "@inevitable/memory";
 import {
+  AssessmentUnit,
   CurriculumUnit,
   DeterministicMvpUnit,
   FiberedLearningLoop,
   FramePlannerUnit,
   ImagePlannerUnit,
+  RepresentationUnit,
   LearningPathProjector,
   MVP_AGENT_MANIFESTS,
   IntentInferenceUnit,
@@ -78,6 +80,8 @@ import { guard as governanceGuard } from "@inevitable/governance";
 import {
   SurfaceSession,
   type MediaGenerator,
+  type SourceEvidenceProvider,
+  type SurfaceFrontierProvider,
   type SurfaceAskInput,
   type VoiceSynthesizer,
 } from "@inevitable/surface";
@@ -365,6 +369,12 @@ export interface DemoOptions {
    */
   readonly imagePlanner?: boolean;
   /**
+   * Representation Intelligence Agent (RIA; CSE-018, ADR-0058). When present (with `composer`), the
+   * model assigns each element's epistemic role + hierarchy; absent/degraded ⇒ the deterministic
+   * plan floor. Gateway sets it; the CLI leaves it off (deterministic RIA still runs).
+   */
+  readonly representation?: boolean;
+  /**
    * Look-ahead budget (UCS, ADR-0030; Phase 3): how many discardable speculative frames the surface
    * may pre-compose ahead of the learner per ask. Seeds `LiveEvolutionConfig.lookaheadBudget` (a
    * governed evolution rollout may then raise/lower it live). 0/absent ⇒ no speculation (the
@@ -377,6 +387,24 @@ export interface DemoOptions {
    * whole block is emitted at once (the default; deterministic CLI/tests stay byte-identical).
    */
   readonly streamRevealMs?: number;
+  /**
+   * Source-evidence seam (CSE M5, CSE-008): resolved anchors for a concept across the surface's
+   * attached Canonical Source Environments. The gateway wires this over its SourceHub (late-bound —
+   * sources attach after creation); absent ⇒ frames compose with no source projection.
+   */
+  readonly sourceEvidence?: SourceEvidenceProvider;
+  /**
+   * Grounded-frontier seam (CSE M9 LKS T1, ADR-0045): on verified mastery the session surfaces the
+   * REAL web-grounded frontier (ADR-0043) instead of the ungrounded research breadcrumb. The gateway
+   * wires this over its SourceHub; absent ⇒ the legacy ungrounded research path runs unchanged.
+   */
+  readonly frontierProvider?: SurfaceFrontierProvider;
+  /**
+   * Enable the Cognitive Theater (CSE M7 T1, ADR-0033/0038): the Director conducts (an authored
+   * pedagogy FSM) and each composed frame is wrapped as a living Scene. The gateway sets this; the
+   * CLI/tests leave it off so frames compose byte-identically (ADR-0033 L2). Requires `composer`.
+   */
+  readonly theater?: boolean;
   /**
    * Rehydrate a previously-persisted surface into a LIVE session (DPS-002). When present, world-state
    * is restored, memory mutations replayed, and the event log hydrated; the session uses a
@@ -398,6 +426,12 @@ export interface DemoOptions {
    * generator is seed-independent, so `seed` alone does not separate id-spaces).
    */
   readonly idGenerator?: IdGenerator;
+  /**
+   * Inject the session clock. Default: a `ManualClock` frozen at 2026-06-11 (deterministic CLI demo +
+   * replay tests). The gateway passes a `SystemClock` so a live product emits real wall-clock
+   * timestamps + HLC and honest work-timing latencies (never the frozen fixture time).
+   */
+  readonly clock?: Clock;
   /** LLM judge for evaluation scoring (D3 path). Absent ⇒ heuristic D1 scorecards only. */
   readonly evaluationModel?: ModelRuntime;
   /** Semantic embed fn for ContextAssembler. Absent ⇒ local FNV-1a fallback. */
@@ -419,8 +453,18 @@ const DEMO_LEARNER: LearnerDescriptor = {
   trustLevel: 5,
 };
 
-function onboarding(learner: LearnerDescriptor, mode?: ProductMode): OnboardingSession {
+function onboarding(
+  learner: LearnerDescriptor,
+  clock: Clock,
+  mode?: ProductMode,
+): OnboardingSession {
   const { userId, cid, trustLevel } = learner;
+  // Lease/envelope expiry is enforced against the session clock (Date.parse(expires_at) > nowMs).
+  // Compute the window from the clock so a real-time gateway does not start with already-expired
+  // leases; under the frozen demo clock this reproduces the original 2026-06-11T00:00 / +2h values.
+  const nowMs = clock.nowMs();
+  const createdAt = new Date(nowMs).toISOString();
+  const expiresAt = new Date(nowMs + 2 * 60 * 60 * 1000).toISOString();
   const learnerIdentity: CognitiveIdentity = {
     cid,
     unit_type: "human.student",
@@ -430,7 +474,7 @@ function onboarding(learner: LearnerDescriptor, mode?: ProductMode): OnboardingS
     parent_cid: null,
     lineage: [],
     tenant_id: null,
-    created_at: "2026-06-11T00:00:00.000Z",
+    created_at: createdAt,
     governance_policies: [],
     attestation_chain: [],
   };
@@ -446,7 +490,7 @@ function onboarding(learner: LearnerDescriptor, mode?: ProductMode): OnboardingS
       network_access: true,
       cost_ceiling_usd: 1,
       data_classification_ceiling: "internal",
-      expires_at: "2026-06-11T02:00:00.000Z",
+      expires_at: expiresAt,
     },
     contextLease: {
       lease_id: `lease-${userId}`,
@@ -455,7 +499,7 @@ function onboarding(learner: LearnerDescriptor, mode?: ProductMode): OnboardingS
       allowed_users: [userId],
       token_budget: 16_000,
       granted_by: "kernel",
-      expires_at: "2026-06-11T02:00:00.000Z",
+      expires_at: expiresAt,
     },
     intentLease: {
       intent_id: `intent-${userId}`,
@@ -463,7 +507,7 @@ function onboarding(learner: LearnerDescriptor, mode?: ProductMode): OnboardingS
       interpreted_goal: "Understand the requested topic deeply",
       scope: ["learning", "student"],
       constraints: [],
-      expires_at: "2026-06-11T02:00:00.000Z",
+      expires_at: expiresAt,
       confidence: 1,
       held_by: [learnerIdentity.cid],
     },
@@ -493,7 +537,10 @@ function agentIdentity(kind: string, cid: string): CognitiveIdentity {
 
 /** Build a fully wired, seeded demo session over the governed substrate. */
 export function buildDemoSession(options: DemoOptions): DemoFixture {
-  const clock = new ManualClock(Date.UTC(2026, 5, 11));
+  // The gateway injects a SystemClock (real time); the CLI demo + replay tests keep the frozen
+  // ManualClock so seeded runs stay byte-identical. A frozen clock in production makes all
+  // timestamps + work-timing latencies fiction — the gateway must never use it.
+  const clock = options.clock ?? new ManualClock(Date.UTC(2026, 5, 11));
   // Resumed sessions need globally-unique NEW ids (recorded events keep their original ids), so they
   // use a crypto generator; fresh sessions stay seeded for deterministic tests/replay (DPS-002). An
   // explicit generator (the gateway passes crypto for unique surface ids) overrides both.
@@ -524,7 +571,7 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     ...DEMO_LEARNER,
     trustLevel: options.trustLevel ?? DEMO_LEARNER.trustLevel,
   };
-  const session = onboarding(learner, options.mode);
+  const session = onboarding(learner, clock, options.mode);
   const governance = new GovernanceEngine(PRODUCT_DISPATCH_POLICIES, { idGenerator });
   // Dynamic capability registry (GOV-P03): grant the learner the dispatch capabilities up front;
   // revoking one blocks that agent's next dispatch. Spec: spec/kernel/capability-registry.md.
@@ -615,6 +662,19 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
       idGenerator,
     }),
   );
+  // The Grader (F14 made real): grades a learner's actual answer into genuine, evidence-bearing
+  // depth tests, so mastery is earned — never fabricated.
+  const assessmentDispatcher = dispatcher(
+    "assessment",
+    "cog-asm-demo",
+    new AssessmentUnit({ manifest: manifest("assessment"), model, idGenerator }),
+  );
+  // R4-model (CSE-018, ADR-0058) — the RIA: assigns each element's epistemic role + hierarchy.
+  const representationDispatcher = dispatcher(
+    "representation",
+    "cog-rep-demo",
+    new RepresentationUnit({ manifest: manifest("representation"), model, idGenerator }),
+  );
 
   const loop = new FiberedLearningLoop({
     learningPaths: new LearningPathProjector(world),
@@ -668,6 +728,9 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     ...(options.composer ? { composerDispatcher } : {}),
     ...(options.composer && options.framePlanner ? { framePlannerDispatcher } : {}),
     ...(options.composer && options.imagePlanner ? { imagePlannerDispatcher } : {}),
+    ...(options.composer && options.representation ? { representationDispatcher } : {}),
+    // The Grader is available on the frame path so a learner's answer earns genuine graded mastery.
+    ...(options.composer ? { assessmentDispatcher } : {}),
     // Look-ahead budget (UCS, ADR-0030; Phase 3) is read live from the governed config each ask.
     ...(options.composer && options.framePlanner
       ? { getLookaheadBudget: () => liveConfig.lookaheadBudget }
@@ -675,6 +738,9 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     ...(options.voice ? { voice: options.voice } : {}),
     ...(options.media ? { media: options.media } : {}),
     ...(options.streamRevealMs ? { streamRevealMs: options.streamRevealMs } : {}),
+    ...(options.sourceEvidence ? { sourceEvidence: options.sourceEvidence } : {}),
+    ...(options.frontierProvider ? { frontierProvider: options.frontierProvider } : {}),
+    ...(options.composer && options.theater ? { theater: true } : {}),
   });
 
   // The curriculum agent (F02/F03) turns any goal into a concept DAG — governed like every unit.
@@ -777,12 +843,22 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
       focusConceptId,
       explanationPrompt,
       practicePrompt,
+      // HONEST checkpoint (review N2): the product surface must NOT fabricate a 5/5 depth gate or
+      // claim the learner "solved" a problem they were never asked to answer. On this teach pass we
+      // record only what is true — the concept was explained and a practice problem was presented —
+      // and mark it taught/ready-to-practice (so the path can advance). No `depthTests` ⇒ no
+      // fabricated `assessment.gate.evaluated`. Genuine learner-graded mastery is earned via the
+      // answer path; until then this is a readiness state, labeled as such on the checkpoint frame.
       mastery: {
         assessorCid: "cog-sup-demo",
         passed: true,
-        confidence: 0.9,
-        evidence: [{ kind: "practice", result: "solved correctly" }],
-        depthTests: DEMO_DEPTH_TESTS,
+        confidence: 0.7,
+        evidence: [
+          {
+            kind: "readiness",
+            note: "concept explained and a practice problem presented; learner demonstration pending",
+          },
+        ],
       },
     });
   };

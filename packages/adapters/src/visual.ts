@@ -133,32 +133,43 @@ export class GeminiImageRuntime implements ImageRuntime {
 
   async generate(input: VisualGenerationInput): Promise<Result<GeneratedVisual, CosError>> {
     const concept = (input.conceptIds[0] ?? "").replace(/-/g, " ") || input.prompt.slice(0, 60);
+    // The ImagePlanner authored this prompt deliberately (image-as-cognition, ADR-0030 P4) — it is
+    // the primary artifact and must reach the provider whole (generous clamp), with only a quiet
+    // style suffix appended. Truncating it to a stub was a live image-quality bug.
+    const planned = input.prompt.trim().slice(0, 600);
     const prompt = [
-      `Educational illustration for the concept "${concept}".`,
-      input.prompt.length > 10 ? input.prompt.slice(0, 120) : undefined,
-      "Clean minimal diagram, white background, educational style, no text overlays.",
-    ]
-      .filter(Boolean)
-      .join(" ");
+      planned || `Educational illustration for the concept "${concept}".`,
+      "Clean, minimal, pedagogical illustration style; no text overlays.",
+    ].join(" ");
 
-    try {
-      const response = await this.client.models.generateImages({
-        model: this.model,
-        prompt,
-        config: { numberOfImages: 1 },
-      });
-      const raw = response.generatedImages?.[0]?.image?.imageBytes;
-      if (!raw) {
-        return err(imageError("E_IMAGE_GENERATION_EMPTY", "Imagen returned no image bytes"));
+    // One bounded retry on transient provider failure: image generation is the surface's single
+    // most fragile provider call, and a lone 503 should not cost the learner the illustration.
+    let lastError: CosError | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await this.client.models.generateImages({
+          model: this.model,
+          prompt,
+          config: { numberOfImages: 1 },
+        });
+        const raw = response.generatedImages?.[0]?.image?.imageBytes;
+        if (!raw) {
+          return err(imageError("E_IMAGE_GENERATION_EMPTY", "Imagen returned no image bytes"));
+        }
+        return ok({ bytes: toBytesFromUnknown(raw), mimeType: "image/png" });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        lastError = imageError("E_IMAGE_GENERATION_FAILED", msg);
+        const transient =
+          msg.includes("fetch failed") ||
+          msg.includes("network") ||
+          msg.includes("503") ||
+          msg.includes("overloaded") ||
+          msg.includes("UNAVAILABLE");
+        if (!transient) break;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
-      return ok({ bytes: toBytesFromUnknown(raw), mimeType: "image/png" });
-    } catch (error) {
-      return err(
-        imageError(
-          "E_IMAGE_GENERATION_FAILED",
-          error instanceof Error ? error.message : String(error),
-        ),
-      );
     }
+    return err(lastError ?? imageError("E_IMAGE_GENERATION_FAILED", "unknown image failure"));
   }
 }

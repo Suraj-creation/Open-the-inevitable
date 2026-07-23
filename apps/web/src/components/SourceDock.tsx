@@ -1,0 +1,356 @@
+/**
+ * SourceDock — the front door (CSE-017, ADR-0056): a learner brings a source in-product. Drag or
+ * pick a file, paste a URL for a governed crawl, or paste text — the dock infers the modality,
+ * refuses what the system can't yet understand (honestly, before upload), registers it, narrates
+ * the canonicalization from the pipeline's OWN output, then auto-attaches it so the Living Reference
+ * appears. A thin interactive container over pure, tested helpers (`inferModality`, `describeLayers`).
+ */
+import { useCallback, useRef, useState } from "react";
+import { attachSource, crawlSource, registerSource, type RegisteredSourceView } from "../api";
+
+/** Extension → modality, with an honest refusal for what has no adapter yet (CSE-017 §3/§5). */
+export interface ModalityInference {
+  readonly modality: string | null; // null ⇒ refused (no adapter yet)
+  readonly binary: boolean; // true ⇒ send bytes (PDF), else UTF-8 text
+  readonly note: string; // plain-language label (supported) or the honest refusal + nearest path
+}
+
+const CODE_EXTS = new Set([
+  "js",
+  "ts",
+  "tsx",
+  "jsx",
+  "py",
+  "rs",
+  "go",
+  "java",
+  "c",
+  "cpp",
+  "h",
+  "hpp",
+  "rb",
+  "swift",
+  "kt",
+  "cs",
+  "php",
+  "scala",
+  "sh",
+]);
+
+/** Modalities the substrate accepts by name but cannot yet canonicalize — refused before upload. */
+const REFUSALS: Record<string, string> = {
+  epub: "E-books aren't understood yet — export the chapter as a PDF for now.",
+  pptx: "Presentations aren't understood yet — export the slides as a PDF.",
+  ppt: "Presentations aren't understood yet — export the slides as a PDF.",
+  docx: "Word documents aren't understood yet — export as PDF, or paste the text.",
+  doc: "Word documents aren't understood yet — export as PDF, or paste the text.",
+  mp3: "Audio isn't understood yet (no transcription) — paste a transcript (.vtt or .srt).",
+  wav: "Audio isn't understood yet (no transcription) — paste a transcript (.vtt or .srt).",
+  m4a: "Audio isn't understood yet (no transcription) — paste a transcript (.vtt or .srt).",
+  png: "Images aren't understood yet — bring a document that discusses them.",
+  jpg: "Images aren't understood yet — bring a document that discusses them.",
+  jpeg: "Images aren't understood yet — bring a document that discusses them.",
+  gif: "Images aren't understood yet — bring a document that discusses them.",
+  xlsx: "Spreadsheets aren't understood yet — export the sheet as a .csv.",
+};
+
+export function inferModality(filename: string): ModalityInference {
+  const ext = (filename.split(".").pop() ?? "").toLowerCase();
+  if (ext === "pdf") return { modality: "pdf", binary: true, note: "PDF document" };
+  if (ext === "md" || ext === "markdown")
+    return { modality: "markdown", binary: false, note: "Markdown document" };
+  if (ext === "txt" || ext === "text")
+    return { modality: "text", binary: false, note: "Plain-text document" };
+  if (CODE_EXTS.has(ext)) return { modality: "code", binary: false, note: `Code (${ext})` };
+  if (ext === "vtt" || ext === "srt")
+    return { modality: "video", binary: false, note: "Video transcript" };
+  if (ext === "ipynb") return { modality: "notebook", binary: false, note: "Jupyter notebook" };
+  if (ext === "csv" || ext === "tsv")
+    return { modality: "dataset", binary: false, note: "Dataset (CSV)" };
+  if (ext === "html" || ext === "htm") return { modality: "web", binary: false, note: "Web page" };
+  if (ext in REFUSALS) return { modality: null, binary: false, note: REFUSALS[ext]! };
+  return {
+    modality: null,
+    binary: false,
+    note: `“.${ext || "?"}” isn't a format I understand yet — try a PDF, Markdown, text, or code file.`,
+  };
+}
+
+const LAYER_LABELS: Record<string, string> = {
+  structural: "Mapped the document's structure",
+  semantic: "Read its meaning and concepts",
+  visual: "Captured the page layout",
+  temporal: "Placed it on a timeline",
+  scientific: "Parsed its technical content",
+  citation: "Traced its citations",
+  meaning: "Modelled how it teaches",
+  cognitive: "Prepared it for your understanding",
+};
+
+/** Turn a registration summary into the honest loading narrative (CSE-017 §4) — no invented copy. */
+export function describeLayers(source: RegisteredSourceView): {
+  readonly built: readonly string[];
+  readonly degraded: readonly string[];
+  readonly verdict: string;
+} {
+  const degradedSet = new Set(source.degraded_layers);
+  const built = source.layers_available
+    .filter((l) => !degradedSet.has(l))
+    .map((l) => LAYER_LABELS[l] ?? `Built the ${l} layer`);
+  const degraded = source.degraded_layers.map(
+    (l) => `${LAYER_LABELS[l] ?? `The ${l} layer`} — partial, shown honestly`,
+  );
+  const verdict = source.usable
+    ? "Ready to teach from — deeper understanding keeps forming as you read."
+    : "Not yet usable — the structure couldn't be read reliably.";
+  return { built, degraded, verdict };
+}
+
+type DockPhase =
+  | { readonly kind: "idle" }
+  | { readonly kind: "refused"; readonly note: string }
+  | { readonly kind: "working"; readonly note: string }
+  | { readonly kind: "done"; readonly source: RegisteredSourceView }
+  | { readonly kind: "error"; readonly message: string };
+
+const PASTE_MODALITIES: readonly { readonly value: string; readonly label: string }[] = [
+  { value: "markdown", label: "Markdown" },
+  { value: "text", label: "Plain text" },
+  { value: "code", label: "Code" },
+  { value: "video", label: "Video transcript (VTT/SRT)" },
+];
+
+export function SourceDock({
+  surfaceId,
+  open,
+  onClose,
+  onAttached,
+}: {
+  readonly surfaceId: string;
+  readonly open: boolean;
+  readonly onClose: () => void;
+  /** Fired after a source is registered AND bound, so the host can refresh (Living Reference appears). */
+  readonly onAttached?: (source: RegisteredSourceView) => void;
+}) {
+  const [phase, setPhase] = useState<DockPhase>({ kind: "idle" });
+  const [url, setUrl] = useState("");
+  const [pasteText, setPasteText] = useState("");
+  const [pasteModality, setPasteModality] = useState("markdown");
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const finish = useCallback(
+    async (source: RegisteredSourceView) => {
+      // Auto-attach so the Living Reference appears without a second gesture (CSE-017 §3.4).
+      await attachSource(surfaceId, source.source_version_id).catch(() => {});
+      setPhase({ kind: "done", source });
+      onAttached?.(source);
+    },
+    [surfaceId, onAttached],
+  );
+
+  const ingestFile = useCallback(
+    async (file: File) => {
+      const inference = inferModality(file.name);
+      if (!inference.modality) {
+        setPhase({ kind: "refused", note: inference.note });
+        return;
+      }
+      setPhase({ kind: "working", note: `Reading “${file.name}”…` });
+      try {
+        const content = inference.binary ? await file.arrayBuffer() : await file.text();
+        const source = await registerSource({
+          content,
+          modality: inference.modality,
+          title: file.name,
+        });
+        await finish(source);
+      } catch (cause) {
+        setPhase({
+          kind: "error",
+          message: cause instanceof Error ? cause.message : "upload failed",
+        });
+      }
+    },
+    [finish],
+  );
+
+  const ingestUrl = useCallback(async () => {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    setPhase({ kind: "working", note: `Fetching ${trimmed}…` });
+    try {
+      const source = await crawlSource(trimmed);
+      await finish(source);
+    } catch (cause) {
+      setPhase({ kind: "error", message: cause instanceof Error ? cause.message : "crawl failed" });
+    }
+  }, [url, finish]);
+
+  const ingestPaste = useCallback(async () => {
+    const trimmed = pasteText.trim();
+    if (!trimmed) return;
+    setPhase({ kind: "working", note: "Reading your text…" });
+    try {
+      const source = await registerSource({
+        content: pasteText,
+        modality: pasteModality,
+        title: `Pasted ${pasteModality}`,
+      });
+      await finish(source);
+    } catch (cause) {
+      setPhase({ kind: "error", message: cause instanceof Error ? cause.message : "failed" });
+    }
+  }, [pasteText, pasteModality, finish]);
+
+  if (!open) return null;
+
+  return (
+    <div className="frontier-overlay" role="dialog" aria-label="Add a source">
+      <button type="button" className="fused-scrim" onClick={onClose} aria-label="Close" />
+      <div className="commons-panel source-dock">
+        <header className="fused-head">
+          <span className="fused-eyebrow commons-eyebrow">
+            Bring anything you want to understand
+          </span>
+          <h2 className="fused-title">Add a source</h2>
+          <button type="button" className="overlay-close" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </header>
+
+        {phase.kind === "done" ? (
+          <SourceDockNarrative source={phase.source} onClose={onClose} />
+        ) : (
+          <div className="source-dock-body">
+            {/* File — drag or pick */}
+            <div
+              className={`source-dock-drop${dragOver ? " is-drag" : ""}`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) void ingestFile(file);
+              }}
+            >
+              <p className="source-dock-drop-label">
+                Drop a PDF, Markdown, text, code, or transcript file
+              </p>
+              <button
+                type="button"
+                className="commons-attach-btn"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Choose a file
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="source-dock-file-input"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void ingestFile(file);
+                }}
+              />
+            </div>
+
+            {/* URL — governed crawl */}
+            <div className="source-dock-row">
+              <input
+                type="url"
+                className="source-dock-input"
+                placeholder="…or paste a web page URL"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void ingestUrl();
+                }}
+              />
+              <button type="button" className="commons-attach-btn" onClick={() => void ingestUrl()}>
+                Fetch
+              </button>
+            </div>
+
+            {/* Paste */}
+            <details className="source-dock-paste">
+              <summary>…or paste text</summary>
+              <textarea
+                className="source-dock-textarea"
+                placeholder="Paste markdown, text, code, or a transcript"
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                rows={5}
+              />
+              <div className="source-dock-row">
+                <select
+                  className="source-dock-input"
+                  value={pasteModality}
+                  onChange={(e) => setPasteModality(e.target.value)}
+                  aria-label="What kind of text is this?"
+                >
+                  {PASTE_MODALITIES.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="commons-attach-btn"
+                  onClick={() => void ingestPaste()}
+                >
+                  Add
+                </button>
+              </div>
+            </details>
+
+            {phase.kind === "working" ? <p className="fused-note">{phase.note}</p> : null}
+            {phase.kind === "refused" ? (
+              <p className="fused-note source-dock-refused">{phase.note}</p>
+            ) : null}
+            {phase.kind === "error" ? (
+              <p className="fused-note source-dock-error">Couldn't add it — {phase.message}</p>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The honest canonicalization narrative shown once a source is registered + attached (CSE-017 §4). */
+export function SourceDockNarrative({
+  source,
+  onClose,
+}: {
+  readonly source: RegisteredSourceView;
+  readonly onClose: () => void;
+}) {
+  const { built, degraded, verdict } = describeLayers(source);
+  return (
+    <div className="source-dock-narrative">
+      <h3 className="commons-entry-title">{source.title}</h3>
+      <ul className="source-dock-steps">
+        {built.map((line) => (
+          <li key={line} className="source-dock-step is-built">
+            ✓ {line}
+          </li>
+        ))}
+        {degraded.map((line) => (
+          <li key={line} className="source-dock-step is-degraded">
+            ⚠ {line}
+          </li>
+        ))}
+      </ul>
+      <p className="source-dock-verdict">{verdict}</p>
+      <button type="button" className="commons-attach-btn" onClick={onClose}>
+        Start learning from it
+      </button>
+    </div>
+  );
+}

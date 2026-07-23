@@ -113,6 +113,11 @@ timeline, multimodal, or rendering work:
 - `spec/product/features/F16-cognitive-surface.md` (substrate) and `F09` (experience);
   `spec/research/cognitive-surface-frontier-research.md` (frontier dossier).
 
+**Design law** — read before any UI, visual, motion, or interface work on any manifestation:
+
+- `spec/design/cognitive-design-language-v1.md` — the Cognitive Design Language (CDL), the
+  permanent design system; audit + rationale in `spec/design/proposals/`.
+
 **Implementation status** — never duplicated in this file:
 
 - `IMPLEMENTATION.md` — current state, traceability map, active frontier, verification.
@@ -129,32 +134,38 @@ lives in `spec/vision-application/referenceRepos.md` and `spec/reference-repos/`
 
 ## 4. Working Doctrine
 
-**Spec-first.** Implementation is subordinate to the spec system; specs are executable
-architectural law, not passive documentation. When a change touches architecture, runtime
-semantics, memory behavior, protocols, orchestration, governance, observability, events, or
-execution semantics: update or create the owning spec first, validate coherence
-upstream/downstream, update `spec/indexes/` and dependency maps, then implement, then validate
-the implementation against the spec and feed lessons back into it. Specs declare ownership,
-dependencies, related protocols/events/runtime/governance/observability systems, semantic tags,
-and non-goals.
+**Spec-first, in proportion. Bias to implementation, not paperwork.** Specs are executable law
+where they exist, but ceremony scales with the decision — never write more spec/doc than the change
+warrants:
 
-**Before implementing,** read the owning specs, identify the cognitive primitives involved,
-check whether the change affects events, memory mutations, world-state, policies, workflows,
-manifests, or protocols, and preserve modularity, observability, governance, replayability, and
-protocol boundaries. Major decisions require an ADR under `spec/architecture-decisions/`.
+- **Major / architectural / irreversible** — a new agent or event family, a protocol or
+  dependency-direction change, a new capability domain, a cross-cutting invariant. Update or create
+  the owning spec *first*, then implement, then validate against it. These get one **ADR** under
+  `spec/architecture-decisions/` — and ADRs are **terse**: 2–4 sentences of context, the decision,
+  the rejected alternatives. Never an essay, never per-sub-phase.
+- **Everything else** — additive fields, wiring, renderers, a small unit following an existing
+  pattern, fixes, tests, sub-phases of an already-adopted ADR. **Implement directly.** No new ADR,
+  no new spec file. Touch an owning spec only when you change a contract others depend on, and then
+  a one-line status note at most. The code and its tests are the record.
 
-**Traceability.** Every implementation artifact traces to a spec domain, a protocol or contract
-where applicable, runtime semantics, governance requirements, observability requirements, and
-tests or validation evidence.
+**Before implementing,** read the owning specs for the area, identify the cognitive primitives, and
+check whether the change touches events, memory mutations, world-state, policies, workflows,
+manifests, or protocols — preserving modularity, observability, governance, replayability, and
+protocol boundaries.
 
-**Testing and failure.** Foundational work ships with unit, integration, governance, replay,
-and failure tests. Nothing cognitive exists without observability hooks. Every implementation
-defines failure modes, retries, degradation, recovery, rollback, and observability under failure.
+**Documentation cadence.** `IMPLEMENTATION.md`, `CHANGELOG.md`, and
+`docs/history/implementation-log.md` are updated **only when a major milestone lands** (a whole
+phase or capability), never per sub-step. Batch the sub-phases; write status once at the boundary.
+Fine-grained, dated continuity lives in agent memory, not these files.
 
-**Research evolution.** The project may evolve beyond current documents. When research or
-implementation evidence reveals a stronger primitive: propose it, check coherence with the
-outcome vision, update the specs, then implement. Preserve important research and rejected
-designs in `spec/research/`.
+**Traceability & testing.** Every artifact traces to its area, its contracts where applicable, and
+tests/validation evidence. Foundational work ships with unit/integration/governance/replay/failure
+tests; nothing cognitive exists without observability; every implementation defines its failure
+modes, degradation, and recovery.
+
+**Research evolution.** When evidence reveals a stronger primitive, propose it, check coherence with
+the vision, update the owning spec, then implement. Preserve important research and rejected designs
+in `spec/research/`.
 
 ## 5. Orientation
 
@@ -194,6 +205,9 @@ describes *what was built* rather than *how to think and where to look*, it does
 | Phase plans and roadmaps | `spec/implementation-roadmaps/` |
 | Architecture/runtime/product semantics | The owning spec under `spec/` |
 | Feature catalog | `spec/indexes/product-feature-index.md` |
+
+The homes in this table are written at **major-milestone** cadence (§4), not per sub-phase; batch
+sub-steps and update once at the boundary. Sub-phase continuity lives in agent memory.
 
 **Size law:** this file stays under ~200 lines. If an edit would push past the cap, compress or
 relocate — never append. When a milestone lands, CLAUDE.md is **not** touched — update

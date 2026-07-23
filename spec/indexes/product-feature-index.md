@@ -56,6 +56,7 @@ The product surface decomposes into twelve capability pillars; sixteen feature s
 | Cognitive Surface substrate (block primitive, projections, render + replay, CRDT collab) | F16, F09, F04, F07 | `world-state/`, `events/`, `replay/`, `execution/`, `runtime/` |
 | Self-Evolution Proposals | F12 | `evolution/`, `experimentation/`, `benchmarking/` |
 | Synthetic Learners & Pedagogy Evaluation | F14 | `synthetic-learners/`, `simulations/`, `cognitive-benchmarks/`, `learning-science/` |
+| Cognitive Source Environment (source canonicalization, anchors, viewports/highlights/sync, episodes, frontier overlays) | F15, F16, F04, F09, F10 | `source-environment/` (CSE-001…CSE-010, ADR-0032) |
 
 ## How to Add a New Feature
 

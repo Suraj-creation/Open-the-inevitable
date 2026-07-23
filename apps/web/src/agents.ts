@@ -86,6 +86,34 @@ const REGISTRY: Record<string, AgentIdentity> = {
     accent: "var(--agent-supervisor)",
     sigil: "◆",
   },
+  revision: {
+    key: "revision",
+    label: "Challenger",
+    role: "revision",
+    accent: "var(--agent-socratic)",
+    sigil: "◇",
+  },
+  composer: {
+    key: "composer",
+    label: "Composer",
+    role: "surface-composition",
+    accent: "var(--agent-explainer)",
+    sigil: "❐",
+  },
+  frameplanner: {
+    key: "frameplanner",
+    label: "Planner",
+    role: "frame-planning",
+    accent: "var(--agent-supervisor)",
+    sigil: "▦",
+  },
+  imageplanner: {
+    key: "imageplanner",
+    label: "Illustrator",
+    role: "image-cognition",
+    accent: "var(--agent-coach)",
+    sigil: "◨",
+  },
 };
 
 const FALLBACK: AgentIdentity = {

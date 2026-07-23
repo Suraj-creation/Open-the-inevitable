@@ -89,6 +89,89 @@ export {
 } from "./frame-planner-unit";
 export type { ImagePlan, ImagePlannerUnitDeps } from "./image-planner-unit";
 export { ImagePlannerUnit, deterministicImagePlan, parseImagePlan } from "./image-planner-unit";
+export type {
+  RepresentationProduct,
+  RepresentationElementAssignment,
+  RepresentationUnitDeps,
+} from "./representation-unit";
+export {
+  RepresentationUnit,
+  degradedRepresentation,
+  parseRepresentation,
+} from "./representation-unit";
+export type {
+  CanonicalizableLayer,
+  RegionInput,
+  SourceCanonicalizerUnitDeps,
+} from "./source-canonicalizer-unit";
+export {
+  SourceCanonicalizerUnit,
+  parseSemanticLayerOutput,
+  parseCitationLayerOutput,
+  deterministicSemanticLayer,
+  deterministicCitationLayer,
+  FALLBACK_LAYER_CONFIDENCE,
+  MODEL_LAYER_CONFIDENCE,
+} from "./source-canonicalizer-unit";
+export type {
+  CanonicalizerDispatch,
+  SourceCanonicalizationServiceDeps,
+  SemanticCanonicalizationResult,
+  CitationCanonicalizationResult,
+  MeaningConstructionResult,
+} from "./source-canonicalization-service";
+export type { ConceptInput, MeaningRepresentationUnitDeps } from "./meaning-representation-unit";
+export {
+  MeaningRepresentationUnit,
+  parseMeaningLayerOutput,
+  deterministicMeaningLayer,
+  FALLBACK_MEANING_CONFIDENCE,
+  MODEL_MEANING_CONFIDENCE,
+} from "./meaning-representation-unit";
+export { SourceCanonicalizationService } from "./source-canonicalization-service";
+export type { ClaimMode, ClaimForContrast, ClaimReasoningUnitDeps } from "./claim-reasoning-unit";
+export {
+  ClaimReasoningUnit,
+  parseClaimExtractionOutput,
+  parseContradictionOutput,
+  deterministicClaimExtraction,
+  FALLBACK_CLAIM_CONFIDENCE,
+  MODEL_CLAIM_CONFIDENCE,
+} from "./claim-reasoning-unit";
+export type {
+  ClaimDispatch,
+  ClaimEmit,
+  ClaimGraphServiceDeps,
+  ClaimExtractionResult,
+  ContradictionDetectionResult,
+} from "./claim-graph-service";
+export {
+  ClaimGraphService,
+  claimNodeId,
+  SOURCE_CLAIM_RECORDED,
+  SOURCE_CONTRADICTION_DETECTED,
+} from "./claim-graph-service";
+export type {
+  FusionSynthesisUnitDeps,
+  SynthesisTreatment,
+  SynthesisClaim,
+  SynthesisContradiction,
+} from "./fusion-synthesis-unit";
+export {
+  FusionSynthesisUnit,
+  parseSynthesisOutput,
+  deterministicSynthesis,
+  FALLBACK_SYNTHESIS_CONFIDENCE,
+  MODEL_SYNTHESIS_CONFIDENCE,
+} from "./fusion-synthesis-unit";
+export type { FrontierResearchUnitDeps } from "./frontier-research-unit";
+export { FrontierResearchUnit, parseFrontierEntries } from "./frontier-research-unit";
+export type { TemporalResearchUnitDeps } from "./temporal-research-unit";
+export { TemporalResearchUnit, parseEpistemicStates } from "./temporal-research-unit";
+export type { CreationAssistUnitDeps, AssistProduct } from "./creation-assist-unit";
+export { CreationAssistUnit, parseAssist, deterministicAssist } from "./creation-assist-unit";
+export type { AnswerAssessment, AssessmentUnitDeps } from "./assessment-unit";
+export { AssessmentUnit, deterministicAssessment, parseAnswerAssessment } from "./assessment-unit";
 export type { InferredIntent, IntentInferenceUnitDeps } from "./intent-inference-unit";
 export {
   IntentInferenceUnit,

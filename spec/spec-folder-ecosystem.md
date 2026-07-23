@@ -80,6 +80,8 @@ The local reference repos are part of the architecture learning substrate:
 | `spec/learning-science/` | Computational learning science | Misconception topology, cognitive load, mastery progression, forgetting curves |
 | `spec/curriculum/` | Curriculum intelligence | ULI graphs, prerequisite sequencing, learning path evolution, research transition |
 | `spec/simulations/` | Cognitive simulation | Synthetic learners, synthetic cohorts, policy labs, failure labs, curriculum simulations |
+| `spec/source-environment/` | Cognitive Source Environment (ADR-0032) | Canonical source representation, Source Anchors, progressive canonicalization, meaning representation, transformations, episodic cognition, living knowledge, source agent society, source–surface projection, experience catalog |
+| `spec/intelligence/` | Cognitive Intelligence Persistence (ADR-0035) | The two-plane substrate: chronicle strengthening, governed distillation, IntelligenceArtifacts, distiller registry, intelligence taxonomy, compounding personalization doctrine |
 | `spec/benchmarking/` | Benchmark suites | ULI benchmarks, pedagogy benchmarks, memory quality, replay, governance, evolution safety |
 | `spec/economics/` | Cognitive economics | Reasoning budgets, cost models, energy optimization, semantic caching, resource markets |
 | `spec/topology/` | Runtime and architecture topology | Orchestration graph, regional topology, sharding, agent pools, topology mutations |

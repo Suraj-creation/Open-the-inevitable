@@ -170,11 +170,15 @@ function ConceptMapBody({ block }: { block: CognitionBlock }): ReactNode {
     | undefined;
   if (!map?.nodes?.length) return <ProseBody block={block} />;
 
-  const COLW = 134;
+  const COLW = 178;
   const ROWH = 50;
   const PAD = 16;
-  const NW = 108;
+  const NW = 150;
   const NH = 34;
+  /* SVG text neither wraps nor clips: truncate deterministically so labels never collide
+     (audit B2); the full title lives in the node's <title> tooltip. */
+  const fitLabel = (t: string, max = 22): string =>
+    t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
   const byLayer = new Map<number, MapNode[]>();
   for (const n of map.nodes) {
     const arr = byLayer.get(n.layer) ?? [];
@@ -229,9 +233,10 @@ function ConceptMapBody({ block }: { block: CognitionBlock }): ReactNode {
                 className={`cm-node status-${n.status} ${n.id === map.focus ? "is-focus" : ""}`}
                 transform={`translate(${p.x},${p.y})`}
               >
+                <title>{n.title}</title>
                 <rect width={NW} height={NH} rx={8} />
                 <text className="cm-title" x={8} y={20}>
-                  {n.title}
+                  {fitLabel(n.title)}
                 </text>
               </g>
             );
@@ -242,7 +247,58 @@ function ConceptMapBody({ block }: { block: CognitionBlock }): ReactNode {
   );
 }
 
+const FRONTIER_KIND_LABEL: Record<string, string> = {
+  "latest-research": "Latest research",
+  practice: "In practice",
+  "alternative-explanation": "Alternative view",
+  "open-question": "Open question",
+  "competing-theory": "Competing theory",
+  interdisciplinary: "Interdisciplinary",
+  "future-direction": "Future direction",
+};
+
+interface GroundedFrontierEntry {
+  readonly kind: string;
+  readonly summary: string;
+  readonly external_refs: readonly { readonly uri: string; readonly title: string }[];
+}
+
 function ResearchBody({ block }: { block: CognitionBlock }): ReactNode {
+  // LKS T1 (ADR-0045): a grounded, web-cited frontier surfaced proactively on verified mastery.
+  if (block.content["grounded"] === true && Array.isArray(block.content["entries"])) {
+    const entries = block.content["entries"] as GroundedFrontierEntry[];
+    return (
+      <div className="research-body frontier-body" data-grounded="true">
+        <p className="frontier-provenance">
+          Frontier · surfaced now you&apos;ve mastered this — the living edge, grounded in real
+          sources
+        </p>
+        <ul className="frontier-entries">
+          {entries.map((e, i) => (
+            <li key={`${e.kind}-${i}`} className="frontier-entry" data-kind={e.kind}>
+              <span className="frontier-kind">{FRONTIER_KIND_LABEL[e.kind] ?? e.kind}</span>
+              <p className="frontier-summary">{e.summary}</p>
+              {e.external_refs.length > 0 && (
+                <p className="frontier-refs">
+                  {e.external_refs.map((r, j) => (
+                    <a
+                      key={r.uri}
+                      className="frontier-ref"
+                      href={r.uri}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      {r.title || `source ${j + 1}`}
+                    </a>
+                  ))}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
   const frontier = typeof block.content["frontier"] === "string" ? block.content["frontier"] : null;
   const gap = typeof block.content["gap"] === "string" ? block.content["gap"] : null;
   const hypothesis =

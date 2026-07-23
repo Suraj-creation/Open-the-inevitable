@@ -52,6 +52,7 @@ export const PLANNABLE_SLOTS = [
   "mental_model",
   "table",
   "key_example",
+  "misconception",
   "memory_cue",
 ] as const;
 
@@ -185,6 +186,32 @@ function goalOf(packet: CognitionPacket): string {
   const content = (packet.content ?? {}) as Record<string, unknown>;
   if (typeof content["goal"] === "string" && content["goal"].trim()) return content["goal"];
   return packet.intent ?? conceptTitleOf(packet);
+}
+
+/** One anchored source passage the frame is taught FROM (R2a, ADR-0057 D1). */
+interface SourceExcerpt {
+  readonly anchor_ref: string;
+  readonly quote: string;
+  readonly path: string;
+}
+
+/** Read the source excerpts threaded into the packet (empty ⇒ goal-mode; nothing changes). */
+function sourceExcerptsOf(packet: CognitionPacket): SourceExcerpt[] {
+  const raw = ((packet.content ?? {}) as Record<string, unknown>)["source_excerpts"];
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === "object")
+    .map((e) => ({
+      anchor_ref: typeof e["anchor_ref"] === "string" ? e["anchor_ref"] : "",
+      quote: typeof e["quote"] === "string" ? e["quote"] : "",
+      path: typeof e["path"] === "string" ? e["path"] : "",
+    }))
+    .filter((e) => e.quote.trim().length > 0);
+}
+
+/** Format the excerpts as a numbered, path-labeled block for the prompt. */
+function sourceBlock(excerpts: readonly SourceExcerpt[]): string {
+  return excerpts.map((e, i) => `[${i + 1}] ${e.path || "passage"}: "${e.quote}"`).join("\n");
 }
 
 /** Normalize + validate a raw slot list into ordered, deduped plannable slots (core_concept first). */
@@ -336,7 +363,7 @@ export class FramePlannerUnit implements CognitiveUnit {
   constructor(deps: FramePlannerUnitDeps) {
     this.manifest = deps.manifest;
     this.model = deps.model;
-    this.timeoutMs = deps.timeoutMs ?? 20_000;
+    this.timeoutMs = deps.timeoutMs ?? 60_000;
     this.idGenerator = deps.idGenerator ?? new CryptoIdGenerator();
     this.getDepthBias = deps.getDepthBias ?? (() => 0);
     this.maxFrames = Math.max(1, deps.maxFrames ?? DEFAULT_MAX_FRAMES);
@@ -374,6 +401,13 @@ export class FramePlannerUnit implements CognitiveUnit {
         invocation_key: request.invocation_key,
       });
     }
+    if (result.finishReason === "max_tokens") {
+      throw plannerError(
+        "E_MODEL_OUTPUT_TRUNCATED",
+        "frame plan cut off at token budget; JSON is incomplete",
+        { invocation_key: request.invocation_key, text_length: result.text.length },
+      );
+    }
     const plan = parseFramePlan(result.text, conceptTitleOf(packet), this.maxFrames);
     const response = this.buildResponsePacket(packet, plan, {
       kind: "model-plan",
@@ -386,6 +420,7 @@ export class FramePlannerUnit implements CognitiveUnit {
   private buildRequest(packet: CognitionPacket): ModelGenerationRequest {
     const title = conceptTitleOf(packet);
     const goal = goalOf(packet);
+    const excerpts = sourceExcerptsOf(packet);
     const bias = this.getDepthBias();
     const depthGuidance =
       bias > 0.15
@@ -401,20 +436,37 @@ export class FramePlannerUnit implements CognitiveUnit {
       "→ connection/edge-cases, but adapt to the concept. Each frame names a `sub_focus` (the exact",
       "slice it teaches) so a downstream composer can distill DIFFERENT anchors for each.",
       "Respond with JSON only (no markdown fences) matching:",
-      '{"frames":[{"title":"short frame title","sub_focus":"the precise slice this frame teaches","archetype":"concept-first|image-led|compare|formal|example-led","slots":["core_concept","definition","key_formula","diagram","relationship","mental_model","table","key_example","memory_cue"],"intent":"introduce|build|illustrate|connect|deepen|summarize"}],"lookahead":[{"title":"opening frame of the likely NEXT step","sub_focus":"what that next step introduces","archetype":"concept-first","slots":["core_concept"],"trigger_assumption":"learner masters this concept and advances"}],"pacing":{"strategy":"progressive","notes":"why this sequence"}}',
+      '{"frames":[{"title":"short frame title","sub_focus":"the precise slice this frame teaches","archetype":"concept-first|image-led|compare|formal|example-led","slots":["core_concept","definition","key_formula","diagram","relationship","mental_model","table","key_example","misconception","memory_cue"],"intent":"introduce|build|illustrate|connect|deepen|summarize"}],"lookahead":[{"title":"opening frame of the likely NEXT step","sub_focus":"what that next step introduces","archetype":"concept-first","slots":["core_concept"],"trigger_assumption":"learner masters this concept and advances"}],"pacing":{"strategy":"progressive","notes":"why this sequence"}}',
       `Rules: 1–${this.maxFrames} frames (fewer is better — never pad). Each frame's \`slots\` lists ONLY`,
-      "the MCCR anchors that frame will actually fill (≤ 5 per frame so it fits one screen); always",
-      "include core_concept. Order frames so understanding compounds. The FIRST frame introduces; the",
-      "LAST consolidates. Distinct sub_focus per frame — no two frames teach the same slice.",
+      "the MCCR anchors that frame will actually fill (≤ 7 per frame so it fits one screen); always",
+      "include core_concept. A frame should carry a COMPLETE slice — formula, worked example, and the",
+      "misconception it attracts belong on the board, not behind a link. Order frames so understanding",
+      "compounds. The FIRST frame introduces; the LAST consolidates. Distinct sub_focus per frame —",
+      "no two frames teach the same slice.",
       "`lookahead` (0 or 1 entries): the OPENING frame you predict the learner will need NEXT once they",
       "master this concept, with the `trigger_assumption` behind the bet. Omit it if the next step is",
       "unclear. It is discardable — a pre-warm hint, never part of this lesson.",
+      // R2a (ADR-0057 D1): when the frame is taught FROM a source, decompose THE PASSAGE.
+      ...(excerpts.length > 0
+        ? [
+            "SOURCE MODE: you are teaching FROM the document passage(s) below. Decompose THIS passage",
+            "into frames — each frame teaches a slice OF the passage, in its reading order. Anchor every",
+            "`sub_focus` to what the passage actually says; never introduce material it does not cover.",
+          ]
+        : []),
       depthGuidance,
     ].join("\n");
+    const sourceSuffix =
+      excerpts.length > 0
+        ? `\n\nSOURCE PASSAGES (decompose these, in order):\n${sourceBlock(excerpts)}`
+        : "";
     return {
-      prompt: `Concept to decompose into frames: ${title}\nLearner goal: ${goal}`,
+      prompt: `Concept to decompose into frames: ${title}\nLearner goal: ${goal}${sourceSuffix}`,
       system,
-      maxTokens: 2048,
+      // Enough room for a multi-frame plan + a bounded thinking phase; at 2048 with uncapped
+      // thinking on gemini-2.5-flash the response was starved to empty text → 100% fallback.
+      maxTokens: 4096,
+      thinkingBudget: 1024,
       responseSchema: OUTPUT_CONTRACT_SCHEMA,
       invocation_key: `${this.manifest.id}:${packet.packet_id}:plan`,
     };

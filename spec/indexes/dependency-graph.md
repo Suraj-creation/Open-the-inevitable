@@ -144,4 +144,101 @@ apps/api (LearnerRegistry + resume-by-learner) -> persistence/durable-learner-id
                                           packages/cli (learner-parameterized onboarding), packages/shared (newCid)
 ```
 
+## Cognitive Source Environment Dependencies (ADR-0032)
+
+Authored 2026-07 (spec-first; implementation begins CSE-P1). Acyclic; arrows point from
+dependent to dependency.
+
+```text
+architecture-decisions/ADR-0032          -> next-generation-cognitive-operating-system-blueprint (§25.4),
+                                          product/features/F15, surface/surface-event-architecture,
+                                          architecture-decisions/ADR-0030
+source-environment/CSE-001-foundations   -> next-generation-cognitive-operating-system-blueprint,
+                                          product/features/F15, product/features/F16,
+                                          architecture/Cognitive-Architecture
+source-environment/CSE-002-canonical-source-representation -> source-environment/CSE-001,
+                                          product/features/F15, world-state/world-state-graph,
+                                          memory/memory-tiers, events/event-taxonomy,
+                                          protocols/model-invocation-protocol, kernel/* (leases, envelopes),
+                                          architecture/Tech-Stack
+source-environment/CSE-003-meaning-representation-layer -> source-environment/CSE-002,
+                                          world-state/knowledge-graph-engine,
+                                          architecture-decisions/ADR-0027
+source-environment/CSE-004-transformations -> source-environment/CSE-003, product/features/F04,
+                                          surface/multimodal-provider-abstraction
+source-environment/CSE-005-episodic-cognition -> source-environment/CSE-002, memory/memory-tiers,
+                                          protocols/memory-mutation-protocol, product/features/F05,
+                                          product/features/F14, persistence/durable-learner-identity
+source-environment/CSE-006-living-knowledge -> source-environment/CSE-002, source-environment/CSE-003,
+                                          product/features/F10, architecture-decisions/ADR-0026,
+                                          architecture-decisions/ADR-0021
+source-environment/CSE-007-source-agent-society -> source-environment/CSE-002, source-environment/CSE-003,
+                                          source-environment/CSE-005, product/features/F06,
+                                          product/features/F07, architecture-decisions/ADR-0018,
+                                          architecture-decisions/ADR-0025
+source-environment/CSE-008-source-surface-projection -> source-environment/CSE-002,
+                                          source-environment/CSE-007, surface/cognitive-surface-runtime,
+                                          surface/surface-event-architecture, surface/inline-multimodal-artifacts,
+                                          architecture-decisions/ADR-0030, architecture-decisions/ADR-0024,
+                                          architecture-decisions/ADR-0007, design/cognitive-design-language-v1
+source-environment/CSE-009-experience-catalog -> source-environment/CSE-004..CSE-008,
+                                          product/features/F09, design/cognitive-design-language-v1
+source-environment/CSE-010-delivery      -> source-environment/CSE-001..CSE-009, implementation-roadmaps
+```
+
+## Cognitive Theater + Backend Dependencies (ADR-0033, ADR-0034)
+
+Authored 2026-07 (spec-first). Acyclic; arrows point from dependent to dependency.
+
+```text
+architecture-decisions/ADR-0033          -> architecture-decisions/ADR-0030, ADR-0024, ADR-0007,
+                                          ADR-0025, ADR-0021, ADR-0027, source-environment/CSE-005/007/008,
+                                          design/cognitive-design-language-v1
+source-environment/CSE-011-cognitive-director -> source-environment/CSE-005, CSE-007, CSE-008,
+                                          architecture-decisions/ADR-0033, ADR-0025, ADR-0026, ADR-0027,
+                                          ADR-0021, kernel/intent-lease, product/features/F07, F14
+source-environment/CSE-012-cognitive-scene -> source-environment/CSE-008, CSE-011,
+                                          surface/cognitive-surface-runtime, surface/surface-event-architecture,
+                                          surface/inline-multimodal-artifacts, architecture-decisions/ADR-0030,
+                                          ADR-0033, ADR-0007, design/cognitive-design-language-v1
+source-environment/CSE-013-knowledge-cinematography -> source-environment/CSE-008, CSE-011, CSE-012,
+                                          architecture-decisions/ADR-0007, ADR-0033,
+                                          design/cognitive-design-language-v1, -v2, -v3
+source-environment/CSE-014-cognitive-interaction-grammar -> source-environment/CSE-008, CSE-011, CSE-012,
+                                          architecture-decisions/ADR-0024, ADR-0033,
+                                          surface/surface-streaming-sync-protocol, kernel/governance-kernel
+source-environment/CSE-015-source-fusion -> source-environment/CSE-002, CSE-003, CSE-006, CSE-008,
+                                          world-state/knowledge-graph-engine, product/features/F08,
+                                          architecture-decisions/ADR-0027
+source-environment/CSE-016-creative-cognition -> source-environment/CSE-005, CSE-006, CSE-009, CSE-012,
+                                          CSE-014, product/features/F10, F14, architecture-decisions/ADR-0026
+design/cognitive-design-language-v3      -> design/cognitive-design-language-v1, -v2,
+                                          architecture-decisions/ADR-0033, source-environment/CSE-011..CSE-014
+architecture-decisions/ADR-0034          -> architecture-decisions/ADR-0003, ADR-0005, ADR-0008, ADR-0009,
+                                          ADR-0010, source-environment/CSE-002, architecture/Tech-Stack,
+                                          packages/contracts
+packages/adapters (supabase.ts)          -> @inevitable/contracts, packages/adapters (conformance),
+                                          architecture-decisions/ADR-0034 (guarded dynamic import; not a workspace dep)
+implementation-roadmaps/cse-cognitive-theater-and-backend -> source-environment/CSE-001..CSE-016,
+                                          architecture-decisions/ADR-0032, ADR-0033, ADR-0034
+```
+
+## Cognitive Intelligence Persistence Dependencies (ADR-0035)
+
+Authored 2026-07 (spec-first; implemented as M3.5, between M3 and M4). Acyclic.
+
+```text
+architecture-decisions/ADR-0035          -> architecture-decisions/ADR-0008, ADR-0009, ADR-0015,
+                                          ADR-0017, ADR-0021, ADR-0027, ADR-0029, ADR-0034,
+                                          source-environment/CSE-005, memory/memory-tiers,
+                                          world-state/world-state-graph
+intelligence/CIP-001-cognitive-intelligence-substrate -> architecture-decisions/ADR-0035,
+                                          events/event-taxonomy, protocols/memory-mutation-protocol,
+                                          protocols/reasoning-trace-protocol, world-state/world-state-graph,
+                                          memory/memory-tiers, source-environment/CSE-005
+intelligence/CIP-002-audit-and-distiller-registry -> intelligence/CIP-001,
+                                          architecture-decisions/ADR-0034,
+                                          implementation-roadmaps/cse-implementation-blueprint
+```
+
 

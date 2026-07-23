@@ -15,7 +15,7 @@ import {
 
 const imageManifest = MVP_AGENT_MANIFESTS.find((m) => m.id === "agent.imageplanner")!;
 
-function stubModel(text: string, finishReason?: "stop" | "refusal"): ModelRuntime {
+function stubModel(text: string, finishReason?: "stop" | "refusal" | "max_tokens"): ModelRuntime {
   return {
     async generate() {
       return { text, model: "stub-model", finishReason: finishReason ?? ("stop" as const) };
@@ -152,6 +152,17 @@ describe("ImagePlannerUnit", () => {
     expect(content["response_kind"]).toBe("deterministic-image-plan");
     expect((content["image_plan"] as ImagePlan).helps).toBe(false);
     expect(emissions.trace?.determinism_level).toBe("D2");
+  });
+
+  test("a truncated decision degrades with the truthful E_MODEL_OUTPUT_TRUNCATED reason", async () => {
+    const unit = new ImagePlannerUnit({
+      manifest: imageManifest,
+      model: stubModel('{"helps":tr', "max_tokens"),
+    });
+    const emissions = await unit.execute(packet({ concept_title: "Linear maps" }));
+    const content = (emissions.packets?.[0]?.content ?? {}) as Record<string, unknown>;
+    expect(content["response_kind"]).toBe("deterministic-image-plan");
+    expect(content["fallback_reason"]).toBe("E_MODEL_OUTPUT_TRUNCATED");
   });
 
   test("refine mode is recorded as a refine reasoning kind", async () => {

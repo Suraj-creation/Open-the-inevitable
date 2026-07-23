@@ -31,6 +31,7 @@ export type {
   DepthGateRecord,
   PrerequisiteDescentRecord,
   ResearchFrontierRecord,
+  ResumeCardRecord,
   EvaluationRecord,
   ProductMode,
   ProjectionMode,
@@ -39,6 +40,15 @@ export type {
   AgentWorkTimingRecord,
   AgentWorkStatus,
 } from "./projection";
+export type {
+  RepresentationPlan,
+  RepresentationElementPlan,
+  RepresentationHierarchy,
+  RepresentationDensity,
+  EpistemicRole,
+  ExpertiseLevel,
+  RepresentationAdaptivity,
+} from "./representation";
 export type {
   CognitionBlock,
   CognitionBlockType,
@@ -71,3 +81,36 @@ export type {
   TimelineEdgeType,
   TimelineEntryPoint,
 } from "./timeline";
+export type {
+  AffectSignalRecord,
+  AffectState,
+  AttentionBudgetRecord,
+  DirectiveRecord,
+  DirectiveScale,
+  DirectorState,
+  SceneActor,
+  SceneDeltaRecord,
+  SceneLighting,
+  SceneRecord,
+} from "./theater";
+export type { SceneShot, ShotKind } from "./cinematography";
+export type { ExpressedIntentRecord, InteractionClass, InteractionRouting } from "./interaction";
+export type {
+  FrontierEntryView,
+  FrontierOverlayView,
+  SourceBindingRecord,
+  SourceHighlightAmplitude,
+  SourceHighlightLifetime,
+  SourceHighlightRecord,
+  SourceHighlightRole,
+  SourceProvenanceClass,
+  SourceRegionView,
+  SourceSyncBinding,
+  SourceSyncBindingRecord,
+  SourceViewport,
+  SourceViewportChangeRecord,
+  SourceViewportPlanRecord,
+  ViewportChangeCause,
+  ViewportEmphasis,
+  SurfaceFrontierProvider,
+} from "./source-projection";

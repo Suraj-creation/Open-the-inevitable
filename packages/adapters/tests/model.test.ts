@@ -208,4 +208,66 @@ describe("GeminiModelRuntime", () => {
     expect(config["maxOutputTokens"]).toBe(64);
     expect(config["responseMimeType"]).toBe("application/json");
   });
+
+  test("webSearch attaches the search tool (not responseSchema) and returns real citations", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const fake: GenAiClientLike = {
+      models: {
+        async generateContent(args) {
+          calls.push(args as unknown as Record<string, unknown>);
+          return {
+            text: "Recent work explores second-order methods.",
+            candidates: [
+              {
+                finishReason: "STOP",
+                groundingMetadata: {
+                  groundingChunks: [
+                    { web: { uri: "https://arxiv.org/abs/2401.00001", title: "A Survey" } },
+                    { web: { uri: "https://arxiv.org/abs/2401.00001", title: "dup — dropped" } },
+                    { web: { title: "no uri — dropped" } },
+                  ],
+                },
+              },
+            ],
+          };
+        },
+        async embedContent() {
+          return { embeddings: [{ values: [0.1] }] };
+        },
+      },
+    };
+    const runtime = GeminiModelRuntime.fromClient(fake, "gemini-test");
+    const result = await runtime.generate({
+      prompt: "frontier of gradient descent",
+      webSearch: true,
+      responseSchema: { type: "object" }, // ignored under webSearch (mutually exclusive)
+    });
+    const config = calls[0]?.["config"] as Record<string, unknown>;
+    expect(config["tools"]).toEqual([{ googleSearch: {} }]);
+    expect(config["responseMimeType"]).toBeUndefined(); // schema not sent with grounding
+    expect(result.citations).toEqual([
+      { uri: "https://arxiv.org/abs/2401.00001", title: "A Survey" },
+    ]); // deduped by uri; entries without a uri dropped
+  });
+
+  test("citations round-trip through record → replay (D3 time-honesty)", async () => {
+    const inner: ModelRuntime = {
+      async generate() {
+        return {
+          text: "grounded",
+          model: "stub",
+          citations: [{ uri: "https://example.org/x", title: "X" }],
+        };
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const { bus, runtime: recorder } = harness("record", inner);
+    const recorded = await recorder.generate(request("frontier:k"));
+    expect(recorded.citations).toEqual([{ uri: "https://example.org/x", title: "X" }]);
+    const replayer = new RecordingModelRuntime({ mode: "replay", bus });
+    const replayed = await replayer.generate(request("frontier:k"));
+    expect(replayed.citations).toEqual([{ uri: "https://example.org/x", title: "X" }]);
+  });
 });

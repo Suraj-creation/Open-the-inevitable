@@ -16,6 +16,8 @@ Protocol families:
 - Governance Decision Protocol.
 - Evolution Proposal Protocol.
 - Workflow State Protocol.
+- Source Canonicalization Contract (layer artifacts, source versions).
+- Source Anchor Resolution (pure-function anchor → region resolution and cross-version migration).
 
 Every protocol must be versioned and contract-tested.
 
@@ -36,4 +38,9 @@ Phase 1B authored the core protocol specs (canonical form = JSON Schema, per
 - Model Invocation Protocol (Phase 2B — D3 recording) → [protocols/model-invocation-protocol.md](../protocols/model-invocation-protocol.md)
 
 Pending: World-State Delta, Tool Invocation, Evolution Proposal, Workflow State.
+
+Source-environment contracts (semantics authored in
+[source-environment/CSE-002](../source-environment/CSE-002-canonical-source-representation.md);
+JSON Schemas are an implementation-phase artifact per ADR-0032): Source Canonicalization
+Contract, Source Anchor Resolution.
 

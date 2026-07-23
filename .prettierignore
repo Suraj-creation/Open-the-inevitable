@@ -13,3 +13,4 @@ paperclip/
 pi/
 *.md
 tmp-events/
+.superpowers/

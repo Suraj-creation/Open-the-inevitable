@@ -55,6 +55,9 @@ const SLOT_ORDER = [
   "mental_model",
   "table",
   "key_example",
+  "process",
+  "code",
+  "misconception",
   "memory_cue",
 ] as const;
 
@@ -128,10 +131,53 @@ const OUTPUT_CONTRACT_SCHEMA: Record<string, unknown> = {
         definition: { type: "string" },
         mental_model: { type: "string" },
         key_example: { type: "string" },
+        misconception: {
+          type: "object",
+          properties: {
+            wrong: { type: "string" },
+            correction: { type: "string" },
+          },
+        },
         memory_cue: { type: "string" },
         key_formula: {
           type: "object",
-          properties: { latex: { type: "string" }, plain: { type: "string" } },
+          properties: {
+            latex: { type: "string" },
+            plain: { type: "string" },
+            lines: { type: "array", items: { type: "string" } },
+            line_labels: { type: "array", items: { type: "string" } },
+          },
+        },
+        process: {
+          type: "object",
+          properties: {
+            steps: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  text: { type: "string" },
+                  detail: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        code: {
+          type: "object",
+          properties: {
+            language: { type: "string" },
+            lines: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  text: { type: "string" },
+                  note: { type: "string" },
+                },
+              },
+            },
+          },
         },
         relationship: {
           type: "object",
@@ -146,8 +192,30 @@ const OUTPUT_CONTRACT_SCHEMA: Record<string, unknown> = {
           type: "object",
           properties: {
             kind: { type: "string" },
-            nodes: { type: "array", items: { type: "object" } },
-            edges: { type: "array", items: { type: "object" } },
+            // Non-empty item properties: Gemini structured output rejects OBJECT array items with
+            // empty `properties` (400 INVALID_ARGUMENT), which would 400 every composer call.
+            nodes: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  label: { type: "string" },
+                  group: { type: "string" },
+                },
+              },
+            },
+            edges: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  from: { type: "string" },
+                  to: { type: "string" },
+                  relation: { type: "string" },
+                },
+              },
+            },
           },
         },
         table: {
@@ -216,6 +284,32 @@ function goalOf(packet: CognitionPacket): string {
   return packet.intent ?? conceptTitleOf(packet);
 }
 
+/** One anchored source passage the frame is taught FROM (R2a, ADR-0057 D1). */
+interface SourceExcerpt {
+  readonly anchor_ref: string;
+  readonly quote: string;
+  readonly path: string;
+}
+
+/** Read the source excerpts threaded into the packet (empty ⇒ goal-mode; nothing changes). */
+function sourceExcerptsOf(packet: CognitionPacket): SourceExcerpt[] {
+  const raw = ((packet.content ?? {}) as Record<string, unknown>)["source_excerpts"];
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === "object")
+    .map((e) => ({
+      anchor_ref: typeof e["anchor_ref"] === "string" ? e["anchor_ref"] : "",
+      quote: typeof e["quote"] === "string" ? e["quote"] : "",
+      path: typeof e["path"] === "string" ? e["path"] : "",
+    }))
+    .filter((e) => e.quote.trim().length > 0);
+}
+
+/** Format the excerpts as a numbered, path-labeled block for the prompt. */
+function sourceBlock(excerpts: readonly SourceExcerpt[]): string {
+  return excerpts.map((e, i) => `[${i + 1}] ${e.path || "passage"}: "${e.quote}"`).join("\n");
+}
+
 function buildElement(
   slot: ComposerSlot,
   content: Record<string, unknown>,
@@ -265,8 +359,17 @@ export function deterministicComposition(packet: CognitionPacket): ComposerOutpu
   };
 }
 
-/** Parse + validate the composer output contract. Throws E_MODEL_OUTPUT_MALFORMED on bad shape. */
-export function parseComposerOutput(text: string, conceptId: string): ComposerOutput {
+/**
+ * Parse + validate the composer output contract. Throws E_MODEL_OUTPUT_MALFORMED on bad shape.
+ * When `fallbackTitle` is provided and the model produced real anchors but omitted `core_concept`,
+ * a minimal core_concept is synthesized from the title rather than discarding the whole rich
+ * response (partial salvage — a good frame missing only its heading should not degrade to fallback).
+ */
+export function parseComposerOutput(
+  text: string,
+  conceptId: string,
+  fallbackTitle?: string,
+): ComposerOutput {
   const trimmed = text
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
@@ -289,12 +392,23 @@ export function parseComposerOutput(text: string, conceptId: string): ComposerOu
     const content = elementContentFrom(slot, value);
     if (content) mccr[slot] = buildElement(slot, content, conceptId);
   }
-  // The board must be non-empty: require at least a core concept.
+  // The board must be non-empty: require at least a core concept. If the model produced other real
+  // anchors but omitted core_concept, salvage the frame by synthesizing one from the concept title
+  // (only when a title is available) rather than discarding a rich composition.
   if (!mccr.core_concept) {
-    throw composerError(
-      "E_MODEL_OUTPUT_MALFORMED",
-      "composer output is missing a core_concept anchor",
-    );
+    const hasOtherAnchors = Object.keys(mccr).length > 0;
+    if (fallbackTitle && fallbackTitle.trim() && hasOtherAnchors) {
+      mccr.core_concept = buildElement(
+        "core_concept",
+        { kind: "text", text: fallbackTitle.trim() },
+        conceptId,
+      );
+    } else {
+      throw composerError(
+        "E_MODEL_OUTPUT_MALFORMED",
+        "composer output is missing a core_concept anchor",
+      );
+    }
   }
 
   const scriptRaw = (obj.narration_script ?? {}) as { segments?: unknown };
@@ -354,7 +468,77 @@ function elementContentFrom(slot: ComposerSlot, value: unknown): Record<string, 
   if (slot === "key_formula") {
     const latex = typeof v["latex"] === "string" ? v["latex"] : "";
     const plain = typeof v["plain"] === "string" ? v["plain"] : "";
-    return latex || plain ? { kind: "formula", latex, plain: plain || latex } : null;
+    const lines = Array.isArray(v["lines"])
+      ? (v["lines"] as unknown[])
+          .filter((l): l is string => typeof l === "string")
+          .map((l) => l.trim())
+          .filter((l) => l.length > 0)
+      : [];
+    // R4c (ADR-0058): optional per-line transformation labels for the derivation grammar.
+    const lineLabels = Array.isArray(v["line_labels"])
+      ? (v["line_labels"] as unknown[]).map((l) => (typeof l === "string" ? l.trim() : ""))
+      : undefined;
+    return latex || plain || lines.length > 0
+      ? {
+          kind: "formula",
+          latex: latex || lines[0] || "",
+          plain: plain || latex,
+          lines,
+          ...(lineLabels ? { line_labels: lineLabels } : {}),
+        }
+      : null;
+  }
+  if (slot === "misconception") {
+    // R4e (ADR-0058; CSE-013 dissolve grammar). Structured object → the dissolve (wrong→correction).
+    // A bare string (legacy prompt / degraded output) stays plain text so nothing is lost.
+    if (typeof value === "string") {
+      const txt = value.trim();
+      return txt ? { kind: "text", text: txt } : null;
+    }
+    const wrong = typeof v["wrong"] === "string" ? v["wrong"].trim() : "";
+    const correction = typeof v["correction"] === "string" ? v["correction"].trim() : "";
+    if (wrong && correction) return { kind: "misconception", wrong, correction };
+    // Only one side given: there is no dissolve to show, but the surviving text still teaches.
+    const txt = correction || wrong;
+    return txt ? { kind: "text", text: txt } : null;
+  }
+  if (slot === "process") {
+    // R4e (ADR-0058; CSE-018 §6 process/algorithm grammar): an ordered procedure. Each step is an
+    // object {text, detail?}; a bare string is accepted as the step text (robustness).
+    const stepsRaw = Array.isArray(v["steps"]) ? (v["steps"] as unknown[]) : [];
+    const steps = stepsRaw
+      .map((s) => {
+        const so = (s ?? {}) as Record<string, unknown>;
+        const text =
+          typeof so["text"] === "string"
+            ? so["text"].trim()
+            : typeof s === "string"
+              ? s.trim()
+              : "";
+        const detail = typeof so["detail"] === "string" ? so["detail"].trim() : "";
+        return { text, detail: detail || null };
+      })
+      .filter((s) => s.text.length > 0);
+    return steps.length > 0 ? { kind: "process", steps } : null;
+  }
+  if (slot === "code") {
+    // R4e (ADR-0058; CSE-018 §6 code grammar): source lines the learner reads. Each line is
+    // {text, note?}; a bare string is the line text. Blank lines are kept (code spacing matters),
+    // but the element only exists if at least one line carries actual code.
+    const language = typeof v["language"] === "string" ? v["language"].trim() : "";
+    const linesRaw = Array.isArray(v["lines"]) ? (v["lines"] as unknown[]) : [];
+    const lines = linesRaw
+      .map((l) => {
+        if (typeof l === "string") return { text: l, note: null as string | null };
+        const lo = (l ?? {}) as Record<string, unknown>;
+        const text = typeof lo["text"] === "string" ? lo["text"] : "";
+        const note = typeof lo["note"] === "string" ? lo["note"].trim() : "";
+        return { text, note: note || null };
+      })
+      .filter((l) => typeof l.text === "string");
+    return lines.some((l) => l.text.trim().length > 0)
+      ? { kind: "code", language: language || "text", lines }
+      : null;
   }
   if (slot === "relationship") {
     const from = typeof v["from"] === "string" ? v["from"] : "";
@@ -413,7 +597,7 @@ export class SurfaceComposerUnit implements CognitiveUnit {
   constructor(deps: SurfaceComposerUnitDeps) {
     this.manifest = deps.manifest;
     this.model = deps.model;
-    this.timeoutMs = deps.timeoutMs ?? 20_000;
+    this.timeoutMs = deps.timeoutMs ?? 60_000;
     this.idGenerator = deps.idGenerator ?? new CryptoIdGenerator();
     this.getDepthBias = deps.getDepthBias ?? (() => 0);
   }
@@ -450,7 +634,20 @@ export class SurfaceComposerUnit implements CognitiveUnit {
         invocation_key: request.invocation_key,
       });
     }
-    const composition = parseComposerOutput(result.text, conceptIdOf(packet));
+    if (result.finishReason === "max_tokens") {
+      // Truncation must be named truthfully — a cut-off composition degrading as "malformed output"
+      // hides the real cause (budget) from the health slice (review §7.1).
+      throw composerError(
+        "E_MODEL_OUTPUT_TRUNCATED",
+        "composition cut off at token budget; JSON is incomplete",
+        { invocation_key: request.invocation_key, text_length: result.text.length },
+      );
+    }
+    const composition = parseComposerOutput(
+      result.text,
+      conceptIdOf(packet),
+      conceptTitleOf(packet),
+    );
     const response = this.buildResponsePacket(packet, composition, {
       kind: "model-composition",
       model: result.model,
@@ -462,6 +659,7 @@ export class SurfaceComposerUnit implements CognitiveUnit {
   private buildRequest(packet: CognitionPacket): ModelGenerationRequest {
     const title = conceptTitleOf(packet);
     const goal = goalOf(packet);
+    const excerpts = sourceExcerptsOf(packet);
     const bias = this.getDepthBias();
     const depthGuidance =
       bias > 0.15
@@ -471,24 +669,60 @@ export class SurfaceComposerUnit implements CognitiveUnit {
           : "Balance intuition and precision.";
     const system = [
       `You are "${this.manifest.id}". ${this.manifest.role}`,
-      "The BOARD must hold only the Minimal Complete Cognitive Representation (MCCR): the distilled",
-      "visual anchors a learner should keep in view. The VOICE (narration script) carries the actual",
-      "teaching — intuition, analogy, story, reasoning. NEVER put teaching prose on the board, and",
-      "NEVER merely restate the board in the narration. They are complementary: the board is memory,",
-      "the voice is the teacher.",
+      "The BOARD must hold the Minimal COMPLETE Cognitive Representation (MCCR): the distilled",
+      "visual anchors a learner should keep in view — what a world-class educator would leave on the",
+      "whiteboard after teaching this. The VOICE (narration script) carries the actual teaching —",
+      "intuition, analogy, story, reasoning. NEVER put teaching prose on the board, and NEVER merely",
+      "restate the board in the narration. They are complementary: the board is memory, the voice is",
+      "the teacher. When the voice stops, the board alone must let the learner reconstruct the idea.",
       "Respond with JSON only (no markdown fences) matching:",
-      '{"mccr":{"core_concept":"short noun phrase","definition":"one crisp sentence","key_formula":{"latex":"...","plain":"spoken form"},"diagram":{"kind":"node-graph|flow|axes|tree","nodes":[{"id":"n1","label":"..."}],"edges":[{"from":"n1","to":"n2","relation":"..."}]},"relationship":{"from":"A","to":"B","relation":"...","text":"..."},"mental_model":"a vivid analogy in a phrase","table":{"headers":["..."],"rows":[["..."]]},"key_example":"one tight worked instance","memory_cue":"a mnemonic"},"narration_script":{"segments":[{"text":"spoken teaching sentence","anchor_ref":"core_concept|definition|key_formula|diagram|relationship|mental_model|table|key_example|memory_cue","intent":"introduce|build|illustrate|connect|check|reinforce","pause_after":false}]},"image_plan":{"helps":true,"prompt":"a concrete illustration prompt","rationale":"why it helps"}}',
-      "Rules: core_concept and definition are REQUIRED; every other MCCR slot is OPTIONAL — include a",
-      "slot ONLY when it earns its place on the board (omit or null otherwise). Keep total anchors ≤ 6",
-      "so one frame fits one screen. Each narration segment's anchor_ref must name a slot you filled",
-      "(or be omitted for a whole-frame remark). 3–6 narration segments. image_plan.helps is true only",
-      "when a generated illustration genuinely aids understanding (then give a concrete prompt).",
+      '{"mccr":{"core_concept":"short noun phrase","definition":"1-2 precise sentences that fully state the concept","key_formula":{"latex":"...","plain":"spoken form","lines":["optional multi-line derivation, one LaTeX line each, top to bottom"],"line_labels":["optional transformation label per line: substitute, factor, simplify, by induction, …"]},"diagram":{"kind":"node-graph|flow|axes|tree|cycle","nodes":[{"id":"n1","label":"..."}],"edges":[{"from":"n1","to":"n2","relation":"..."}]},"relationship":{"from":"A","to":"B","relation":"...","text":"..."},"mental_model":"a vivid analogy in a phrase","table":{"headers":["..."],"rows":[["..."]]},"key_example":"one tight WORKED instance with its answer, not just a name","process":{"steps":[{"text":"an ordered step of a procedure or algorithm","detail":"optional clarifying sub-line"}]},"code":{"language":"python","lines":[{"text":"a source line, indentation preserved","note":"optional annotation for a salient line"}]},"misconception":{"wrong":"the single most common false belief, stated exactly as the learner would think it","correction":"what is actually true, which the wrong belief resolves into"},"memory_cue":"a mnemonic"},"narration_script":{"segments":[{"text":"spoken teaching sentence","anchor_ref":"core_concept|definition|key_formula|diagram|relationship|mental_model|table|key_example|process|code|misconception|memory_cue","intent":"introduce|build|illustrate|connect|check|reinforce","pause_after":false}]},"image_plan":{"helps":true,"prompt":"a concrete illustration prompt","rationale":"why it helps"}}',
+      "DENSITY LAW: core_concept and definition are REQUIRED. Beyond them, fill EVERY slot that",
+      "genuinely carries cognition for this concept — a well-taught frame typically lands 5–7 anchors.",
+      "A near-empty board wastes the learner's visual memory; a padded board buries it. Never invent",
+      "filler to hit a count, and never drop a formula, worked example, misconception, or diagram the",
+      "concept truly has. Total anchors ≤ 8 so one frame fits one screen without scrolling.",
+      "QUALITY LAW: definitions are complete sentences, not fragments. key_example is WORKED — inputs,",
+      "steps compressed, result. If the concept has a derivation worth seeing, use key_formula.lines",
+      "(up to ~10 lines) — and when a step's move isn't obvious, give the matching key_formula.line_labels",
+      "entry (the transformation: substitute, factor, simplify, by induction), so the derivation reads",
+      "as constructed reasoning, not just stacked equations. diagram nodes/edges must encode real structure (causality, flow, hierarchy),",
+      "never decoration. misconception is a DISSOLVE object: wrong = the false belief in the learner's",
+      "own voice, correction = the truth it resolves into — so the surface can show wrong receding into",
+      "right, not two facts side by side. Give both halves or omit the slot.",
+      "process is for a PROCEDURE or ALGORITHM the learner must be able to follow: ordered steps, each",
+      "one concrete action (optionally a short detail). Use it when the concept is a how-to or a",
+      "sequence of moves — not for a list of facts (that is not a process). The board reveals the steps",
+      "one at a time as you speak them.",
+      "code is for real SOURCE the learner reads: lines with indentation preserved, and a note only on",
+      "the lines that carry the lesson (not every line). Use it when the concept IS code — a function,",
+      "a snippet, a data structure — never to paraphrase prose as pseudo-code.",
+      "Each narration segment's anchor_ref must name a slot you filled (or be omitted for a",
+      "whole-frame remark). 4–7 narration segments; each teaches something the board cannot say alone.",
+      "image_plan.helps is true only when a generated illustration genuinely aids understanding",
+      "(then give a concrete prompt).",
+      // R2a (ADR-0057 D1): when teaching FROM a source, ground the board + voice in the passage.
+      ...(excerpts.length > 0
+        ? [
+            "SOURCE MODE: you are teaching FROM the document passage(s) below. The narration must quote",
+            "or closely paraphrase the passage and name its figures/equations; the MCCR distills what",
+            "the passage says. Never assert anything the passage does not support — if it lacks a",
+            "formula/example, do not invent one. The passage itself is added to the board automatically.",
+          ]
+        : []),
       depthGuidance,
     ].join("\n");
+    const sourceSuffix =
+      excerpts.length > 0
+        ? `\n\nSOURCE PASSAGES (teach from these):\n${sourceBlock(excerpts)}`
+        : "";
     return {
-      prompt: `Concept to teach: ${title}\nLearner goal: ${goal}`,
+      prompt: `Concept to teach: ${title}\nLearner goal: ${goal}${sourceSuffix}`,
       system,
-      maxTokens: 4096,
+      // The combined MCCR + narration + image_plan payload is large; give it ample room and bound
+      // the reasoning-model thinking phase so JSON is never truncated (the composer-flakiness root cause).
+      maxTokens: 8192,
+      thinkingBudget: 2048,
       responseSchema: OUTPUT_CONTRACT_SCHEMA,
       invocation_key: `${this.manifest.id}:${packet.packet_id}:compose`,
     };

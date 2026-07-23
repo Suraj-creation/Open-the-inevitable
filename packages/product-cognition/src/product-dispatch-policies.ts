@@ -32,8 +32,21 @@ const STUDENT_AGENTS = new Set([
   "imageplanner",
 ]);
 
-/** Agents that require elevated trust (trust_level >= 3). */
-const PRIVILEGED_AGENTS = new Set(["memory", "curriculum"]);
+/** Agents that require elevated trust (trust_level >= 3). The canonicalizer, meaning, and claim
+ * agents join memory and curriculum here because constructing shared source layers / the Claim
+ * Graph reshapes the global knowledge graph (CSE M3/M6/M9 T2, ADR-0032/0037/0041) — not a
+ * per-learner surface concern. */
+const PRIVILEGED_AGENTS = new Set([
+  "memory",
+  "curriculum",
+  "canonicalizer",
+  "meaning",
+  "claim",
+  "synthesis",
+  "frontier",
+  "temporal",
+  "creation",
+]);
 
 const MINIMUM_TRUST = 1;
 const ELEVATED_TRUST = 3;

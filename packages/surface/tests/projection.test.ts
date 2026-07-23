@@ -439,6 +439,37 @@ describe("foldSurfaceEvents", () => {
     expect(state.research_frontiers[0]?.concept_id).toBe("fourier");
   });
 
+  test("LKS T1: a grounded surfaced frontier folds its grounded flag + cited entries (ADR-0045)", async () => {
+    const f = makeFixture("projection-frontier-grounded");
+    await seedSurface(f, "srf-fg");
+
+    await f.emit("surface.research.frontier.detected", {
+      surface_id: "srf-fg",
+      concept_id: "gradient-descent",
+      confidence: 0.9,
+      gate_passed: true,
+    });
+    await f.emit("surface.research.frontier.surfaced", {
+      surface_id: "srf-fg",
+      concept_id: "gradient-descent",
+      grounded: true,
+      entries: [
+        {
+          kind: "latest-research",
+          summary: "Adaptive step-size methods are an active direction.",
+          external_refs: [{ uri: "https://arxiv.org/abs/2401.1", title: "A 2024 Survey" }],
+        },
+      ],
+    });
+
+    const state = foldSurfaceEvents(f.bus.replay({ subject: "surface.>" }), "srf-fg")!;
+    const record = state.research_frontiers[0];
+    expect(record?.surfaced).toBe(true);
+    expect(record?.grounded).toBe(true);
+    expect(record?.entries?.[0]?.kind).toBe("latest-research");
+    expect(record?.entries?.[0]?.external_refs[0]?.uri).toBe("https://arxiv.org/abs/2401.1");
+  });
+
   test("frontier.deferred counts toward version only — no record appended (S3.1)", async () => {
     const f = makeFixture("projection-frontier-deferred");
     await seedSurface(f, "srf-fdefer");
@@ -827,6 +858,256 @@ describe("foldSurfaceEvents", () => {
     // flat reveal-order index is built deterministically
     expect(frame.mccr?.elements.map((e) => e.element_id)).toEqual(["el-c", "el-d", "el-f", "el-g"]);
     expect(frame.provenance.source_event_id).toBeTruthy();
+  });
+
+  test("R4e: a structured misconception folds as the dissolve grammar; a legacy one stays text", async () => {
+    const f = makeFixture("frame-misconception");
+    await seedSurface(f, "srf-misc");
+    await f.emit("surface.frame.composed", {
+      surface_id: "srf-misc",
+      frame_id: "cfr-m",
+      ordinal: 1000,
+      concept_id: "entropy",
+      title: "Entropy",
+      mccr: {
+        core_concept: {
+          element_id: "el-c",
+          type: "core_concept",
+          slot: "headline",
+          reveal_order: 0,
+          concept_id: "entropy",
+          content: { kind: "text", text: "Entropy" },
+        },
+        // Structured dissolve — the fold must reconstruct wrong + correction.
+        misconception: {
+          element_id: "el-m",
+          type: "misconception",
+          slot: "aside",
+          reveal_order: 1,
+          concept_id: "entropy",
+          content: {
+            kind: "misconception",
+            wrong: "Entropy is mess.",
+            correction: "It counts microstates.",
+          },
+        },
+        _frame_id: "cfr-m",
+      },
+      confidence: 0.8,
+      reasoning: "named the trap",
+      composer_packet_id: "cp-compose-m",
+      producer_cid: "cog-composer",
+      reason: "composed",
+      world_state_nodes: ["concept:entropy"],
+    });
+    const state = foldSurfaceEvents(f.bus.replay({ subject: "surface.>" }), "srf-misc")!;
+    expect(state.frames[0]!.mccr?.misconception?.content).toEqual({
+      kind: "misconception",
+      wrong: "Entropy is mess.",
+      correction: "It counts microstates.",
+    });
+
+    // A legacy misconception element (type misconception, kind text) must stay plain text.
+    const g = makeFixture("frame-misconception-legacy");
+    await seedSurface(g, "srf-misc2");
+    await g.emit("surface.frame.composed", {
+      surface_id: "srf-misc2",
+      frame_id: "cfr-m2",
+      ordinal: 1000,
+      concept_id: "entropy",
+      title: "Entropy",
+      mccr: {
+        core_concept: {
+          element_id: "el-c",
+          type: "core_concept",
+          slot: "headline",
+          reveal_order: 0,
+          concept_id: "entropy",
+          content: { kind: "text", text: "Entropy" },
+        },
+        misconception: {
+          element_id: "el-m",
+          type: "misconception",
+          slot: "aside",
+          reveal_order: 1,
+          concept_id: "entropy",
+          content: { kind: "text", text: "It just means disorder." },
+        },
+        _frame_id: "cfr-m2",
+      },
+      confidence: 0.8,
+      reasoning: "named the trap",
+      composer_packet_id: "cp-compose-m2",
+      producer_cid: "cog-composer",
+      reason: "composed",
+      world_state_nodes: ["concept:entropy"],
+    });
+    const legacy = foldSurfaceEvents(g.bus.replay({ subject: "surface.>" }), "srf-misc2")!;
+    expect(legacy.frames[0]!.mccr?.misconception?.content).toEqual({
+      kind: "text",
+      text: "It just means disorder.",
+    });
+  });
+
+  test("R4e (Law 9): the fold carries an image element's recorded rationale onto the board", async () => {
+    const f = makeFixture("frame-image-rationale");
+    await seedSurface(f, "srf-img");
+    await f.emit("surface.frame.composed", {
+      surface_id: "srf-img",
+      frame_id: "cfr-img",
+      ordinal: 1000,
+      concept_id: "entropy",
+      title: "Entropy",
+      mccr: {
+        core_concept: {
+          element_id: "el-c",
+          type: "core_concept",
+          slot: "headline",
+          reveal_order: 0,
+          concept_id: "entropy",
+          content: { kind: "text", text: "Entropy" },
+        },
+        image: {
+          element_id: "el-image",
+          type: "image",
+          slot: "image",
+          reveal_order: 9,
+          concept_id: "entropy",
+          content: {
+            kind: "image",
+            artifact: {
+              artifact_id: "art-1",
+              content_ref: "blob:art-1",
+              mime_type: "image/png",
+              provider_id: "prov-1",
+            },
+            alt: "Illustration of Entropy",
+            prompt: "energy dispersing",
+            caption: "Energy dispersing",
+            labels: [],
+            rationale: "Shows dispersal the formula alone hides.",
+          },
+        },
+        _frame_id: "cfr-img",
+      },
+      confidence: 0.8,
+      reasoning: "an image earns its place",
+      composer_packet_id: "cp-compose-img",
+      producer_cid: "cog-composer",
+      reason: "composed",
+      world_state_nodes: ["concept:entropy"],
+    });
+    const state = foldSurfaceEvents(f.bus.replay({ subject: "surface.>" }), "srf-img")!;
+    const image = state.frames[0]!.mccr?.image?.content;
+    expect(image?.kind).toBe("image");
+    expect(image && "rationale" in image ? image.rationale : undefined).toBe(
+      "Shows dispersal the formula alone hides.",
+    );
+  });
+
+  test("R4e: the fold reconstructs a process element's ordered steps (process grammar)", async () => {
+    const f = makeFixture("frame-process");
+    await seedSurface(f, "srf-proc");
+    await f.emit("surface.frame.composed", {
+      surface_id: "srf-proc",
+      frame_id: "cfr-proc",
+      ordinal: 1000,
+      concept_id: "long-division",
+      title: "Long division",
+      mccr: {
+        core_concept: {
+          element_id: "el-c",
+          type: "core_concept",
+          slot: "headline",
+          reveal_order: 0,
+          concept_id: "long-division",
+          content: { kind: "text", text: "Long division" },
+        },
+        process: {
+          element_id: "el-process",
+          type: "process",
+          slot: "process",
+          reveal_order: 8,
+          concept_id: "long-division",
+          content: {
+            kind: "process",
+            steps: [
+              { text: "Divide", detail: "leading digits" },
+              { text: "Multiply and subtract", detail: null },
+              { text: "Bring down", detail: null },
+            ],
+          },
+        },
+        _frame_id: "cfr-proc",
+      },
+      confidence: 0.8,
+      reasoning: "showed the procedure",
+      composer_packet_id: "cp-compose-proc",
+      producer_cid: "cog-composer",
+      reason: "composed",
+      world_state_nodes: ["concept:long-division"],
+    });
+    const state = foldSurfaceEvents(f.bus.replay({ subject: "surface.>" }), "srf-proc")!;
+    const proc = state.frames[0]!.mccr?.process?.content;
+    expect(proc?.kind).toBe("process");
+    const steps = proc && proc.kind === "process" ? proc.steps : [];
+    expect(steps.map((s) => s.text)).toEqual(["Divide", "Multiply and subtract", "Bring down"]);
+    expect(steps[0]!.detail).toBe("leading digits");
+  });
+
+  test("R4e: the fold reconstructs a code element's language + lines (code grammar)", async () => {
+    const f = makeFixture("frame-code");
+    await seedSurface(f, "srf-code");
+    await f.emit("surface.frame.composed", {
+      surface_id: "srf-code",
+      frame_id: "cfr-code",
+      ordinal: 1000,
+      concept_id: "gcd",
+      title: "Euclid's algorithm",
+      mccr: {
+        core_concept: {
+          element_id: "el-c",
+          type: "core_concept",
+          slot: "headline",
+          reveal_order: 0,
+          concept_id: "gcd",
+          content: { kind: "text", text: "Euclid's algorithm" },
+        },
+        code: {
+          element_id: "el-code",
+          type: "code",
+          slot: "code",
+          reveal_order: 9,
+          concept_id: "gcd",
+          content: {
+            kind: "code",
+            language: "python",
+            lines: [
+              { text: "def gcd(a, b):", note: "the function" },
+              { text: "    while b:", note: null },
+              { text: "        a, b = b, a % b", note: null },
+            ],
+          },
+        },
+        _frame_id: "cfr-code",
+      },
+      confidence: 0.8,
+      reasoning: "showed the source",
+      composer_packet_id: "cp-compose-code",
+      producer_cid: "cog-composer",
+      reason: "composed",
+      world_state_nodes: ["concept:gcd"],
+    });
+    const state = foldSurfaceEvents(f.bus.replay({ subject: "surface.>" }), "srf-code")!;
+    const code = state.frames[0]!.mccr?.code?.content;
+    expect(code?.kind).toBe("code");
+    if (code && code.kind === "code") {
+      expect(code.language).toBe("python");
+      // Indentation preserved; the note survives on the annotated line only.
+      expect(code.lines[2]!.text).toBe("        a, b = b, a % b");
+      expect(code.lines[0]!.note).toBe("the function");
+      expect(code.lines[1]!.note).toBeNull();
+    }
   });
 
   test("planned → composed converges to the same frame entry as composed-only (UCS)", async () => {

@@ -45,15 +45,31 @@ import type { CognitiveEvent } from "@inevitable/protocols";
 import {
   CosError,
   CryptoIdGenerator,
+  SystemClock,
   hlcInit,
   ok,
   err,
   type Hlc,
   type Result,
 } from "@inevitable/shared";
-import { foldSurfaceEvents, type SurfaceAskResult, type SurfaceState } from "@inevitable/surface";
-import { geminiApiKey, persistDir, strictModel } from "./env";
+import {
+  foldSurfaceEvents,
+  type SurfaceAskInput,
+  type SurfaceAskResult,
+  type SurfaceState,
+} from "@inevitable/surface";
+import { geminiApiKey, persistDir, strictModel, supabaseBackendUrl } from "./env";
+import { IntelligenceSink } from "./intelligence";
 import { LearnerRegistry, type LearnerRecord } from "./learners";
+import { SourceHub, type RegisteredSource } from "./sources";
+import { SourcePlanePersistence } from "./source-persistence";
+import type { WebFetchFn } from "./crawler";
+import type {
+  ConceptTimeline,
+  Creation,
+  FrontierOverlay,
+  FusionResult,
+} from "@inevitable/source-environment";
 import {
   FileMediaStore,
   InMemoryMediaStore,
@@ -75,6 +91,24 @@ interface HostedSurface {
   readonly learnerId?: string;
   /** Per-surface HLC for gateway.* observability events (separate from the session clock chain). */
   gatewayHlc: Hlc;
+  /**
+   * Per-surface command queue (issue 20): mutating commands run serially so a second ask/advance can
+   * never reset the session's timeline/lookahead under an in-flight one. Interleaved cognition in the
+   * canonical log is a correctness hazard, not a feature.
+   */
+  queue: Promise<unknown>;
+  /**
+   * The curriculum generated on the first ask, cached so subsequent `advance` commands teach the NEXT
+   * concept on the SAME path without regenerating the DAG (understanding compounds; the concept-id space
+   * stays stable, so look-ahead speculation can actually promote). Set by `runAsk`, read by `runAdvance`.
+   */
+  curriculum?: SurfaceAskInput;
+  /**
+   * Source versions bound to this surface (CSE M5). The session's `sourceEvidence` seam closes over
+   * this array (late-bound — sources attach after creation), so viewport planning sees exactly the
+   * attached environments at teach time.
+   */
+  readonly sourceBindings: string[];
 }
 
 /**
@@ -92,10 +126,61 @@ export interface ServedSurface {
   subscribeStream(handler: (event: CognitiveEvent) => void): { unsubscribe(): void };
   trace(blockId: string): ReturnType<Surface["trace"]>;
   ask(goal: string): Promise<Result<SurfaceAskResult, CosError>>;
+  /** Teach the next (or a requested) concept on the existing path — the continuity primitive. */
+  advance(conceptId?: string): Promise<Result<SurfaceAskResult, CosError>>;
   expand(blockId: string, layer: number): ReturnType<Surface["expand"]>;
   close(reason?: string): ReturnType<Surface["close"]>;
   /** Apply a governed learner interaction (S1.3, ADR-0024). */
   interact(input: Parameters<Surface["interact"]>[0]): ReturnType<Surface["interact"]>;
+  /** Grade a learner's answer to a concept's practice problem into genuine earned mastery (F14). */
+  answer(conceptId: string, text: string): ReturnType<Surface["submitAnswer"]>;
+  /** Bind a registered Canonical Source Environment to this surface (CSE M5, CSE-008 §3.1). */
+  attachSource(sourceVersionId: string): Promise<Result<RegisteredSource, CosError>>;
+  /**
+   * Teach FROM a bound source: derive the curriculum from the document's own concepts/sections and
+   * run the ask over it — the document becomes the timeline (R2c, ADR-0057 D3). Defaults to the
+   * surface's first bound source when no id is given.
+   */
+  teachSource(sourceVersionId?: string): Promise<Result<SurfaceAskResult, CosError>>;
+  /** Reconcile the surface's bound sources over a concept set — Source Fusion (CSE M9 T1, CSE-015). */
+  fuse(conceptRefs: readonly string[]): Promise<Result<FusionResult, CosError>>;
+  /** Research a concept's living-knowledge frontier via governed web search (CSE M9 Frontier T1). */
+  researchFrontier(conceptRef: string): Promise<Result<FrontierOverlay, CosError>>;
+  /** Research a concept's Temporal Knowledge Model via governed web search (CSE M9 TKM T1). */
+  researchTimeline(conceptRef: string): Promise<Result<ConceptTimeline, CosError>>;
+  /** Open a learner creation — their artifact-in-progress (CSE M11 T1, CSE-016, no-ghostwriter law). */
+  startCreation(
+    input: Readonly<{
+      kind: string;
+      title: string;
+      conceptRefs: readonly string[];
+      draft?: string;
+    }>,
+  ): Promise<Result<Creation, CosError>>;
+  /** Offer a disclosed assist (scaffold|critique|provocation|reference) over a creation — never the artifact. */
+  assistCreation(
+    creationId: string,
+    mode: string,
+    draft?: string,
+  ): Promise<Result<Creation, CosError>>;
+  /** Mark a creation complete with the learner's final draft (CSE M11 T1). */
+  completeCreation(creationId: string, draft?: string): Promise<Result<Creation, CosError>>;
+  /** Consent a completed creation into the substrate as a Cognitive Source (ADR-0051, contribution). */
+  contributeCreation(
+    creationId: string,
+    consent: boolean,
+  ): Promise<Result<{ creation: Creation; source: RegisteredSource }, CosError>>;
+  /** Revoke a contribution's consent and cascade a redaction (ADR-0054 — the learner's right to un-share). */
+  revokeCreation(creationId: string): Promise<
+    Result<
+      {
+        creation: Creation;
+        source_version_id: string;
+        redacted_counts: { commons_entries: number; content_withheld: number };
+      },
+      CosError
+    >
+  >;
   onAttach(): void;
   onDetach(): void;
 }
@@ -171,6 +256,16 @@ export class SurfaceHost {
   private readonly injectedVoice: VoiceRuntime | undefined;
   /** Image runtime (S2.1b, SRF-006): injected by tests; resolved per-create in production. */
   private readonly imageRuntime: ImageRuntime | null;
+  /** Intelligence Plane seam (ADR-0035): session-close distillation + chronicle mirror. */
+  readonly intelligence: IntelligenceSink;
+  /** The Canonical Source Environment registry (CSE M5): cross-surface; surfaces bind versions. */
+  readonly sources: SourceHub;
+  /**
+   * Resolves once the durable source plane has been rehydrated (ADR-0055 D1). The server awaits this
+   * before serving any route, so a restart never exposes a half-loaded source plane. Resolves
+   * immediately when persistence is off (the offline default).
+   */
+  readonly ready: Promise<void>;
 
   constructor(
     deps: {
@@ -178,11 +273,26 @@ export class SurfaceHost {
       /** Inject a specific image runtime (tests use this); production calls resolveImage() per-create. */
       imageRuntime?: ImageRuntime;
       persistDir?: string;
+      intelligenceSink?: IntelligenceSink;
+      /** Inject the governed web-fetch seam (tests use a fake so the suite stays offline; ADR-0052). */
+      webFetch?: WebFetchFn;
     } = {},
   ) {
+    this.persistDir = deps.persistDir ?? persistDir();
+    // Durable source plane (ADR-0055): under COS_PERSIST_DIR the hub persists every mutation and
+    // rehydrates registrations under their original ids so attach events / commons / consent resolve
+    // across restarts. Off ⇒ process-lifetime (the offline default), `ready` resolves immediately.
+    const persistence = this.persistDir ? new SourcePlanePersistence(this.persistDir) : undefined;
+    this.sources = new SourceHub({
+      ...(deps.webFetch ? { webFetch: deps.webFetch } : {}),
+      ...(persistence ? { persistence } : {}),
+    });
+    this.ready = persistence ? this.sources.rehydrate() : Promise.resolve();
     this.injectedVoice = deps.voiceRuntime;
     this.imageRuntime = deps.imageRuntime ?? null;
-    this.persistDir = deps.persistDir ?? persistDir();
+    this.intelligence =
+      deps.intelligenceSink ??
+      new IntelligenceSink(supabaseBackendUrl() ? { dbUrl: supabaseBackendUrl() } : {});
     this.media = this.persistDir
       ? new FileMediaStore(join(this.persistDir, "media"))
       : new InMemoryMediaStore();
@@ -209,6 +319,11 @@ export class SurfaceHost {
     options: CreateSurfaceOptions = {},
   ): Promise<Result<{ surfaceId: string; learnerId: string }, CosError>> {
     const { inner, provider } = await resolveModel();
+    // CSE M9 T2+T3 (ADR-0041/0042): light up fusion cognition on the shared SourceHub when a real
+    // model is available — Source Fusion then extracts each source's claims, detects genuine
+    // cross-source contradictions, and weaves a fused explanation per concept. Idempotent +
+    // gateway-only; with the null model, fusion stays on the T1 structured path.
+    if (provider === "gemini") this.sources.enableFusionCognition(inner, provider);
     const voiceRuntime = this.injectedVoice ?? (await resolveVoice());
     const voice = voiceRuntime ? createVoiceSynthesizer(voiceRuntime, this.media) : undefined;
     const imageRuntime = this.imageRuntime ?? (await resolveImage());
@@ -222,10 +337,16 @@ export class SurfaceHost {
     // A returning learner's NEW surface draws on their prior cross-surface cognition (DPS-004): load
     // the durable profile and seed it (silently) into the fresh substrate. Empty for a fresh learner.
     const learnerSeed = this.learners.readCognition(learner.learnerId);
+    // CSE M5: the session's source-evidence seam closes over this surface's (late-bound) source
+    // bindings — attached after creation, read at frame-composition time.
+    const sourceBindings: string[] = [];
     const fixture = buildDemoSession({
       modelFactory: (bus, clock, idGenerator) =>
         new RecordingModelRuntime({ mode: "record", bus, inner, provider, clock, idGenerator }),
       seed,
+      // Real wall-clock time in production: a live surface must emit honest timestamps + HLC +
+      // work-timing latencies, never the CLI fixture's frozen 2026-06-11 clock.
+      clock: new SystemClock(),
       // Crypto ids so concurrently-hosted surfaces never collide (the seeded generator is
       // seed-independent, so distinct seeds alone would mint identical surface ids).
       idGenerator: new CryptoIdGenerator(),
@@ -250,6 +371,38 @@ export class SurfaceHost {
       // UCS (ADR-0030; Phase 4): the Image Agent owns the image-as-cognition decision (prompt +
       // caption + callout labels), replacing the composer's inline image_plan on the frame path.
       imagePlanner: true,
+      // R4-model (CSE-018, ADR-0058): the RIA assigns each element's epistemic role + hierarchy;
+      // degrades to the deterministic plan floor when the model is unavailable.
+      representation: true,
+      // CSE M5: source evidence for viewport planning, over whatever is attached at teach time.
+      sourceEvidence: {
+        anchorsForConcept: (conceptId: string, conceptTitle: string) =>
+          this.sources.evidenceFor(sourceBindings, conceptId, conceptTitle),
+      },
+      // CSE M7 T1: the Cognitive Theater — the Director conducts + Scenes wrap frames. Gateway-only
+      // (CLI/tests exercise the pre-Theater frame path so backward compatibility stays covered).
+      theater: true,
+      // CSE M9 LKS T1 (ADR-0045): on verified mastery, surface the REAL web-grounded frontier
+      // (ADR-0043) — grounded-or-deferred, never the ungrounded breadcrumb. Only meaningful with a
+      // real model (the SourceHub's frontier unit is wired then); with the null model it honestly
+      // yields nothing and the readiness gate defers.
+      frontierProvider: {
+        researchFrontier: async (conceptId: string, conceptTitle: string) => {
+          const overlay = await this.sources.researchFrontier(
+            conceptTitle || conceptId,
+            sourceBindings[0] ?? null,
+          );
+          return {
+            concept_ref: conceptId,
+            entries: overlay.entries.map((e) => ({
+              kind: e.kind,
+              summary: e.summary,
+              external_refs: e.external_refs.map((r) => ({ uri: r.uri, title: r.title })),
+            })),
+            degraded: overlay.degraded,
+          };
+        },
+      },
       ...(provider === "gemini"
         ? { evaluationModel: inner, embedFn: (t: string) => inner.embed(t) }
         : {}),
@@ -264,6 +417,8 @@ export class SurfaceHost {
       fixture.bus.subscribe(">", async (event) => {
         if (finalLog) await finalLog.publish(event.event_type, event);
         else buffer.push(event);
+        // W1 slice (ADR-0035): best-effort chronicle mirror into Postgres when configured.
+        this.intelligence.mirror(event);
       });
     }
 
@@ -292,9 +447,52 @@ export class SurfaceHost {
       goal,
       learnerId: learner.learnerId,
       gatewayHlc: hlcInit("surface-gateway"),
+      queue: Promise.resolve(),
+      sourceBindings,
     };
     this.surfaces.set(surfaceId, hosted);
+
+    // CSE M6 (ADR-0037): a returning learner's episode resume card — derived ONLY from the
+    // intelligence plane's latest episode + delta artifacts. No artifacts ⇒ no card (a fresh
+    // learner never gets a fabricated welcome-back). Best-effort: never fails create.
+    await this.projectResumeCard(hosted, learner.cid);
+
     return ok({ surfaceId, learnerId: learner.learnerId });
+  }
+
+  /** Build + emit the resume card from the learner's latest episode/delta artifacts (CSE-005 §4). */
+  private async projectResumeCard(hosted: HostedSurface, learnerCid: string): Promise<void> {
+    try {
+      const episode = await this.intelligence.latestFor(learnerCid, "learner.episode");
+      if (!episode) return;
+      const delta = await this.intelligence.latestFor(learnerCid, "learner.understanding-delta");
+      const body = episode.body as {
+        concept_refs?: string[];
+        confusions?: { description?: string; concept_ref?: string; state?: string }[];
+        outcome?: { summary?: string };
+      };
+      const conceptsTouched = Array.isArray(body.concept_refs) ? body.concept_refs : [];
+      const openConfusions = (Array.isArray(body.confusions) ? body.confusions : [])
+        .filter((c) => c.state === "open")
+        .map((c) => ({ description: c.description ?? "", concept_ref: c.concept_ref ?? "" }));
+      // distilled_hlc leads with 16 zero-padded decimal wall-clock ms digits (shared/hlc).
+      const distilledMs = Number.parseInt(episode.distilled_hlc.slice(0, 16), 10);
+      const daysSince =
+        Number.isFinite(distilledMs) && distilledMs > 0
+          ? Math.max(0, Math.floor((Date.now() - distilledMs) / 86_400_000))
+          : 0;
+      await hosted.fixture.surface.projectResumeCard({
+        episodeRef: episode.artifact_id,
+        deltaRef: delta?.artifact_id ?? null,
+        summary: body.outcome?.summary ?? "",
+        lastConceptRef: conceptsTouched[conceptsTouched.length - 1] ?? null,
+        conceptsTouched,
+        openConfusions,
+        daysSince,
+      });
+    } catch {
+      /* resume projection is best-effort — a create must never fail on it */
+    }
   }
 
   /**
@@ -329,28 +527,217 @@ export class SurfaceHost {
       // Commands re-persist the world + memory snapshots so a later restart rehydrates the latest state.
       // An ask runs the learning cycle (mastery), so it also captures the learner's cross-surface
       // cognition (DPS-004) into the durable profile that seeds their future surfaces.
-      ask: async (goal) => {
-        const result = await this.runAsk(hosted, goal);
-        this.persistSnapshots(hosted.surfaceId, fixture);
-        this.captureCognition(hosted);
-        return result;
-      },
-      expand: async (blockId, layer) => {
-        const result = await fixture.surface.expand(blockId, layer);
-        this.persistSnapshots(hosted.surfaceId, fixture);
-        return result;
-      },
+      ask: (goal) =>
+        this.serialize(hosted, async () => {
+          const result = await this.runAsk(hosted, goal);
+          this.persistSnapshots(hosted.surfaceId, fixture);
+          this.captureCognition(hosted);
+          return result;
+        }),
+      advance: (conceptId) =>
+        this.serialize(hosted, async () => {
+          const result = await this.runAdvance(hosted, conceptId);
+          this.persistSnapshots(hosted.surfaceId, fixture);
+          this.captureCognition(hosted);
+          return result;
+        }),
+      expand: (blockId, layer) =>
+        this.serialize(hosted, async () => {
+          const result = await fixture.surface.expand(blockId, layer);
+          this.persistSnapshots(hosted.surfaceId, fixture);
+          return result;
+        }),
       close: async (reason) => {
         const result = await fixture.surface.close(reason);
         this.persistSnapshots(hosted.surfaceId, fixture);
+        // M3.5 D1 wiring (ADR-0035): fold the closed session's chronicle into the Intelligence
+        // Plane — store first, then emit `intelligence.distilled`. Best-effort: never fails close.
+        const learner = hosted.learnerId ? this.learners.get(hosted.learnerId) : undefined;
+        await this.intelligence.distillAndStore(
+          [...fixture.bus.log],
+          {
+            learner_cid: learner?.cid ?? hosted.learnerId ?? `cog-unattributed-${hosted.surfaceId}`,
+            tenant_id: "default",
+            session_id: hosted.surfaceId,
+          },
+          fixture.bus,
+        );
         return result;
       },
-      interact: async (input) => {
-        const result = await fixture.surface.interact(input);
-        this.persistSnapshots(hosted.surfaceId, fixture);
-        // A reshaping interaction re-runs the governed cycle, so capture cross-surface cognition.
-        if (result.ok && result.value.effect === "dispatched") this.captureCognition(hosted);
-        return result;
+      interact: (input) =>
+        this.serialize(hosted, async () => {
+          const result = await fixture.surface.interact(input);
+          this.persistSnapshots(hosted.surfaceId, fixture);
+          // A reshaping interaction re-runs the governed cycle, so capture cross-surface cognition.
+          if (result.ok && result.value.effect === "dispatched") this.captureCognition(hosted);
+          return result;
+        }),
+      answer: (conceptId, text) =>
+        this.serialize(hosted, async () => {
+          const result = await fixture.surface.submitAnswer({ conceptId, answer: text });
+          this.persistSnapshots(hosted.surfaceId, fixture);
+          // A graded answer records mastery evidence — capture cross-surface cognition.
+          if (result.ok) this.captureCognition(hosted);
+          return result;
+        }),
+      // CSE M5: bind a registered source environment — the attach event lands on the surface's
+      // canonical log, and the binding joins the evidence seam for subsequent frame composition.
+      attachSource: (sourceVersionId) =>
+        this.serialize(hosted, async () => {
+          const registered = this.sources.registered(sourceVersionId);
+          if (!registered) {
+            return err(gatewayError("unknown source version", { sourceVersionId })) as Result<
+              RegisteredSource,
+              CosError
+            >;
+          }
+          const attached = await fixture.surface.attachSource({
+            sourceId: registered.source_id,
+            sourceVersionId: registered.source_version_id,
+            modality: registered.modality,
+            title: registered.title,
+            layersAvailable: registered.layers_available,
+            contentRef: registered.content_ref,
+          });
+          if (!attached.ok) return attached;
+          if (!hosted.sourceBindings.includes(sourceVersionId)) {
+            hosted.sourceBindings.push(sourceVersionId);
+          }
+          this.persistSnapshots(hosted.surfaceId, fixture);
+          return ok(registered);
+        }),
+      // R2c (ADR-0057 D3): teach FROM a bound source — the document becomes the timeline. Build the
+      // curriculum from the source's own concepts/sections (in teaching order), cache it so `advance`
+      // walks the rest of the document, and run the ask. The frame pipeline is now source-fed (R2a/b).
+      teachSource: (sourceVersionId) =>
+        this.serialize(hosted, async () => {
+          const versionId = sourceVersionId ?? hosted.sourceBindings[0];
+          if (!versionId) {
+            return err(gatewayError("no source bound to this surface to teach from")) as Result<
+              SurfaceAskResult,
+              CosError
+            >;
+          }
+          const curriculum = this.sources.curriculumFor(versionId);
+          if (!curriculum || curriculum.concepts.length === 0) {
+            return err(
+              gatewayError("source has no teachable structure yet (no concepts or headings)", {
+                versionId,
+              }),
+            ) as Result<SurfaceAskResult, CosError>;
+          }
+          const focusTitle =
+            curriculum.concepts.find((c) => c.id === curriculum.entry)?.title ?? curriculum.entry;
+          const input: SurfaceAskInput = {
+            goal: `Teach me this document`,
+            pathId: `path-source-${versionId.slice(0, 16)}`,
+            concepts: curriculum.concepts.map((c) => ({
+              id: c.id,
+              title: c.title,
+              prerequisites: c.prerequisites,
+            })),
+            focusConceptId: curriculum.entry,
+            explanationPrompt: `Teach "${focusTitle}" directly from the source passage`,
+            practicePrompt: `Give one concrete practice problem for ${focusTitle}`,
+            mastery: {
+              assessorCid: "cog-source-teach",
+              passed: true,
+              confidence: 0.7,
+              evidence: [
+                {
+                  kind: "readiness",
+                  note: "source section taught from its own passage; learner demonstration pending",
+                },
+              ],
+            },
+          };
+          hosted.curriculum = input;
+          const result = await fixture.surface.ask(input);
+          this.persistSnapshots(hosted.surfaceId, fixture);
+          return result;
+        }),
+      // CSE M9 T1: reconcile the surface's bound sources over a concept set (Source Fusion).
+      fuse: async (conceptRefs) => {
+        if (hosted.sourceBindings.length === 0) {
+          return err(gatewayError("no sources bound to this surface to fuse"));
+        }
+        const learner = hosted.learnerId ? this.learners.get(hosted.learnerId) : undefined;
+        const result = await this.sources.fuse(
+          hosted.sourceBindings,
+          conceptRefs,
+          learner?.cid ?? hosted.learnerId ?? null,
+        );
+        return ok(result);
+      },
+      // CSE M9 Frontier T1: research a concept's living-knowledge frontier via governed web search.
+      researchFrontier: async (conceptRef) => {
+        const versionId = hosted.sourceBindings[0] ?? null;
+        const overlay = await this.sources.researchFrontier(conceptRef, versionId);
+        return ok(overlay);
+      },
+      // CSE M9 TKM T1: research a concept's Temporal Knowledge Model via governed web search.
+      researchTimeline: async (conceptRef) => {
+        const versionId = hosted.sourceBindings[0] ?? null;
+        const timeline = await this.sources.researchTimeline(conceptRef, versionId);
+        return ok(timeline);
+      },
+      // CSE M11 T1: open a learner creation (their artifact) — the system only ever attaches assists.
+      startCreation: async (input) => {
+        const learner = hosted.learnerId ? this.learners.get(hosted.learnerId) : undefined;
+        const creation = await this.sources.startCreation({
+          ...input,
+          learnerCid: learner?.cid ?? hosted.learnerId ?? null,
+        });
+        return ok(creation);
+      },
+      // CSE M11 T1: offer a disclosed assist over a creation — never the artifact (no-ghostwriter law).
+      assistCreation: async (creationId, mode, draft) => {
+        const updated = await this.sources.assistCreation(creationId, mode, draft);
+        if (!updated) return err(gatewayError("unknown creation", { creationId }));
+        return ok(updated);
+      },
+      // CSE M11 T1: complete a creation with the learner's final draft.
+      completeCreation: async (creationId, draft) => {
+        const updated = await this.sources.completeCreation(creationId, draft);
+        if (!updated) return err(gatewayError("unknown creation", { creationId }));
+        return ok(updated);
+      },
+      // ADR-0051: consent a completed creation into the substrate as a Cognitive Source. On success
+      // the new source is bound to THIS surface so the learner can immediately teach/fuse from it.
+      // ADR-0055 D5: the binding goes through the SAME attachSource path every other binding uses, so
+      // `surface.source.attached` lands on the canonical log — the client fold (and the Fuse gate)
+      // agree with the server about what sources exist (state never changes without its event).
+      contributeCreation: async (creationId, consent) => {
+        const contributed = await this.sources.contributeCreation(creationId, { consent });
+        if (contributed.ok) {
+          const source = contributed.value.source;
+          const attached = await fixture.surface.attachSource({
+            sourceId: source.source_id,
+            sourceVersionId: source.source_version_id,
+            modality: source.modality,
+            title: source.title,
+            layersAvailable: source.layers_available,
+            contentRef: source.content_ref,
+          });
+          if (attached.ok && !hosted.sourceBindings.includes(source.source_version_id)) {
+            hosted.sourceBindings.push(source.source_version_id);
+          }
+          this.persistSnapshots(hosted.surfaceId, fixture);
+        }
+        return contributed;
+      },
+      // ADR-0054: revoke consent + cascade a redaction. Also unbind the redacted version from THIS
+      // surface so a subsequent fuse can't reach the withdrawn source.
+      revokeCreation: async (creationId) => {
+        const revoked = await this.sources.revokeContribution(creationId);
+        if (revoked.ok) {
+          const idx = hosted.sourceBindings.indexOf(revoked.value.source_version_id);
+          if (idx >= 0) {
+            hosted.sourceBindings.splice(idx, 1);
+            this.persistSnapshots(hosted.surfaceId, fixture);
+          }
+        }
+        return revoked;
       },
       onAttach: () => this.emitBoundaryEvent(hosted, "gateway.stream.attached"),
       onDetach: () => this.emitBoundaryEvent(hosted, "gateway.stream.detached"),
@@ -383,9 +770,21 @@ export class SurfaceHost {
       subscribeStream: () => ({ unsubscribe: () => {} }),
       trace: () => replayOnly(),
       ask: async () => replayOnly(),
+      advance: async () => replayOnly(),
       expand: async () => replayOnly(),
       close: async () => replayOnly(),
       interact: async () => replayOnly(),
+      answer: async () => replayOnly(),
+      attachSource: async () => replayOnly(),
+      teachSource: async () => replayOnly(),
+      fuse: async () => replayOnly(),
+      researchFrontier: async () => replayOnly(),
+      researchTimeline: async () => replayOnly(),
+      startCreation: async () => replayOnly(),
+      assistCreation: async () => replayOnly(),
+      completeCreation: async () => replayOnly(),
+      contributeCreation: async () => replayOnly(),
+      revokeCreation: async () => replayOnly(),
       onAttach: () => {},
       onDetach: () => {},
     };
@@ -460,9 +859,23 @@ export class SurfaceHost {
     const voice = voiceRuntime ? createVoiceSynthesizer(voiceRuntime, this.media) : undefined;
     const imageRuntime = this.imageRuntime ?? (await resolveImage());
     const mediaGen = createMediaGenerator(imageRuntime, this.media);
+    // CSE M5 + ADR-0055 D3: rebind the surface's sources from its own event log. The durable source
+    // plane has already rehydrated (host.ready), so fold the restored surface events and re-bind
+    // every attached version the hub still serves — the Living Reference, evidence seam, and Fuse
+    // gate survive the restart. A version the hub no longer serves (e.g. redacted) is dropped.
+    const restoredState = foldSurfaceEvents(
+      restore.events.filter((e) => e.event_type.startsWith(SURFACE_SUBJECT_PREFIX)),
+      surfaceId,
+    );
+    const sourceBindings: string[] = (restoredState?.sources ?? [])
+      .map((s) => s.source_version_id)
+      .filter((id): id is string => typeof id === "string" && !!this.sources.registered(id));
     const fixture = buildDemoSession({
       modelFactory: (bus, clock, idGenerator) =>
         new RecordingModelRuntime({ mode: "record", bus, inner, provider, clock, idGenerator }),
+      // Real wall-clock time on rehydration too (new events after resume must not collide with the
+      // fixture's frozen time). Recorded events keep their original timestamps.
+      clock: new SystemClock(),
       restore,
       ...(learner ? { learner } : {}),
       ...(voice ? { voice } : {}),
@@ -479,6 +892,15 @@ export class SurfaceHost {
       lookaheadBudget: 1,
       // UCS (ADR-0030; Phase 4): the Image Agent owns image-as-cognition (matches create()).
       imagePlanner: true,
+      // R4-model (CSE-018, ADR-0058): the RIA (matches create()).
+      representation: true,
+      // CSE M5: source evidence over the (re-attached) bindings — matches create().
+      sourceEvidence: {
+        anchorsForConcept: (conceptId: string, conceptTitle: string) =>
+          this.sources.evidenceFor(sourceBindings, conceptId, conceptTitle),
+      },
+      // CSE M7 T1: the Cognitive Theater — matches create().
+      theater: true,
       ...(provider === "gemini"
         ? { evaluationModel: inner, embedFn: (t: string) => inner.embed(t) }
         : {}),
@@ -499,9 +921,24 @@ export class SurfaceHost {
       goal,
       ...(learnerId !== undefined ? { learnerId } : {}),
       gatewayHlc: hlcInit("surface-gateway"),
+      queue: Promise.resolve(),
+      sourceBindings,
     };
     this.surfaces.set(surfaceId, hosted);
     return hosted;
+  }
+
+  /**
+   * Run a mutating command serially per surface (issue 20): each awaits the previous so two asks can
+   * never interleave and corrupt the canonical log. Failures don't poison the chain for later commands.
+   */
+  private serialize<T>(hosted: HostedSurface, work: () => Promise<T>): Promise<T> {
+    const run = hosted.queue.then(work, work);
+    hosted.queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   /**
@@ -522,7 +959,61 @@ export class SurfaceHost {
     await hosted.fixture.assembleContext(goal);
     const curriculum = await hosted.fixture.generateCurriculum(goal);
     if (!curriculum.ok) return err(curriculum.error);
+    // Cache the curriculum so `advance` can teach the next concept on this same path without
+    // regenerating the DAG — the loop compounds instead of restarting (review N4/§4.9).
+    hosted.curriculum = curriculum.value;
     return hosted.fixture.surface.ask(curriculum.value);
+  }
+
+  /**
+   * Advance the lesson to the NEXT (or an explicitly requested) concept on the EXISTING path — the
+   * continuity primitive behind path-node clicks and the "continue" affordance. Reuses the cached
+   * curriculum (no regeneration, stable concept ids) and only moves the focus, so the learner's
+   * mastered path is preserved and look-ahead speculation can promote. Falls back to a fresh ask when
+   * no curriculum is cached yet (e.g. a rehydrated surface whose first ask predates this field).
+   */
+  private async runAdvance(
+    hosted: HostedSurface,
+    conceptId?: string,
+  ): Promise<Result<SurfaceAskResult, CosError>> {
+    const cached = hosted.curriculum;
+    if (!cached) return this.runAsk(hosted, hosted.goal);
+    const nextFocus = this.resolveNextConcept(hosted, cached, conceptId);
+    if (!nextFocus) return err(gatewayError("no further concept to advance to on this path"));
+    const focusTitle = cached.concepts.find((c) => c.id === nextFocus)?.title ?? nextFocus;
+    const input: SurfaceAskInput = {
+      ...cached,
+      focusConceptId: nextFocus,
+      explanationPrompt: `Explain ${focusTitle} so a motivated beginner genuinely understands it`,
+      practicePrompt: `Give one concrete practice problem for ${focusTitle}`,
+    };
+    hosted.curriculum = input;
+    await hosted.fixture.assembleContext(focusTitle);
+    return hosted.fixture.surface.ask(input);
+  }
+
+  /**
+   * Resolve which concept to teach next: an explicit request (must be on the path), else the first
+   * concept whose mastery is not yet recorded in the folded state, else the concept after the current
+   * focus in curriculum order.
+   */
+  private resolveNextConcept(
+    hosted: HostedSurface,
+    cached: SurfaceAskInput,
+    requested?: string,
+  ): string | null {
+    const ids = cached.concepts.map((c) => c.id);
+    if (requested && ids.includes(requested)) return requested;
+    const state = hosted.fixture.surface.state();
+    const mastered = new Set(
+      (state?.timeline?.nodes ?? [])
+        .filter((n) => n.status === "mastered")
+        .map((n) => n.concept_id),
+    );
+    const firstUnmastered = ids.find((id) => !mastered.has(id));
+    if (firstUnmastered) return firstUnmastered;
+    const currentIdx = ids.indexOf(cached.focusConceptId);
+    return ids[currentIdx + 1] ?? null;
   }
 
   /** Emit a `gateway.*` boundary-observability event (recorded-observation, never folded). */

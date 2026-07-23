@@ -87,9 +87,15 @@ export class NullModelRuntime implements ModelRuntime {
 // GeminiModelRuntime — first real provider (guarded dynamic import)
 // ---------------------------------------------------------------------------
 
+interface GenAiGroundingChunk {
+  web?: { uri?: string; title?: string };
+}
 interface GenAiResponseLike {
   text?: string;
-  candidates?: Array<{ finishReason?: string }>;
+  candidates?: Array<{
+    finishReason?: string;
+    groundingMetadata?: { groundingChunks?: GenAiGroundingChunk[] };
+  }>;
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
 }
 interface GenAiEmbedResponseLike {
@@ -109,6 +115,22 @@ export interface GenAiClientLike {
 }
 interface GenAiModule {
   GoogleGenAI: new (opts: { apiKey: string }) => GenAiClientLike;
+}
+
+/** Real grounding citations from a web-grounded response — deduped by uri, empty when ungrounded. */
+function extractCitations(
+  response: GenAiResponseLike,
+): { readonly uri: string; readonly title: string }[] {
+  const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
+  const seen = new Set<string>();
+  const citations: { uri: string; title: string }[] = [];
+  for (const chunk of chunks) {
+    const uri = chunk.web?.uri;
+    if (typeof uri !== "string" || !uri || seen.has(uri)) continue;
+    seen.add(uri);
+    citations.push({ uri, title: chunk.web?.title ?? uri });
+  }
+  return citations;
 }
 
 function mapFinishReason(raw: string | undefined): ModelGenerationResult["finishReason"] {
@@ -169,9 +191,20 @@ export class GeminiModelRuntime implements ModelRuntime {
     if (input.maxTokens !== undefined) config["maxOutputTokens"] = input.maxTokens;
     if (input.temperature !== undefined) config["temperature"] = input.temperature;
     if (input.seed !== undefined) config["seed"] = input.seed;
-    if (input.responseSchema !== undefined) {
+    // Web-grounded generation (CSE-006 §4): attach the Google Search tool and read real citations
+    // from groundingMetadata. Mutually exclusive with structured output — grounded calls parse
+    // lenient text, so responseSchema is ignored when webSearch is set.
+    if (input.webSearch) {
+      config["tools"] = [{ googleSearch: {} }];
+    } else if (input.responseSchema !== undefined) {
       config["responseMimeType"] = "application/json";
       config["responseSchema"] = input.responseSchema;
+    }
+    // Reasoning models (gemini-2.5-*) spend thinking tokens from the output budget. On structured
+    // JSON calls an uncapped thinking phase can consume the whole budget and starve the response,
+    // yielding empty text → parse failure → silent fallback. A bounded budget keeps text intact.
+    if (input.thinkingBudget !== undefined) {
+      config["thinkingConfig"] = { thinkingBudget: input.thinkingBudget };
     }
     const model = input.model ?? this.defaultModel;
     const RETRY_DELAYS_MS = [1000, 2000, 4000];
@@ -184,6 +217,7 @@ export class GeminiModelRuntime implements ModelRuntime {
           config,
         });
         const usage = response.usageMetadata;
+        const citations = extractCitations(response);
         return {
           text: response.text ?? "",
           model,
@@ -195,18 +229,22 @@ export class GeminiModelRuntime implements ModelRuntime {
                   inputTokens: usage.promptTokenCount,
                   outputTokens: usage.candidatesTokenCount,
                 },
+          ...(citations.length > 0 ? { citations } : {}),
         };
       } catch (error) {
         lastError = error;
         const msg = error instanceof Error ? error.message : String(error);
-        // Retry only on transient network/rate-limit errors; bail immediately on auth errors.
+        // Retry only on transient network/overload errors; bail immediately on auth errors.
+        // Quota exhaustion (429 RESOURCE_EXHAUSTED) is NOT retried with long backoff here — under
+        // hard quota the retries only stack multi-second delays onto an already-serialized ask and
+        // still end in a fallback; fail fast so the degraded path is reached quickly and visibly.
         const isTransient =
           msg.includes("fetch failed") ||
           msg.includes("network") ||
           msg.includes("ECONNRESET") ||
-          msg.includes("429") ||
           msg.includes("503") ||
-          msg.includes("overloaded");
+          msg.includes("overloaded") ||
+          msg.includes("UNAVAILABLE");
         if (!isTransient || attempt >= RETRY_DELAYS_MS.length) break;
         await new Promise((res) => setTimeout(res, RETRY_DELAYS_MS[attempt]));
       }
@@ -324,6 +362,7 @@ export class RecordingModelRuntime implements ModelRuntime {
         text: response.text,
         model: response.model,
         finishReason: response.finishReason ?? null,
+        ...(response.citations ? { citations: response.citations } : {}),
       },
       provider: this.provider,
       format_version: MODEL_RECORDING_FORMAT_VERSION,
@@ -367,7 +406,12 @@ export class RecordingModelRuntime implements ModelRuntime {
       const payload = event.payload as {
         invocation_key?: string;
         ordinal?: number;
-        response?: { text?: string; model?: string; finishReason?: string | null };
+        response?: {
+          text?: string;
+          model?: string;
+          finishReason?: string | null;
+          citations?: readonly { uri: string; title: string }[];
+        };
       };
       const key = payload.invocation_key ?? "anonymous";
       const response: ModelGenerationResult = {
@@ -376,6 +420,7 @@ export class RecordingModelRuntime implements ModelRuntime {
         ...(payload.response?.finishReason
           ? { finishReason: payload.response.finishReason as ModelGenerationResult["finishReason"] }
           : {}),
+        ...(payload.response?.citations ? { citations: payload.response.citations } : {}),
       };
       const list = index.get(key) ?? [];
       list.push({ ordinal: payload.ordinal ?? 0, response });

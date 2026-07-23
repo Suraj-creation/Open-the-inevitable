@@ -1,4 +1,4 @@
-import type { EventBus } from "@inevitable/events";
+import { createEvent, type EventBus } from "@inevitable/events";
 import { type GovernanceEngine, guard } from "@inevitable/governance";
 import { withSpan } from "@inevitable/observability";
 import type {
@@ -55,7 +55,10 @@ export type ProductRuntimeAgentId =
   | "debate"
   | "composer"
   | "frameplanner"
-  | "imageplanner";
+  | "imageplanner"
+  | "representation"
+  | "canonicalizer"
+  | "meaning";
 
 export interface RuntimeAgentBinding {
   readonly identity: CognitiveIdentity;
@@ -118,6 +121,8 @@ function workTypeFor(agentId: ProductRuntimeAgentId): CognitiveWorkItem["work_ty
     case "assessment":
       return "assessment";
     case "curriculum":
+    case "canonicalizer":
+    case "meaning":
       return "curriculum_planning";
     case "memory":
       return "memory_consolidation";
@@ -131,6 +136,7 @@ function workTypeFor(agentId: ProductRuntimeAgentId): CognitiveWorkItem["work_ty
     case "debate":
     case "composer":
     case "imageplanner":
+    case "representation":
       return "student_interaction";
     case "research":
     case "frameplanner":
@@ -344,6 +350,12 @@ export class ProductRuntimeDispatcher {
         "cos.span_id": packet.span_id,
       });
       this.scheduler.complete(workItem.work_id);
+      // C1 — Chronicle law (ADR-0035/CIP-001 §4.3): the FULL reasoning trace a unit returns is
+      // cognition and must reach the chronicle, not evaporate at dispatch. Family `reasoning`
+      // (recorded-observation); publish failure never fails the dispatch — the work succeeded.
+      if (emissions.trace) {
+        await this.publishTrace(packet, input.targetAgentId, emissions.trace);
+      }
       return ok({
         workItem: dispatched,
         packet,
@@ -361,6 +373,44 @@ export class ProductRuntimeDispatcher {
           cause: cause instanceof Error ? cause.message : String(cause),
         }),
       );
+    }
+  }
+
+  /**
+   * Publish the unit's full ReasoningTrace to the chronicle as `reasoning.trace.recorded`
+   * (CIP-001 §4.3, closing the M3.5 audit's highest-value gap). Best-effort by design:
+   * recorded-observation family; a publish failure must never fail a dispatch that succeeded.
+   */
+  private async publishTrace(
+    packet: CognitionPacket,
+    targetAgentId: ProductRuntimeAgentId,
+    trace: Emissions["trace"],
+  ): Promise<void> {
+    if (!trace) return;
+    try {
+      this.hlc = hlcTick(this.hlc, this.clock);
+      const created = createEvent(
+        {
+          eventType: "reasoning.trace.recorded",
+          producerCid: this.agent.identity.cid,
+          producerType: "product.runtime-dispatch",
+          payload: {
+            agent_id: targetAgentId,
+            packet_id: packet.packet_id,
+            session_id: packet.session_id ?? null,
+            trace: trace as unknown as Record<string, unknown>,
+          },
+          topic: "cos.reasoning.trace.recorded",
+          classification: "internal",
+          correlationId: packet.correlation_id ?? packet.packet_id,
+          causationId: packet.packet_id,
+        },
+        { clock: this.clock, hlc: this.hlc, idGenerator: this.idGenerator },
+      );
+      this.hlc = created.hlc;
+      await this.deps.bus.publish(created.event);
+    } catch {
+      // Chronicle publish is observational here; the dispatch outcome stands.
     }
   }
 

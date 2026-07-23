@@ -25,6 +25,7 @@
     "@inevitable/runtime": "workspace:*",
     "@inevitable/scheduler": "workspace:*",
     "@inevitable/shared": "workspace:*",
+    "@inevitable/source-environment": "workspace:*",
     "@inevitable/world-state": "workspace:*"
   },
   "devDependencies": {

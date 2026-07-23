@@ -41,6 +41,17 @@ export function strictModel(): boolean {
 }
 
 /**
+ * The durable Postgres plane/chronicle (ADR-0034/0035): active only when BOTH
+ * `COS_BACKEND=supabase` and `SUPABASE_DB_URL` are set, so dev/test runs stay offline by default.
+ * (A bracketed placeholder URL — pre-credential .env — counts as unset.)
+ */
+export function supabaseBackendUrl(): string | undefined {
+  if (process.env["COS_BACKEND"] !== "supabase") return undefined;
+  const url = process.env["SUPABASE_DB_URL"];
+  return url && url.trim() && !url.includes("[") ? url : undefined;
+}
+
+/**
  * The durable-persistence directory, if set. When present, the gateway durably persists every
  * surface's event log and media to disk and can reconstruct a surface after a restart (ADR-0008).
  * Absent ⇒ in-memory only (the default; tests stay hermetic). Spec: persistence/durable-cognitive-persistence.
@@ -48,4 +59,18 @@ export function strictModel(): boolean {
 export function persistDir(): string | undefined {
   const dir = process.env["COS_PERSIST_DIR"];
   return dir && dir.trim() ? dir : undefined;
+}
+
+/**
+ * Supabase Storage config for durable canonical source bytes (CSE M5, ADR-0034/0036): active only
+ * when `COS_BACKEND=supabase` and both the project URL and service-role key are set (bracketed
+ * placeholders count as unset). Absent ⇒ source bytes are served from process memory only.
+ */
+export function supabaseStorageConfig(): { url: string; serviceKey: string } | undefined {
+  if (process.env["COS_BACKEND"] !== "supabase") return undefined;
+  const url = process.env["SUPABASE_URL"];
+  const serviceKey = process.env["SUPABASE_SERVICE_ROLE_KEY"];
+  if (!url?.trim() || url.includes("[")) return undefined;
+  if (!serviceKey?.trim() || serviceKey.includes("[")) return undefined;
+  return { url, serviceKey };
 }

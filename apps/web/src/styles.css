@@ -161,10 +161,14 @@
 }
 .surface-goal {
   flex: 1;
+  min-width: 0;
   font-family: var(--font-serif);
   font-size: var(--t-md);
   color: var(--ink-soft);
   font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .conn {
   display: inline-flex;
@@ -180,6 +184,7 @@
   height: 7px;
   border-radius: var(--r-pill);
   background: var(--ink-ghost);
+  transition: background var(--t-quick) var(--ease-soft);
 }
 .conn-live .conn-dot {
   background: var(--mastered);
@@ -285,7 +290,7 @@
   border-color: var(--accent);
   background: var(--accent);
   box-shadow: 0 0 0 4px var(--accent-glow);
-  animation: breathe 2.4s var(--ease-soft) infinite;
+  animation: breathe 2.6s var(--ease-soft) infinite;
 }
 .spine-node.is-here::after {
   content: "";
@@ -298,13 +303,59 @@
 }
 
 /* ─────────────────────────── Cognitive stage ─────────────────────────── */
+/* The stage owns its chrome: a column of [board plane | slot column], so practice inputs and
+   forward affordances RESERVE layout space — floating chrome can never occlude an anchor (CDL). */
 .stage-wrap {
   position: absolute;
   inset: 0;
-  padding: 4.75rem clamp(var(--s-4), 6vw, var(--s-8)) 7rem;
+  padding: 4.25rem clamp(var(--s-4), 6vw, var(--s-8)) 3.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+}
+.board-plane {
+  position: relative;
+  flex: 1;
+  min-height: 0;
   display: flex;
   justify-content: center;
-  min-height: 0;
+}
+.board-slots {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  width: min(680px, 100%);
+  margin: 0 auto;
+  padding: var(--s-3) 0 var(--s-2);
+}
+/* The descent breadcrumb — a light trail back up while diving in a prerequisite (CDL §7). */
+.descent-trail {
+  position: absolute;
+  top: 0.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.8rem;
+  border-radius: var(--r-pill);
+  font-size: var(--t-2xs);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  background: color-mix(in oklab, var(--state-confusion) 12%, var(--plane-raised));
+  border: 1px solid color-mix(in oklab, var(--state-confusion) 32%, transparent);
+  animation: rise var(--t-move) var(--ease-expo) both;
+}
+.descent-trail strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.descent-trail-glyph {
+  color: var(--state-confusion);
 }
 .stage {
   flex: 1;
@@ -385,7 +436,7 @@
   height: 6px;
   border-radius: var(--r-pill);
   background: var(--stage-accent);
-  animation: breathe 1.6s var(--ease-soft) infinite;
+  animation: breathe 2.6s var(--ease-soft) infinite;
 }
 .stage-badge {
   font-size: var(--t-2xs);
@@ -608,11 +659,11 @@
 }
 .presence-card.state-speaking .presence-sigil {
   box-shadow: 0 0 0 4px color-mix(in oklab, var(--agent-accent) 16%, transparent);
-  animation: breathe 1.8s var(--ease-soft) infinite;
+  animation: breathe 2.6s var(--ease-soft) infinite;
 }
 .presence-card.state-speaking .presence-dot {
   background: var(--agent-accent);
-  animation: breathe 1.2s var(--ease-soft) infinite;
+  animation: breathe 2.6s var(--ease-soft) infinite;
 }
 
 /* ─────────────────────────── Provenance peek ─────────────────────────── */
@@ -684,78 +735,208 @@
   cursor: pointer;
 }
 
-/* ─────────────────── Narration transport (floating HUD) ─────────────────── */
-.track {
-  position: absolute;
+/* ─────────────── The Voice Line (CDL chrome: ambient → available) ───────────────
+   Narration as a line of light on the bottom edge; instruments rise on approach on a glass
+   plane (P5); the Thread of Understanding runs along the very edge. Steady state ≤ 2.5rem. */
+.voiceline {
+  position: fixed;
   z-index: 30;
-  left: 50%;
-  bottom: clamp(var(--s-4), 2.5vh, var(--s-6));
-  transform: translateX(-50%);
-  width: min(1100px, calc(100% - 2 * var(--s-5)));
+  inset: auto 0 0 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--s-5);
-  padding: var(--s-3) var(--s-5);
-  border-radius: var(--r-lg);
-  background: color-mix(in oklab, var(--surface-2) 70%, var(--base));
-  border: 1px solid var(--hairline);
-  box-shadow:
-    var(--inset-hi),
-    0 24px 60px -32px rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(18px) saturate(1.1);
+  padding: 0;
+  /* Legibility gradient — the voice reads over any board content without a slab. */
+  background: linear-gradient(
+    to top,
+    color-mix(in oklab, var(--void) 92%, transparent) 30%,
+    color-mix(in oklab, var(--void) 55%, transparent) 70%,
+    transparent
+  );
+  pointer-events: none;
 }
-.track-narration {
-  flex: 1;
-  min-width: 0;
+.voiceline > * {
+  pointer-events: auto;
+}
+/* Instruments: collapsed to nothing in ambient; rise on approach (motion: materialize/yield). */
+.vl-instruments {
   display: flex;
   align-items: center;
-  gap: var(--s-4);
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--s-3) var(--s-4);
+  width: min(1100px, calc(100% - 2 * var(--s-5)));
+  margin-bottom: var(--s-2);
+  padding: var(--s-2) var(--s-4);
+  border-radius: var(--r-lg);
+  border: var(--glass-edge);
+  background: var(--glass-tint);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-e3);
+  max-height: 12rem;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    max-height var(--t-move) var(--ease-expo),
+    opacity var(--t-quick) var(--ease-soft),
+    transform var(--t-move) var(--ease-expo),
+    margin var(--t-move) var(--ease-expo),
+    padding var(--t-move) var(--ease-expo);
+}
+.voiceline[data-state="ambient"] .vl-instruments {
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(8px);
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-width: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* The voice row — always present. */
+.vl-voice {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: min(980px, calc(100% - 2 * var(--s-5)));
+  padding: var(--s-2) 0 var(--s-2);
+  min-height: 2.4rem;
+}
+.vl-play {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.6rem;
+  cursor: pointer;
+  transition:
+    color var(--t-instant) var(--ease-soft),
+    border-color var(--t-instant) var(--ease-soft),
+    box-shadow var(--t-quick) var(--ease-soft);
+}
+.vl-play.is-playing {
+  color: var(--stage-tint, var(--accent));
+  border-color: color-mix(in oklab, var(--stage-tint, var(--accent)) 45%, transparent);
+  box-shadow: 0 0 14px -4px color-mix(in oklab, var(--stage-tint, var(--accent)) 60%, transparent);
+}
+.vl-play:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--hairline-strong);
+}
+.vl-play:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 .narration-text {
+  flex: 1;
+  min-width: 0;
   margin: 0;
   font-family: var(--font-serif);
   font-size: var(--t-md);
-  line-height: 1.4;
+  line-height: 1.45;
   color: var(--ink-soft);
+  /* Never clamp the spoken word away: ambient shows one line with a soft fade; approach reveals
+     the full sentence (no truncation of the one text that must never be cut). */
+  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  -webkit-mask-image: linear-gradient(90deg, black 88%, transparent);
+  mask-image: linear-gradient(90deg, black 88%, transparent);
 }
-.waveform {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  height: 1.5rem;
-  flex-shrink: 0;
+.voiceline[data-state="available"] .narration-text {
+  white-space: normal;
+  -webkit-mask-image: none;
+  mask-image: none;
 }
-.waveform i {
-  width: 3px;
-  height: 30%;
-  border-radius: var(--r-pill);
-  background: var(--ink-ghost);
+.vl-place {
+  flex: none;
+  font-size: var(--t-2xs);
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  white-space: nowrap;
 }
-.waveform.is-live i {
-  background: var(--accent);
-  animation: wave 1s var(--ease-soft) infinite;
+.vl-place em {
+  font-style: normal;
+  color: var(--ink-ghost);
+  font-variant-numeric: tabular-nums;
 }
-.waveform.is-live i:nth-child(2) {
-  animation-delay: 0.15s;
+/* The in-flight ask's phase, whispered beside the voice (surface.ask.progress — never silent). */
+.vl-progress {
+  flex: none;
+  font-size: var(--t-2xs);
+  letter-spacing: 0.06em;
+  color: color-mix(in oklab, var(--stage-tint, var(--accent)) 62%, var(--ink-faint));
+  white-space: nowrap;
+  animation: breathe 2.6s var(--ease-soft) infinite;
 }
-.waveform.is-live i:nth-child(3) {
-  animation-delay: 0.3s;
-}
-.waveform.is-live i:nth-child(4) {
-  animation-delay: 0.45s;
-}
-.waveform.is-live i:nth-child(5) {
-  animation-delay: 0.6s;
-}
-.track-controls {
+/* The Thread of Understanding — the bottom edge itself. Filaments = segments; nodes = concepts. */
+.thread {
   display: flex;
   align-items: center;
-  gap: var(--s-4);
+  width: 100%;
+  height: 14px;
+  padding: 0 var(--s-4) 4px;
+  gap: 2px;
+}
+.thread-empty {
+  width: 4rem;
+  height: 2px;
+  margin: 0 auto;
+  border-radius: var(--r-pill);
+  background: var(--hairline);
+}
+.thread-frame {
+  flex-grow: 1;
+  flex-basis: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.thread-seg {
+  flex: 1;
+  min-width: 4px;
+  height: 14px;
+  padding: 6px 0;
+  border: none;
+  border-radius: var(--r-pill);
+  background: var(--hairline);
+  background-clip: content-box;
+  cursor: pointer;
+  transition: background-color var(--t-quick) var(--ease-soft);
+}
+.thread-seg:hover {
+  background-color: var(--ink-faint);
+}
+.thread-seg.is-done {
+  background-color: color-mix(in oklab, var(--stage-tint, var(--accent)) 55%, var(--ink-ghost));
+}
+.thread-seg.is-current {
+  background-color: var(--stage-tint, var(--accent));
+  box-shadow: 0 0 10px -2px color-mix(in oklab, var(--stage-tint, var(--accent)) 70%, transparent);
+}
+.thread-node {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  padding: 3px;
+  border: none;
+  border-radius: var(--r-pill);
+  background: radial-gradient(circle, var(--ink-faint) 0 3px, transparent 3.5px);
+  cursor: pointer;
+  transition: transform var(--t-quick) var(--ease-spring);
+}
+.thread-node:hover {
+  transform: scale(1.4);
+}
+.thread-frame.is-current .thread-node {
+  background: radial-gradient(circle, var(--stage-tint, var(--accent)) 0 3.5px, transparent 4px);
 }
 .transport {
   display: inline-flex;
@@ -785,43 +966,6 @@
 .t-btn:disabled {
   opacity: 0.35;
   cursor: default;
-}
-.t-play {
-  background: var(--accent);
-  color: #04222a;
-  border-color: transparent;
-}
-.t-play:hover:not(:disabled) {
-  color: #04222a;
-}
-.scrubber {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  max-width: 16rem;
-  flex-wrap: wrap;
-}
-.scrubber-empty {
-  width: 4rem;
-  height: 3px;
-  border-radius: var(--r-pill);
-  background: var(--hairline);
-}
-.tick {
-  width: 14px;
-  height: 4px;
-  border-radius: var(--r-pill);
-  border: none;
-  background: var(--hairline-strong);
-  cursor: pointer;
-  transition: all var(--dur-fast) var(--ease-expo);
-}
-.tick.is-done {
-  background: var(--ink-faint);
-}
-.tick.is-current {
-  width: 24px;
-  background: var(--accent);
 }
 .ask {
   display: flex;
@@ -883,7 +1027,7 @@
 }
 .stage-pulse.is-thinking {
   border-color: var(--accent);
-  animation: breathe 1.6s var(--ease-soft) infinite;
+  animation: breathe 2.6s var(--ease-soft) infinite;
 }
 .stage-empty-line {
   font-family: var(--font-serif);
@@ -921,37 +1065,47 @@
     transform: scale(0.92);
   }
 }
-@keyframes wave {
-  0%,
-  100% {
-    height: 28%;
-  }
-  50% {
-    height: 92%;
-  }
-}
-
 /* ─────────────────────────── Responsive ─────────────────────────── */
 @media (max-width: 1080px) {
   .stage-wrap {
-    padding: 4.5rem clamp(var(--s-3), 4vw, var(--s-6)) 8rem;
+    padding: 4rem clamp(var(--s-3), 4vw, var(--s-6)) 3.25rem;
   }
   .overlay--right .overlay-panel {
     width: min(92vw, 30rem);
   }
 }
 @media (max-width: 720px) {
-  .track {
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--s-3);
-    width: calc(100% - 2 * var(--s-4));
-  }
-  .track-controls {
-    flex-wrap: wrap;
-  }
   .surface-top {
     gap: var(--s-3);
+  }
+  .surface-goal {
+    font-size: var(--t-sm);
+  }
+  .agents-word,
+  .agents-label {
+    display: none;
+  }
+  .vl-place {
+    display: none;
+  }
+  .vl-instruments {
+    width: calc(100% - 2 * var(--s-3));
+    gap: var(--s-2) var(--s-3);
+  }
+  .vl-voice {
+    width: calc(100% - 2 * var(--s-3));
+  }
+  .narration-text {
+    font-size: var(--t-base);
+  }
+  .path-launcher {
+    bottom: 4.4rem;
+  }
+}
+/* Notched / home-indicator devices: the Thread respects the safe area. */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .voiceline {
+    padding-bottom: env(safe-area-inset-bottom);
   }
 }
 
@@ -1016,17 +1170,29 @@
   stroke: var(--agent-research);
   opacity: 0.8;
 }
+.graph-scroll {
+  display: grid;
+  place-items: center;
+}
 .gnode {
   cursor: pointer;
 }
+/* Constellation nodes sit on the raised plane so the filaments behind them stay quiet. */
 .gnode-box {
-  fill: var(--surface-2);
+  fill: var(--plane-raised);
   stroke: var(--locked);
   stroke-width: 1;
-  transition: all 0.2s var(--ease-soft);
+  transition:
+    fill var(--t-quick) var(--ease-soft),
+    stroke var(--t-quick) var(--ease-soft),
+    filter var(--t-quick) var(--ease-soft);
 }
+/* Mastered concepts acquire a persistent warm "gold-leaf" identity (review §16) — the path visibly
+   accumulates earned understanding, so visual memory compounds as the learner advances. */
 .gnode.status-mastered .gnode-box {
   stroke: var(--mastered);
+  stroke-width: 1.5;
+  fill: color-mix(in oklab, var(--mastered) 12%, var(--surface-2));
 }
 .gnode.status-in_progress .gnode-box {
   stroke: var(--in-progress);
@@ -1170,6 +1336,11 @@
   opacity: 0.4;
   cursor: default;
 }
+.ij-btn.is-pending {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, var(--surface-1));
+}
 .ij-interrupt {
   border-color: rgba(255, 206, 107, 0.3);
   color: var(--in-progress);
@@ -1305,23 +1476,26 @@
   color: var(--ink);
 }
 .enter-mode-chip--active {
-  border-color: var(--accent);
-  background: rgba(168, 139, 250, 0.12);
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
   color: var(--accent);
 }
 
 /* ── Educator overlay (S4.3) ──────────────────────────────────────────────── */
 .edu-overlay {
   position: fixed;
-  bottom: 4rem;
+  bottom: 3.5rem;
   right: 0;
-  width: 320px;
+  width: min(320px, 92vw);
   max-height: 70vh;
   overflow-y: auto;
-  background: var(--bg-panel);
-  border-left: 1px solid var(--border);
-  border-top: 1px solid var(--border);
+  background: var(--glass-tint-heavy);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-left: var(--glass-edge);
+  border-top: var(--glass-edge);
   border-top-left-radius: var(--r-md);
+  box-shadow: var(--shadow-e4);
   padding: var(--s-4);
   display: flex;
   flex-direction: column;
@@ -1548,8 +1722,8 @@
   color: var(--ink);
 }
 .proj-chip--active {
-  border-color: var(--accent);
-  background: rgba(168, 139, 250, 0.12);
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
   color: var(--accent);
 }
 
@@ -1638,11 +1812,11 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  background: color-mix(in oklab, var(--stage) 92%, var(--base));
-  border: 1px solid var(--hairline);
-  box-shadow:
-    var(--inset-hi),
-    0 40px 120px -50px rgba(0, 0, 0, 0.9);
+  background: var(--glass-tint-heavy);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: var(--glass-edge);
+  box-shadow: var(--shadow-e5);
   pointer-events: auto;
   transition:
     transform var(--dur) var(--ease-expo),
@@ -1726,15 +1900,49 @@
   gap: var(--s-6);
 }
 
-/* Agents control (top bar) — compact, with live status pills. */
+/* The System Gem cluster — all system state as one calm point of light (CDL: light carries
+   meaning). The gem is also the entry to the Agent Observatory. */
+.gem-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.gem-core {
+  width: 11px;
+  height: 11px;
+  border-radius: var(--r-pill);
+  background: var(--gem-hue, var(--stage-tint, var(--accent)));
+  box-shadow: 0 0 10px 1px color-mix(in oklab, var(--gem-hue, var(--accent)) 45%, transparent);
+  transition: background var(--t-move) var(--ease-soft);
+}
+.agents-btn.is-busy .gem-core {
+  animation: breathe 2.6s var(--ease-soft) infinite;
+}
+/* Degradation is honest but never an alarm: a quiet ember ring around the gem. */
+.agents-btn[data-degraded="true"] .gem-core {
+  box-shadow:
+    0 0 0 2px color-mix(in oklab, var(--state-confusion) 55%, transparent),
+    0 0 12px 2px color-mix(in oklab, var(--state-confusion) 35%, transparent);
+}
 .agents-btn {
   display: inline-flex;
   align-items: center;
   gap: var(--s-3);
-  padding: var(--s-2) var(--s-3) var(--s-2) var(--s-4);
+  padding: var(--s-2) var(--s-3) var(--s-2) var(--s-3);
   border-radius: var(--r-pill);
-  border: 1px solid var(--hairline);
-  background: var(--surface-1);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--ink-soft);
   cursor: pointer;
   transition:
@@ -1744,7 +1952,7 @@
 }
 .agents-btn:hover,
 .agents-btn.is-active {
-  border-color: var(--hairline-strong);
+  border-color: var(--hairline);
   color: var(--ink);
 }
 .agents-btn.is-active {
@@ -1771,7 +1979,7 @@
 }
 .agents-pill.state-thinking {
   opacity: 0.8;
-  animation: breathe 1.8s var(--ease-soft) infinite;
+  animation: breathe 2.6s var(--ease-soft) infinite;
 }
 .agents-pill.state-contributing {
   opacity: 1;
@@ -1779,7 +1987,7 @@
 }
 .agents-pill.state-speaking {
   opacity: 1;
-  animation: breathe 1.2s var(--ease-soft) infinite;
+  animation: breathe 2.6s var(--ease-soft) infinite;
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--agent-accent) 30%, transparent);
 }
 .agents-word {
@@ -1792,9 +2000,9 @@
 /* Path launcher (floating, bottom-left). */
 .path-launcher {
   position: absolute;
-  z-index: 30;
+  z-index: 31;
   left: clamp(var(--s-4), 3vw, var(--s-6));
-  bottom: clamp(var(--s-4), 2.5vh, var(--s-6));
+  bottom: 3.4rem;
   display: inline-flex;
   align-items: center;
   gap: var(--s-2);
@@ -1808,8 +2016,8 @@
   text-transform: uppercase;
   font-weight: 600;
   cursor: pointer;
-  -webkit-backdrop-filter: blur(18px);
-  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: var(--glass-blur-whisper);
+  backdrop-filter: var(--glass-blur-whisper);
   transition:
     border-color var(--dur-fast) var(--ease-soft),
     color var(--dur-fast) var(--ease-soft);
@@ -1919,25 +2127,15 @@
 }
 .nw.w-active {
   color: var(--ink);
-  text-shadow: 0 0 18px var(--accent-glow);
+  text-shadow: 0 0 18px color-mix(in oklab, var(--stage-tint, var(--accent)) 30%, transparent);
 }
-.track {
-  transition:
-    width var(--dur) var(--ease-expo),
-    opacity var(--dur) var(--ease-soft);
-}
-.track-controls {
-  transition:
-    opacity var(--dur) var(--ease-soft),
-    max-width var(--dur) var(--ease-expo);
-  max-width: 1200px;
-}
-.track.is-idle {
-  width: min(720px, calc(100% - 2 * var(--s-5)));
-  opacity: 0.9;
-}
-.track.is-idle .track-controls {
-  display: none;
+/* Keyboard safety net: any focus within the Voice Line summons the instruments even if the
+   pointer never approached (the learner is never stranded, review §17c). */
+.voiceline:focus-within .vl-instruments {
+  max-height: 12rem;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
 }
 
 /* Streaming cognition: a blinking caret while an explanation forms (S-UCS, ADR-0028). */
@@ -1949,7 +2147,7 @@
   vertical-align: text-bottom;
   background: var(--stage-accent, var(--accent));
   border-radius: 1px;
-  animation: caret-blink 1s steps(2, jump-none) infinite;
+  animation: caret-blink 1.2s var(--ease-soft) infinite;
 }
 @keyframes caret-blink {
   0%,
@@ -2061,6 +2259,20 @@
   justify-content: center;
   overflow: hidden; /* the no-scroll guarantee — a frame is a complete thought */
   padding: clamp(2rem, 5vh, 4rem) clamp(1.5rem, 5vw, 5rem);
+  /* Cognitive color language: a faint per-frame wash tinted by the kind of thinking (learning /
+     practice / assessment / research). ~6% mix — the room's light shifts, the content stays legible. */
+  background:
+    radial-gradient(
+      130% 90% at 50% -20%,
+      color-mix(in oklab, var(--stage-tint, var(--accent)) 14%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      90% 70% at 50% 120%,
+      color-mix(in oklab, var(--stage-tint, var(--accent)) 8%, transparent),
+      transparent 58%
+    );
+  transition: background var(--dur-slow) var(--ease-soft);
 }
 .frame-stage--empty {
   flex-direction: column;
@@ -2072,7 +2284,7 @@
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 0 var(--accent-glow);
-  animation: breathe 2.4s var(--ease-expo) infinite;
+  animation: breathe 2.6s var(--ease-soft) infinite;
 }
 .frame-empty-text {
   color: var(--ink-faint);
@@ -2084,24 +2296,166 @@
   position: absolute;
   inset: 0;
 }
+/* R3c (ADR-0057; CSE-013): the Cinematographer's latest shot realizes as a subtle camera move on
+   the board — the shot grammar made visible. Amplitudes are deliberately tiny (≤2%); the point is
+   a legible, meaningful move, never spectacle (CSE-013 §3: "a move with no cognitive reason is a
+   defect"). All motion is gated under no-preference — reduced-motion clients get the discrete
+   baseline (the frame simply present), honoring the mandated reduced-motion realization (§6). */
+@media (prefers-reduced-motion: no-preference) {
+  .frame-deck[data-shot] .frame-stage--enter {
+    transform-origin: center;
+  }
+  .frame-deck[data-shot="semantic-zoom-in"] .frame-stage--enter {
+    animation: shot-zoom-in var(--t-form, 620ms) var(--ease-expo, ease) both;
+  }
+  .frame-deck[data-shot="semantic-zoom-out"] .frame-stage--enter,
+  .frame-deck[data-shot="macro-to-micro"] .frame-stage--enter {
+    animation: shot-zoom-out var(--t-form, 620ms) var(--ease-expo, ease) both;
+  }
+  .frame-deck[data-shot="establish"] .frame-stage--enter,
+  .frame-deck[data-shot="orientation"] .frame-stage--enter {
+    animation: shot-establish var(--t-form, 620ms) var(--ease-expo, ease) both;
+  }
+  /* `hold` is deliberate stillness (CSE-013): no camera move at all. */
+  .frame-deck[data-shot="hold"] .frame-stage--enter {
+    animation: none;
+  }
+}
+@keyframes shot-zoom-in {
+  from {
+    transform: scale(0.98);
+    opacity: 0.6;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes shot-zoom-out {
+  from {
+    transform: scale(1.02);
+    opacity: 0.6;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes shot-establish {
+  from {
+    opacity: 0.4;
+  }
+  to {
+    opacity: 1;
+  }
+}
+/* Motion explains causality (CDL): a NEW concept `form`s — materializing from depth (blur +
+   rise); the SAME concept `continue`s — thought moving laterally forward (explanation → its
+   practice). Reduced-motion collapses both to an instant swap via the global rule. */
 .frame-stage--enter {
-  animation: frame-enter var(--dur-slow) var(--ease-expo) both;
+  animation: frame-form-enter var(--t-form) var(--ease-expo) both;
 }
 .frame-stage--exit {
-  animation: frame-exit var(--dur-slow) var(--ease-expo) forwards;
+  animation: frame-form-exit var(--t-form) var(--ease-expo) forwards;
   pointer-events: none;
 }
-@keyframes frame-enter {
+/* `continue`: the shared core-concept anchor travels (JS FLIP, FrameDeck); the rest of the stage
+   simply crossfades so the learner sees one idea in motion, not the whole board sliding. */
+.frame-deck[data-transition="continue"] .frame-stage--enter {
+  animation-name: frame-continue-enter;
+}
+.frame-deck[data-transition="continue"] .frame-stage--exit {
+  animation-name: frame-continue-exit;
+}
+@keyframes frame-continue-enter {
   from {
     opacity: 0;
-    transform: translateY(12px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes frame-continue-exit {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+/* `descend`: diving into a prerequisite — we fly THROUGH the current frame (it scales up and
+   blurs away) into the nested concept, which arrives from deep (small + blurred → full). */
+.frame-deck[data-transition="descend"] .frame-stage--enter {
+  animation-name: frame-descend-enter;
+}
+.frame-deck[data-transition="descend"] .frame-stage--exit {
+  animation-name: frame-descend-exit;
+}
+.frame-deck[data-transition="ascend"] .frame-stage--enter {
+  animation-name: frame-ascend-enter;
+}
+.frame-deck[data-transition="ascend"] .frame-stage--exit {
+  animation-name: frame-ascend-exit;
+}
+@keyframes frame-descend-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.72);
+    filter: blur(8px);
   }
   to {
     opacity: 1;
     transform: none;
+    filter: blur(0);
   }
 }
-@keyframes frame-exit {
+@keyframes frame-descend-exit {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.32);
+    filter: blur(10px);
+  }
+}
+@keyframes frame-ascend-enter {
+  from {
+    opacity: 0;
+    transform: scale(1.22);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+@keyframes frame-ascend-exit {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.72);
+    filter: blur(8px);
+  }
+}
+@keyframes frame-form-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.99);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+@keyframes frame-form-exit {
   from {
     opacity: 1;
     transform: none;
@@ -2109,6 +2463,7 @@
   to {
     opacity: 0;
     transform: translateY(-10px) scale(0.992);
+    filter: blur(4px);
   }
 }
 /* N+1 pre-warm: present for the browser to fetch/decode, invisible + inert to the learner. */
@@ -2155,6 +2510,24 @@
 .frame-grid[data-archetype="compare"] {
   grid-template-columns: minmax(0, 1fr);
 }
+/* Sparse frames (2–3 anchors, e.g. practice/checkpoint) center and breathe rather than leaving two
+   thin strips floating in an empty column. A single column, centered, at comfortable reading width. */
+.frame-grid[data-density="sparse"],
+.frame-grid[data-density="sparse"][data-archetype] {
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  justify-items: center;
+  gap: clamp(1rem, 3vh, 2rem);
+  /* No decorative min-height: the stage centers the fit; inflated measurements would block
+     density recomposition from inviting folded anchors back (audit B1). */
+}
+.frame-grid[data-density="sparse"] .mccr-el {
+  width: min(680px, 100%);
+  text-align: center;
+}
+.frame-grid[data-density="sparse"] .mccr-text {
+  font-size: clamp(1.05rem, 2.2vw, 1.4rem);
+}
 @media (max-width: 720px) {
   .frame-grid,
   .frame-grid[data-archetype] {
@@ -2162,50 +2535,560 @@
   }
 }
 
-/* An MCCR anchor — a card that earns its place on the board. Core/definition span full width. */
+/* ── MCCR anchor hierarchy (CDL) ─────────────────────────────────────────────
+   The board is not a grid of equal cards — hierarchy IS the pedagogy made visible.
+   Canon (core concept) dominates, free of card chrome. Gloss (definition) reads as
+   prose under a thread of state light. Supporting anchors are quiet P2 cards. */
 .mccr-el {
   position: relative;
   margin: 0;
-  padding: clamp(0.85rem, 1.6vw, 1.25rem);
+  padding: var(--breath-inner);
   border: 1px solid var(--hairline);
   border-radius: var(--r-md);
-  background: color-mix(in oklab, var(--ink) 2%, transparent);
+  background: var(--surface-1);
   animation: rise var(--dur-slow) var(--ease-expo) both;
 }
 .mccr-el--core_concept,
 .mccr-el--definition {
   grid-column: 1 / -1;
 }
-.mccr-el-tag {
-  display: inline-block;
-  font-size: 0.62rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-ghost);
-  margin-bottom: 0.4rem;
+/* Canon — the one thing this frame is about. No box: the concept IS the board. */
+.mccr-el--core_concept {
+  border: none;
+  background: transparent;
+  padding: 0.25rem 0 0.4rem;
 }
 .mccr-el--core_concept .mccr-text {
   font-family: var(--font-serif);
-  font-size: clamp(1.3rem, 2.8vw, 1.9rem);
-  line-height: 1.1;
+  font-weight: 480;
+  font-size: clamp(1.7rem, 3.4vw, 2.5rem);
+  line-height: 1.08;
+  letter-spacing: -0.01em;
   color: var(--ink);
   margin: 0;
+  max-width: 28ch;
+}
+/* Gloss — the definition as readable prose, lit by a thread of the state's light. */
+.mccr-el--definition {
+  border: none;
+  border-left: 2px solid color-mix(in oklab, var(--stage-tint, var(--accent)) 55%, transparent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--stage-tint, var(--accent)) 7%, transparent),
+    transparent 70%
+  );
+  padding: 0.7rem var(--breath-inner);
+}
+.mccr-el--definition .mccr-text {
+  font-family: var(--font-serif);
+  font-size: clamp(1.05rem, 1.9vw, 1.3rem);
+  line-height: 1.5;
+  color: var(--ink);
+  max-width: var(--measure-prose);
+}
+/* Memory cue — a keepsake, warm and small. */
+.mccr-el--memory_cue {
+  background: color-mix(in oklab, var(--state-reflection) 6%, transparent);
+  border-color: color-mix(in oklab, var(--state-reflection) 22%, transparent);
+}
+.mccr-el--memory_cue .mccr-text {
+  font-family: var(--font-serif);
+  font-style: italic;
+}
+
+/* ── Per-role semantic identity (CDL: light carries meaning) ─────────────────
+   Each cognitive role borrows its hue from the state palette at STRUCTURAL amplitude — role tags
+   at ~70%, edges ≤ 25%, washes ≤ 7% — so the learner's eye can navigate the board by role
+   (formula ≠ example ≠ misconception at a glance) while the narration spotlight remains the only
+   focal accent on screen. Never decoration: every hue below names a kind of thinking. */
+.mccr-el--memory_cue .mccr-el-tag {
+  color: color-mix(in oklab, var(--state-reflection) 72%, var(--ink-faint));
+  opacity: 1;
+}
+/* Key formula — precision. The learning state's clarity, machined. */
+.mccr-el--key_formula {
+  border-color: color-mix(in oklab, var(--state-learning) 18%, var(--hairline));
+}
+.mccr-el--key_formula .mccr-el-tag {
+  color: color-mix(in oklab, var(--state-learning) 72%, var(--ink-faint));
+  opacity: 1;
+}
+/* Worked example — doing. Practice green enters the board wherever the learner should try. */
+.mccr-el--key_example {
+  border-left: 2px solid color-mix(in oklab, var(--state-practice) 45%, transparent);
+  background: color-mix(in oklab, var(--state-practice) 4%, var(--surface-1));
+}
+.mccr-el--key_example .mccr-el-tag {
+  color: color-mix(in oklab, var(--state-practice) 72%, var(--ink-faint));
+  opacity: 1;
+}
+/* Mental model — intuition. Discovery amber: the analogy that lights the idea up. */
+.mccr-el--mental_model {
+  background: color-mix(in oklab, var(--state-discovery) 4%, var(--surface-1));
+  border-color: color-mix(in oklab, var(--state-discovery) 16%, var(--hairline));
+}
+.mccr-el--mental_model .mccr-el-tag {
+  color: color-mix(in oklab, var(--state-discovery) 72%, var(--ink-faint));
+  opacity: 1;
+}
+.mccr-el--mental_model .mccr-text {
+  font-family: var(--font-serif);
+  font-style: italic;
+}
+/* Misconception — redirection, never alarm (CDL: confusion is ember, not red). The one wrong
+   belief this concept attracts, named so the learner can defuse it before it forms. */
+.mccr-el--misconception {
+  grid-column: 1 / -1;
+  border-left: 3px solid color-mix(in oklab, var(--state-confusion) 55%, transparent);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--state-confusion) 6%, transparent),
+    transparent 75%
+  );
+}
+.mccr-el--misconception .mccr-el-tag {
+  color: color-mix(in oklab, var(--state-confusion) 78%, var(--ink-faint));
+  opacity: 1;
+}
+/* R4e (ADR-0058; CSE-013 dissolve grammar): the misconception is a DISSOLVE, not a side-by-side
+   comparison — the wrong belief struck through, an arrow down, then the correction it resolves into.
+   While the narration is on this anchor (`data-dissolving`) the correction resolves in and the wrong
+   half settles back a plane; at rest both are shown. Reduced motion drops the animation (below). */
+.mccr-misconception {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  max-width: var(--measure-prose);
+}
+.mccr-misconception-wrong,
+.mccr-misconception-right {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  margin: 0;
+  line-height: 1.45;
+}
+.mccr-misconception-wrong {
+  color: color-mix(in oklab, var(--state-confusion) 72%, var(--ink-faint));
+}
+.mccr-misconception-wrong s {
+  text-decoration-color: color-mix(in oklab, var(--state-confusion) 70%, transparent);
+}
+.mccr-misconception-right {
+  color: var(--ink);
+  font-weight: 560;
+}
+.mccr-misconception-arrow {
+  color: color-mix(in oklab, var(--state-mastery, #d9b25f) 80%, var(--ink-faint));
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.mccr-misconception-mark {
+  font-size: 0.85em;
+}
+.mccr-misconception-mark--wrong {
+  color: var(--state-confusion);
+}
+.mccr-misconception-mark--right {
+  color: var(--state-mastery, #d9b25f);
+}
+.mccr-misconception[data-dissolving="true"] .mccr-misconception-right {
+  animation: dissolve-in var(--dur-slow, 520ms) var(--ease-expo, ease) both;
+}
+.mccr-misconception[data-dissolving="true"] .mccr-misconception-wrong {
+  animation: dissolve-out var(--dur-slow, 520ms) var(--ease-soft, ease) both;
+}
+@keyframes dissolve-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.4rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes dissolve-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.6;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Vestibular safety (CSE-013 §6): both halves present at once, no motion. */
+  .mccr-misconception[data-dissolving="true"] .mccr-misconception-right,
+  .mccr-misconception[data-dissolving="true"] .mccr-misconception-wrong {
+    animation: none;
+  }
+}
+/* R4e (ADR-0058; CSE-018 §6 process/algorithm grammar): an ordered procedure. While spoken
+   (`--staging`) each step arrives in sequence — the learner watches the process unfold; at rest
+   every step is present. Reuses the derivation stagger. */
+.mccr-process {
+  margin: 0;
+  padding-left: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  color: var(--ink-soft);
+  max-width: var(--measure-prose);
+}
+.mccr-process-step {
+  line-height: 1.45;
+}
+.mccr-process-text {
+  color: var(--ink);
+}
+.mccr-process-detail {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.82rem;
+  color: var(--ink-faint);
+}
+.mccr-process--staging .mccr-process-step {
+  animation: derive-line var(--dur-slow, 520ms) var(--ease-expo, ease) both;
+  animation-delay: calc(var(--line-index, 0) * 0.4s);
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Vestibular safety: every step present at once, no stagger. */
+  .mccr-process--staging .mccr-process-step {
+    animation: none;
+  }
+}
+/* R4e (ADR-0058; CSE-018 §6 code grammar): real source as a first-class anchor — monospace,
+   indentation preserved, language-tagged; the noted (taught) lines carry a left accent so the eye
+   lands where the voice is, brighter while the anchor is spoken. Static layout, no motion. */
+.mccr-code {
+  position: relative;
+  margin: 0;
+  border-radius: var(--r-md, 8px);
+  background: color-mix(in oklab, var(--ink) 6%, var(--surface-1, #fff));
+  border: 1px solid color-mix(in oklab, var(--ink) 12%, transparent);
+  max-width: var(--measure-prose);
+  overflow: hidden;
+}
+.mccr-code-lang {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.55rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.mccr-code-pre {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  overflow-x: auto;
+  font-family: var(--font-mono, ui-monospace, "Consolas", monospace);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.mccr-code-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.85rem;
+}
+.mccr-code-text {
+  color: var(--ink);
+  white-space: pre;
+}
+.mccr-code-note {
+  white-space: normal;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 0.72rem;
+  font-style: italic;
+  color: var(--ink-faint);
+}
+.mccr-code-line[data-noted="true"] {
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--accent) 45%, transparent);
+}
+.mccr-code[data-active="true"] .mccr-code-line[data-noted="true"] {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+}
+.mccr-code[data-active="true"] .mccr-code-line[data-noted="true"] .mccr-code-note {
+  color: color-mix(in oklab, var(--accent) 70%, var(--ink-faint));
+}
+/* Relationship — structure made visible; its arrow carries the state's light. */
+.mccr-el--relationship .mccr-el-tag,
+.mccr-el--diagram .mccr-el-tag {
+  color: color-mix(in oklab, var(--stage-tint, var(--accent)) 66%, var(--ink-faint));
+  opacity: 1;
+}
+.mccr-el--table .mccr-el-tag {
+  color: color-mix(in oklab, var(--state-research) 66%, var(--ink-faint));
+  opacity: 1;
 }
 .mccr-text {
   margin: 0;
   color: var(--ink-soft);
-  font-size: clamp(0.95rem, 1.6vw, 1.1rem);
-  line-height: 1.45;
+  font-size: clamp(0.95rem, 1.6vw, 1.08rem);
+  line-height: 1.5;
+  max-width: var(--measure-prose);
+}
+/* Focus recession (CDL depth): while one anchor is spotlighted, siblings recede a plane back. */
+.frame-grid[data-focus="true"] .mccr-el[data-active="false"][data-revealed="true"] {
+  opacity: 0.68;
+  filter: saturate(0.85);
+}
+.frame-grid .mccr-el {
+  transition:
+    opacity var(--t-move) var(--ease-soft),
+    filter var(--t-move) var(--ease-soft),
+    transform var(--t-quick) var(--ease-expo);
+}
+.mccr-el[data-active="true"] {
+  background: color-mix(in oklab, var(--stage-tint, var(--accent)) 5%, var(--surface-1));
+}
+/* R3d (ADR-0057; CSE-012 §4): the Scene's lighting recedes non-focal actors — a gentle dim so the
+   focus reads first while siblings stay legible (never hidden; readability > emphasis). The active
+   spoken element is never receded (guarded in FrameStage). Opacity only — reduced-motion neutral. */
+.mccr-el[data-lit="recede"] {
+  opacity: 0.78;
+  transition: opacity var(--dur, 240ms) ease;
+}
+
+/* R4b (ADR-0058; CSE-018 Law 5): the RIA's epistemic role → the CDL visual language. The role is a
+   SEPARATE semantic layer from the element type (it will diverge under model-backed planning, R4d);
+   here it tints the element's kind-tag so the learner reads the KIND of knowledge without a label.
+   `--role-hue` is the hook downstream treatments read; additive, never conflicts with type styling. */
+.mccr-el[data-epistemic-role] {
+  --role-hue: var(--ink-faint);
+}
+.mccr-el[data-epistemic-role="misconception"],
+.mccr-el[data-epistemic-role="warning"] {
+  --role-hue: var(--state-confusion, #e8927c);
+}
+.mccr-el[data-epistemic-role="insight"] {
+  --role-hue: var(--state-mastery, #d9b25f);
+}
+.mccr-el[data-epistemic-role="canonical"],
+.mccr-el[data-epistemic-role="definition"] {
+  --role-hue: var(--state-learning, #7fb7c9);
+}
+.mccr-el[data-epistemic-role="evidence"] {
+  --role-hue: var(--state-discovery, #ffc46b);
+}
+.mccr-el[data-epistemic-role="example"] {
+  --role-hue: var(--state-practice, #8bbf7a);
+}
+.mccr-el[data-epistemic-role] .mccr-el-tag {
+  color: var(--role-hue);
+}
+
+/* R3e (ADR-0057; CSE-005 §3.5): the sensing chip — visible + opt-out. Muted by default; frustration/
+   overload use the reserved ember (redirection, never alarm). */
+.affect-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+}
+.affect-state {
+  text-transform: capitalize;
+}
+.affect-state--frustrated,
+.affect-state--overloaded {
+  color: var(--state-confusion, #e8927c);
+}
+.affect-state--confident,
+.affect-state--engaged {
+  color: var(--state-mastery, #d9b25f);
+}
+.affect-budget {
+  color: var(--ink-ghost);
+}
+.affect-optout {
+  font: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: var(--ink-ghost);
+  padding: 0 0.15rem;
+  line-height: 1;
+}
+/* Folded anchors (density recomposition): quiet chips that reopen on the focus plane. */
+.mccr-folded {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  justify-content: center;
+  padding-top: var(--s-1);
+}
+.mccr-fold-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--r-pill);
+  border: 1px dashed var(--hairline-strong);
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: var(--t-2xs);
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition:
+    color var(--t-instant) var(--ease-soft),
+    border-color var(--t-instant) var(--ease-soft);
+}
+.mccr-fold-chip:hover {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--stage-tint, var(--accent)) 50%, var(--hairline-strong));
+}
+/* The focus plane: one folded anchor brought forward on glass (P5). */
+.mccr-focus-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  padding: var(--s-6);
+}
+.mccr-focus-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: color-mix(in oklab, var(--void) 45%, transparent);
+  cursor: pointer;
+}
+.mccr-focus-card {
+  position: relative;
+  width: min(640px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: var(--s-3);
+  border-radius: var(--r-lg);
+  border: var(--glass-edge);
+  background: var(--glass-tint-heavy);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-e4);
+  animation: rise var(--t-move) var(--ease-expo) both;
+}
+.mccr-focus-card .mccr-el {
+  border: none;
+  background: transparent;
+}
+.mccr-focus-close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+}
+.mccr-el-tag {
+  display: inline-block;
+  font-size: var(--t-2xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-ghost);
+  margin-bottom: 0.4rem;
+  opacity: 0.8;
+}
+.mccr-el--core_concept .mccr-el-tag {
+  display: none;
 }
 .mccr-formula {
   display: block;
-  font-family: ui-monospace, "Cascadia Code", monospace;
-  font-size: clamp(1rem, 1.8vw, 1.25rem);
+  font-family: "Cambria Math", "STIX Two Math", Georgia, serif;
+  font-size: clamp(1.05rem, 1.9vw, 1.35rem);
+  line-height: 1.5;
   color: var(--ink);
   background: color-mix(in oklab, var(--accent) 8%, transparent);
   border-radius: 8px;
-  padding: 0.6rem 0.8rem;
-  overflow-x: auto;
+  padding: 0.6rem 0.85rem;
+  /* No horizontal scrollbar (no-scroll law): long formulae wrap rather than scroll. */
+  overflow-wrap: anywhere;
+}
+.mccr-formula sub,
+.mccr-formula sup {
+  font-size: 0.72em;
+  font-style: italic;
+}
+/* A stacked fraction rendered without a math engine. */
+.mccr-formula .ltx-frac {
+  display: inline-flex;
+  flex-direction: column;
+  vertical-align: middle;
+  text-align: center;
+  margin: 0 0.15em;
+}
+.mccr-formula .ltx-num {
+  border-bottom: 1px solid currentColor;
+  padding: 0 0.3em;
+}
+.mccr-formula .ltx-den {
+  padding: 0 0.3em;
+}
+.mccr-formula .ltx-sqrt {
+  border-top: 1px solid currentColor;
+  padding: 0 0.15em;
+}
+/* KaTeX (publication-grade upgrade) inherits the board's ink; sized to the formula role. */
+.mccr-formula .katex {
+  font-size: 1.12em;
+}
+/* A multi-line derivation — stacked, aligned left, read top-to-bottom like a textbook page.
+   Each line is an equal step; the state's light marks the sequence spine. */
+.mccr-formula--derivation {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  border-left: 2px solid color-mix(in oklab, var(--stage-tint, var(--accent)) 35%, transparent);
+}
+.mccr-formula-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding-left: 0.35rem;
+}
+/* R4c (ADR-0058; CSE-018 §6): the transformation label — the step's cognitive reason, in the
+   provenance voice, muted so it annotates without competing with the math. */
+.mccr-formula-latex {
+  flex: 0 1 auto;
+}
+.mccr-formula-label {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-ghost);
+  text-transform: lowercase;
+}
+/* R3a (ADR-0057): while the formula is being spoken, each derivation line arrives in sequence —
+   the learner watches the derivation constructed on the board, one step at a time. Staggered by the
+   line's index; base state (no staging class) shows every line, so it is never hidden otherwise. */
+.mccr-formula--staging .mccr-formula-line {
+  animation: derive-line var(--dur-slow, 520ms) var(--ease-expo, ease) both;
+  animation-delay: calc(var(--line-index, 0) * 0.5s);
+}
+@keyframes derive-line {
+  from {
+    opacity: 0;
+    transform: translateY(0.4rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Vestibular safety (CSE-013 §6): no motion, no delay — every line is present at once. */
+  .mccr-formula--staging .mccr-formula-line {
+    animation: none;
+  }
 }
 .mccr-relationship {
   display: flex;
@@ -2247,6 +3130,356 @@
   color: var(--ink);
   background: color-mix(in oklab, var(--ink) 4%, transparent);
 }
+.mccr-table-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* The answer panel — practice is real, and the workbook sits ON the board plane (a reserved
+   slot in the stage column, P4 focus material), never floating over the anchors (CDL). */
+.answer-panel {
+  width: min(560px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--tint-practice) 10%, var(--plane-raised));
+  border: 1px solid color-mix(in oklab, var(--tint-practice) 40%, transparent);
+  box-shadow: var(--shadow-e3);
+  animation: rise var(--dur-slow) var(--ease-expo) both;
+}
+.answer-label {
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.answer-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 3rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg-0, #05070e) 70%, transparent);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+.answer-input:focus-visible {
+  outline: 2px solid var(--tint-practice);
+  outline-offset: 1px;
+}
+.answer-submit {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1.1rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--tint-practice) 55%, transparent);
+  background: color-mix(in oklab, var(--tint-practice) 20%, var(--bg-1, #0a0e19));
+  color: var(--ink);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: transform var(--dur-fast, 160ms) var(--ease-expo, ease);
+}
+.answer-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.answer-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Research-frontier nudge — learning steps into research (F10). Lives in the slot column. */
+.frontier-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 100%;
+  padding: 0.4rem 0.5rem 0.4rem 0.9rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--tint-research) 12%, var(--plane-raised));
+  border: 1px solid color-mix(in oklab, var(--tint-research) 40%, transparent);
+  box-shadow: var(--shadow-e2);
+  animation: rise var(--dur-slow) var(--ease-expo) both;
+}
+.frontier-chip-eyebrow {
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--tint-research) 70%, var(--ink));
+}
+.frontier-chip-btn {
+  background: none;
+  border: none;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.frontier-chip-dismiss {
+  background: none;
+  border: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+  padding: 0.3rem;
+}
+
+/* The forward slot — the learner is never stranded at a stopping point (materializes in the
+   stage's reserved slot column, motion: materialize). */
+.next-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  animation: rise var(--dur-slow) var(--ease-expo) both;
+}
+.next-step-eyebrow {
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.next-step-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.7rem 1.4rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--stage-tint, var(--accent)) 55%, transparent);
+  background: color-mix(in oklab, var(--stage-tint, var(--accent)) 14%, var(--plane-raised));
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 1.05rem;
+  cursor: pointer;
+  box-shadow: var(--shadow-e2);
+  transition:
+    transform var(--t-instant) var(--ease-spring),
+    background var(--t-instant) ease;
+}
+.next-step-btn:hover {
+  transform: translateY(-2px);
+  background: color-mix(in oklab, var(--stage-tint, var(--accent)) 24%, var(--plane-raised));
+}
+
+/* Consolidate motion (CDL §7) — a mastered concept crystallizes and drifts into the Path. */
+.consolidate-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.consolidate-mote {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.1rem;
+  border-radius: var(--r-pill);
+  font-family: var(--font-serif);
+  font-size: var(--t-md);
+  color: var(--ink);
+  background: color-mix(in oklab, var(--state-mastery) 16%, var(--plane-raised));
+  border: 1px solid color-mix(in oklab, var(--state-mastery) 50%, transparent);
+  box-shadow: 0 0 30px -6px color-mix(in oklab, var(--state-mastery) 55%, transparent);
+  will-change: transform, opacity;
+}
+.consolidate-mote-glyph {
+  color: var(--state-mastery);
+}
+
+/* Error states — failures are shown, never swallowed (review N8). */
+.enter-error {
+  margin: 0 0 0.25rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--status-warn, #ffb454) 14%, transparent);
+  border: 1px solid color-mix(in oklab, var(--status-warn, #ffb454) 40%, transparent);
+  color: var(--ink);
+  font-size: 0.85rem;
+}
+.surface-error {
+  position: fixed;
+  top: 3.4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  max-width: min(680px, 92vw);
+  padding: 0.55rem 0.9rem;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--status-warn, #ffb454) 16%, var(--bg-0, #05070e));
+  border: 1px solid color-mix(in oklab, var(--status-warn, #ffb454) 45%, transparent);
+  color: var(--ink);
+  font-size: 0.85rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+.surface-error button {
+  background: none;
+  border: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+/* "Working" acknowledgement — a quiet pulse so the learner knows the surface heard them (N7). */
+.surface-working {
+  position: fixed;
+  top: 3.4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent) 12%, var(--bg-0, #05070e));
+  border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  box-shadow: 0 8px 30px color-mix(in oklab, var(--accent) 18%, transparent);
+}
+.surface-working-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: breathe 1.4s var(--ease-soft) infinite;
+}
+
+/* Degraded-cognition indicator (review §22): honest signal that a unit fell back to deterministic. */
+.conn-degraded {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--warn);
+  border: 1px solid color-mix(in oklab, var(--warn) 40%, transparent);
+  background: color-mix(in oklab, var(--warn) 10%, transparent);
+}
+.conn-degraded-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--warn);
+}
+
+/* Observatory learner/operator split (review §18): two labeled sections in one overlay. */
+.obs-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+.obs-section--telemetry {
+  margin-top: var(--s-5);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--border);
+}
+.obs-section-label {
+  margin: 0 0 var(--s-2);
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* "Another view" — a learner-facing entry to the ensemble when agents disagreed (review §12). */
+.conn-another-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  color: var(--agent-socratic);
+  border: 1px solid color-mix(in oklab, var(--agent-socratic) 38%, transparent);
+  background: color-mix(in oklab, var(--agent-socratic) 10%, transparent);
+  cursor: pointer;
+}
+.conn-another-view:hover {
+  color: var(--ink);
+}
+/* Export the session as a study deck — quiet chrome; the artifact is the point. */
+.export-deck {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  color: var(--ink-faint);
+  border: 1px solid var(--hairline);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color var(--t-instant) var(--ease-soft),
+    border-color var(--t-instant) var(--ease-soft);
+}
+.export-deck:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--stage-tint, var(--accent)) 45%, var(--hairline));
+}
+.export-deck:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+/* "+ N more rows" — a disclosure, never a dead note: the full table opens on the focus plane. */
+.mccr-table-more {
+  margin: 0.35rem 0 0;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  background: transparent;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  transition:
+    color var(--t-instant) var(--ease-soft),
+    border-color var(--t-instant) var(--ease-soft);
+}
+.mccr-table-more:hover {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--stage-tint, var(--accent)) 50%, var(--hairline-strong));
+}
+/* A table disclosed from within an anchor escapes the card: fixed glass over the whole stage. */
+.mccr-focus-layer--table {
+  position: fixed;
+  z-index: 40;
+}
+.mccr-focus-layer--table .mccr-focus-card {
+  width: min(860px, calc(100vw - 2 * var(--s-6)));
+}
+
+/* The image decision's reasoning, surfaced in the Observatory (review §18). */
+.composition-image-note {
+  margin: 0.25rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--ink-faint);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .mccr-image {
   margin: 0;
 }
@@ -2262,6 +3495,30 @@
   font-size: 0.78rem;
   color: var(--ink-faint);
   text-align: center;
+}
+/* R4e (CSE-018 Law 9): the image's recorded rationale — a quiet opt-in disclosure so the WHY is one
+   step away without competing with the illustration (F16 causal transparency). */
+.mccr-image-rationale {
+  margin-top: 0.35rem;
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  text-align: center;
+}
+.mccr-image-rationale > summary {
+  cursor: pointer;
+  list-style: none;
+  opacity: 0.72;
+  transition: opacity var(--t-quick, 140ms) var(--ease-soft, ease);
+}
+.mccr-image-rationale > summary:hover,
+.mccr-image-rationale[open] > summary {
+  opacity: 1;
+}
+.mccr-image-rationale > p {
+  margin: 0.3rem auto 0;
+  max-width: var(--measure-prose);
+  line-height: 1.4;
+  color: var(--ink-soft);
 }
 /* Image-as-cognition (ADR-0030 Phase 4): callout labels annotate the illustration. */
 .mccr-image-frame {
@@ -2297,6 +3554,35 @@
   overflow: hidden;
   position: relative;
 }
+/* Honest degradation: a failed artifact keeps its cognition (caption + labels) as quiet text. */
+.mccr-image--failed {
+  border-radius: 8px;
+  border: 1px dashed color-mix(in oklab, var(--state-confusion) 30%, var(--hairline));
+  padding: var(--s-3) var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.mccr-image-failed-note {
+  margin: 0;
+  font-size: var(--t-2xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--state-confusion) 65%, var(--ink-faint));
+}
+.mccr-image-failed-caption {
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--ink-soft);
+}
+.mccr-image-labels--inline {
+  position: static;
+  flex-direction: row;
+  flex-wrap: wrap;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
 .mccr-image-shimmer {
   position: absolute;
   inset: 0;
@@ -2316,6 +3602,21 @@
   stroke: var(--hairline-strong);
   stroke-width: 1.25;
 }
+/* Directed diagrams (flow/tree/cycle) get an arrowhead so causal/sequence direction reads at a glance. */
+.mccr-diagram--flow .mccr-diagram-edge line,
+.mccr-diagram--tree .mccr-diagram-edge line,
+.mccr-diagram--cycle .mccr-diagram-edge line {
+  stroke: color-mix(in oklab, var(--accent) 60%, var(--hairline-strong));
+}
+.mccr-diagram marker path {
+  fill: color-mix(in oklab, var(--accent) 60%, var(--hairline-strong));
+}
+/* The coordinate plane's actual axes (an axes diagram without axis lines is just a ring). */
+.mccr-diagram-axes line {
+  stroke: var(--hairline-strong);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
 .mccr-diagram-edge-label {
   fill: var(--ink-ghost);
   font-size: 9px;
@@ -2328,6 +3629,242 @@
   fill: var(--ink-soft);
   font-size: 11px;
 }
+/* Semantic node groups — the planner's `group` field is structure; each group holds one hue
+   (deterministic by first appearance; palette drawn from the cognitive state hues). */
+.mccr-diagram-node--g0 circle {
+  fill: var(--state-learning);
+}
+.mccr-diagram-node--g1 circle {
+  fill: var(--state-discovery);
+}
+.mccr-diagram-node--g2 circle {
+  fill: var(--state-practice);
+}
+.mccr-diagram-node--g3 circle {
+  fill: var(--state-assessment);
+}
+.mccr-diagram-node--g4 circle {
+  fill: var(--state-research);
+}
+
+/* ── Observatory: the RIA's representation plan, made inspectable (ADR-0058 §5) ── */
+.rep-panel {
+  margin-top: var(--s-4);
+}
+.rep-empty {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--ink-faint);
+}
+.rep-meta {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-xs);
+}
+.rep-kind {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+}
+.rep-kind--model {
+  color: color-mix(in oklab, var(--state-mastery, #d9b25f) 75%, var(--ink-soft));
+}
+.rep-density {
+  color: var(--ink-soft);
+}
+.rep-density--over {
+  color: color-mix(in oklab, var(--state-confusion) 75%, var(--ink-faint));
+}
+.rep-adaptivity {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--ink-faint);
+  line-height: 1.4;
+}
+.rep-expertise {
+  font-family: var(--font-mono);
+  color: var(--ink-soft);
+  margin-right: 0.4rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.rep-composition {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.rep-el {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: var(--t-xs);
+}
+/* Residue anchors read dimmer here too — the panel mirrors the board's hierarchy. */
+.rep-el[data-hierarchy="residue"] {
+  opacity: 0.6;
+}
+.rep-el-name {
+  color: var(--ink-soft);
+}
+.rep-el-role {
+  font-family: var(--font-mono);
+  color: var(--ink-faint);
+}
+.rep-el-hierarchy {
+  color: var(--ink-faint);
+  font-size: 0.9em;
+}
+.rep-exclusions {
+  margin-top: var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--ink-faint);
+}
+.rep-exclusions-label {
+  display: block;
+  color: var(--ink-soft);
+  margin-bottom: 0.15rem;
+}
+.rep-exclusions ul {
+  list-style: disc;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+/* ── Observatory: cognition health, playback diagnostics, and the raw event log ── */
+.health-panel,
+.playback-panel,
+.event-inspector {
+  margin-top: var(--s-4);
+}
+.health-clean {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--ink-faint);
+}
+.health-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.health-item {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0.15rem 0.6rem;
+  font-size: var(--t-xs);
+}
+.health-unit {
+  font-family: var(--font-mono);
+  color: var(--ink-soft);
+}
+.health-count {
+  color: color-mix(in oklab, var(--state-confusion) 70%, var(--ink-faint));
+}
+.health-reason {
+  grid-column: 1 / -1;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.playback-line {
+  margin: 0;
+  display: flex;
+  gap: var(--s-3);
+  font-size: var(--t-xs);
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+.playback-mode {
+  color: color-mix(in oklab, var(--stage-tint, var(--accent)) 66%, var(--ink-faint));
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--t-2xs);
+}
+.event-count {
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--ink-ghost);
+  margin-left: 0.4rem;
+}
+.event-search {
+  width: 100%;
+  margin: 0 0 var(--s-2);
+  padding: 0.4rem 0.6rem;
+  font-size: var(--t-xs);
+  font-family: var(--font-ui);
+  color: var(--ink);
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+}
+.event-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 32vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.event-row {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: 0.28rem 0.4rem;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.event-row:hover {
+  background: var(--surface-1);
+}
+.event-type {
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.event-hlc {
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  color: var(--ink-ghost);
+  flex: none;
+}
+.event-json {
+  margin: 0.15rem 0 0.4rem;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  max-height: 30vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.event-capped {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-2xs);
+  color: var(--ink-ghost);
+}
 
 /* The teacher's marker: one soft box that slides over the spotlit anchor as narration plays.
    Under prefers-reduced-motion the global rule zeroes the transition, so it snaps instead. */
@@ -2336,10 +3873,11 @@
   top: 0;
   left: 0;
   border-radius: var(--r-md);
-  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  /* The teacher's marker takes the frame's cognitive tint (learning cyan, practice green, …). */
+  background: color-mix(in oklab, var(--stage-tint, var(--accent)) 10%, transparent);
   box-shadow:
-    0 0 0 1px var(--hairline-strong),
-    0 6px 24px -8px var(--accent-glow);
+    0 0 0 1px color-mix(in oklab, var(--stage-tint, var(--accent)) 45%, var(--hairline-strong)),
+    0 6px 24px -8px color-mix(in oklab, var(--stage-tint, var(--accent)) 40%, transparent);
   pointer-events: none;
   transition:
     transform var(--dur-slow) var(--ease-expo),
@@ -2348,7 +3886,66 @@
   z-index: 1;
 }
 .mccr-el[data-active="true"] {
-  border-color: color-mix(in oklab, var(--accent) 45%, var(--hairline));
+  border-color: color-mix(in oklab, var(--stage-tint, var(--accent)) 45%, var(--hairline));
+}
+/* The board is manipulable (F16): each anchor reveals reshaping affordances on hover/focus, so the
+   learner can act on the exact idea in front of them. Hidden until intent; keyboard-reachable. */
+.mccr-el {
+  position: relative;
+}
+.mccr-el-actions {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  display: flex;
+  gap: 0.25rem;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    opacity var(--dur-fast) var(--ease-soft),
+    transform var(--dur-fast) var(--ease-expo);
+  pointer-events: none;
+}
+.mccr-el:hover .mccr-el-actions,
+.mccr-el:focus-within .mccr-el-actions {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+/* No hover on touch devices: the reshaping affordances stay quietly present (audit H2). */
+@media (hover: none) {
+  .mccr-el-actions {
+    opacity: 0.75;
+    transform: none;
+    pointer-events: auto;
+  }
+}
+.mccr-el-action {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg-0, #05070e) 78%, transparent);
+  color: var(--ink-soft);
+  font-size: 0.66rem;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-expo);
+}
+.mccr-el-action:hover {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--stage-tint, var(--accent)) 50%, var(--border));
+}
+/* Staged reveal (UCS, ADR-0030): an element fades/rises in as the narration reaches it. Space is
+   reserved (opacity, not display) so nothing reflows and the fit-scale stays stable. Reduced-motion:
+   the global rule zeroes the transition, so it appears instantly. */
+.mccr-el[data-revealed="false"] {
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+}
+.mccr-el {
+  transition:
+    opacity var(--dur) var(--ease-soft),
+    transform var(--dur) var(--ease-expo);
 }
 
 @keyframes shimmer {
@@ -2468,4 +4065,1527 @@
   font-size: 0.62rem;
   color: var(--ink-ghost);
   font-style: italic;
+}
+
+/* ── The Living Reference (CSE M5, CSE-008): the source beside the living cognition. ─────────────
+   Evidence renders in the SOURCE's channel (reading tone, its own text); all cognitive markup is a
+   non-destructive overlay. Highlight optics are owned here BY ROLE (CDL: components never pick
+   colors ad hoc; role → state hue). Amber is reserved for the fidelity mismatch — the one warning. */
+.board-plane--with-source {
+  gap: var(--s-4);
+  align-items: stretch;
+}
+/* R2e (ADR-0057 D5): source-as-stage. Teaching FROM the document ⇒ the document takes the stage
+   (leads, dominant width) and the MCCR board recedes to a companion gloss column beside it —
+   spatial contiguity: the explanation sits next to what it explains. */
+.board-plane--source-stage {
+  flex-direction: row;
+}
+.board-plane--source-stage .source-reference {
+  order: -1; /* the document leads */
+  flex: 1 1 60%;
+}
+.board-plane--source-stage .frame-deck,
+.board-plane--source-stage .cognitive-stage {
+  flex: 0 1 clamp(300px, 38%, 520px);
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .board-plane--source-stage {
+    flex-direction: column;
+  }
+  .board-plane--source-stage .source-reference {
+    flex: 1 1 auto;
+  }
+}
+.source-reference {
+  flex: 0 1 clamp(280px, 34%, 480px);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: var(--glass-edge);
+  border-radius: var(--r-lg);
+  background: var(--glass-tint);
+  backdrop-filter: var(--glass-blur-whisper);
+  overflow: hidden;
+  animation: rise var(--dur-slow) var(--ease-expo) both;
+}
+@media (max-width: 900px) {
+  .board-plane--with-source {
+    flex-direction: column;
+  }
+  .source-reference {
+    flex: 0 0 38vh;
+  }
+}
+.source-reference-head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--hairline);
+}
+.source-reference-eyebrow {
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.source-reference-title {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+.source-fidelity {
+  font-size: 0.64rem;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+.source-fidelity--verified {
+  color: var(--state-practice);
+}
+.source-fidelity--mismatch {
+  color: var(--state-confusion); /* the reserved warning hue — fidelity broke, say so */
+}
+.source-resume-guide {
+  font: inherit;
+  font-size: 0.66rem;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+}
+.source-text-pane,
+.source-pdf-pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--s-3) var(--s-4);
+}
+.source-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-reading, Georgia, "Times New Roman", serif);
+  font-size: 0.82rem;
+  line-height: 1.62;
+  color: var(--ink-soft);
+}
+/* M10 T1 — code sources render as code: monospace, tighter, on a code panel (ADR-0046). */
+.source-reference[data-modality="code"] .source-text-pane {
+  background: color-mix(in oklab, var(--ink 100%, #0b0c10) 4%, var(--surface-raised, #14151b));
+  border-radius: 8px;
+}
+.source-reference[data-modality="code"] .source-text {
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace);
+  font-size: 0.76rem;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+}
+/* M10 T3 — a video transcript reads as a transcript (ADR-0048); the interactive concept scrubber
+   over the L4 temporal layer is a deferred follow-on. */
+.source-reference[data-modality="video"] .source-text {
+  white-space: pre-wrap;
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+/* The semantic highlight grammar: role → hue, amplitude → strength (CSE-008 §5; CDL §4). */
+.source-highlight {
+  border-radius: 3px;
+  padding: 0 0.08em;
+  color: inherit;
+  background: color-mix(in oklab, var(--state-learning) 16%, transparent);
+  transition:
+    background var(--dur, 240ms) ease,
+    box-shadow var(--dur, 240ms) ease;
+}
+.source-highlight[data-role="definition"] {
+  background: color-mix(in oklab, var(--state-learning) 16%, transparent);
+}
+.source-highlight[data-role="evidence"],
+.source-highlight[data-role="concept"] {
+  background: color-mix(in oklab, var(--state-learning) 14%, transparent);
+}
+.source-highlight[data-role="prerequisite"] {
+  background: color-mix(in oklab, var(--state-research) 16%, transparent);
+}
+.source-highlight[data-role="misconception"] {
+  background: color-mix(in oklab, var(--state-confusion) 15%, transparent);
+}
+.source-highlight[data-role="mathematical-focus"] {
+  background: color-mix(in oklab, var(--state-assessment) 16%, transparent);
+}
+.source-highlight[data-role="frontier"],
+.source-highlight[data-role="curiosity"] {
+  background: color-mix(in oklab, var(--state-discovery) 15%, transparent);
+}
+.source-highlight[data-amplitude="whisper"] {
+  opacity: 0.72;
+}
+.source-highlight[data-amplitude="focal"] {
+  background: color-mix(in oklab, var(--state-learning) 30%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--state-learning) 22%, transparent);
+}
+.source-quote-fallback {
+  margin: var(--s-4);
+  padding: var(--s-3) var(--s-4);
+  border-left: 2px solid var(--hairline);
+  font-family: var(--font-reading, Georgia, serif);
+  font-style: italic;
+  color: var(--ink-soft);
+}
+/* PDF: the canonical page canvas + absolutely-positioned bbox overlays. */
+.source-pdf-pane {
+  padding: var(--s-3);
+}
+.source-pdf-page {
+  position: relative;
+  margin: 0 auto;
+}
+.source-pdf-canvas {
+  display: block;
+  border-radius: var(--r-sm);
+  background: #fff;
+}
+.source-highlight--box {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 4px;
+  mix-blend-mode: multiply;
+}
+.source-pdf-pageno {
+  position: sticky;
+  bottom: 0;
+  text-align: right;
+  font-size: 0.62rem;
+  color: var(--ink-faint);
+  padding-top: var(--s-2);
+}
+/* Evidence on the board: the source_viewport MCCR element — the source's own voice. */
+.mccr-source {
+  margin: 0;
+  padding-left: var(--s-3);
+  border-left: 2px solid color-mix(in oklab, var(--ink-faint) 60%, transparent);
+}
+.mccr-source-quote {
+  margin: 0;
+  font-family: var(--font-reading, Georgia, "Times New Roman", serif);
+  font-style: italic;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+.mccr-source-ref {
+  margin-top: 0.35rem;
+  font-size: 0.62rem;
+  color: var(--ink-ghost);
+}
+
+/* ── Resume card (CSE M6, ADR-0037): a returning learner reopens their understanding, not a page.
+   Reflective tone (calm), lives on the board-slot column like the frontier chip — never a modal. */
+.resume-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border: var(--glass-edge);
+  border-left: 2px solid var(--state-reflection);
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--state-reflection) 8%, var(--glass-tint));
+  backdrop-filter: var(--glass-blur-whisper);
+  max-width: min(560px, 92vw);
+  animation: rise var(--dur-slow) var(--ease-expo) both;
+}
+.resume-card-eyebrow {
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--state-reflection);
+}
+.resume-card-summary {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink);
+  line-height: 1.5;
+}
+.resume-card-confusion {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+}
+.resume-card-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.resume-card-btn {
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--base);
+  background: var(--state-reflection);
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+}
+.resume-card-map {
+  font: inherit;
+  font-size: 0.76rem;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+.resume-card-dismiss {
+  margin-left: auto;
+  font: inherit;
+  color: var(--ink-faint);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* ── The "Mind" affordance in the top bar. ── */
+.mind-open {
+  font: inherit;
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mind-open:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+/* ── Understanding Map (CSE M6, CSE-005 §3.4): the learner's mind made legible — evidence, never a
+   score. An on-demand overlay over the intelligence plane. ── */
+.umap-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: clamp(1rem, 6vh, 5rem) 1rem;
+}
+.umap-scrim {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: color-mix(in oklab, var(--void) 62%, transparent);
+  backdrop-filter: blur(3px);
+  cursor: pointer;
+}
+.umap-panel {
+  position: relative;
+  width: min(720px, 96vw);
+  max-height: 86vh;
+  overflow: auto;
+  border: var(--glass-edge);
+  border-radius: var(--r-lg);
+  background: var(--glass-tint-heavy);
+  backdrop-filter: var(--glass-blur);
+  padding: var(--s-5, 1.5rem);
+  animation: rise var(--dur-slow) var(--ease-expo) both;
+}
+.umap-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-2);
+  margin-bottom: var(--s-4);
+}
+.umap-eyebrow {
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  width: 100%;
+}
+.umap-title {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--ink);
+  flex: 1;
+}
+.umap-note {
+  color: var(--ink-faint);
+  font-size: 0.84rem;
+}
+.umap-section {
+  margin-bottom: var(--s-4);
+  padding-bottom: var(--s-4);
+  border-bottom: 1px solid var(--hairline);
+}
+.umap-section:last-child {
+  border-bottom: none;
+}
+.umap-section-title {
+  margin: 0 0 var(--s-2);
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+.umap-episodes {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.umap-episode-summary {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--ink);
+}
+.umap-episode-concepts {
+  margin: 0.25rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.umap-chip {
+  font-size: 0.68rem;
+  color: var(--ink-soft);
+  background: var(--surface-2);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+.umap-chip--blind {
+  color: var(--state-discovery);
+  background: color-mix(in oklab, var(--state-discovery) 12%, transparent);
+}
+.umap-stat {
+  margin: 0.25rem 0;
+  font-size: 0.84rem;
+  color: var(--ink-soft);
+}
+.umap-stat strong {
+  color: var(--ink);
+}
+.umap-stat-detail {
+  color: var(--ink-faint);
+}
+
+/* ── The Director badge (CSE M7 T1): the current cognitive state + pace, with "why this pace".
+   The Director conducts; this is the client realizing it — a whisper chip, never alarm chrome. */
+.director-badge {
+  position: relative;
+}
+.director-badge-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: inherit;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.director-badge-chip:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+.director-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--state-learning);
+  box-shadow: 0 0 6px var(--state-learning);
+}
+/* The dot's hue names the cognitive state the Director chose (CDL state palette). */
+.director-badge-chip[data-state="orienting"] .director-badge-dot {
+  background: var(--state-discovery);
+  box-shadow: 0 0 6px var(--state-discovery);
+}
+.director-badge-chip[data-state="practicing"] .director-badge-dot {
+  background: var(--state-practice);
+  box-shadow: 0 0 6px var(--state-practice);
+}
+.director-badge-chip[data-state="struggling"] .director-badge-dot {
+  background: var(--state-confusion);
+  box-shadow: 0 0 6px var(--state-confusion);
+}
+.director-badge-chip[data-state="consolidating"] .director-badge-dot {
+  background: var(--state-reflection);
+  box-shadow: 0 0 6px var(--state-reflection);
+}
+.director-badge-chip[data-state="assessing"] .director-badge-dot {
+  background: var(--state-assessment);
+  box-shadow: 0 0 6px var(--state-assessment);
+}
+.director-badge-chip[data-state="mastering"] .director-badge-dot {
+  background: var(--state-mastery);
+  box-shadow: 0 0 6px var(--state-mastery);
+}
+.director-why {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 40;
+  width: min(320px, 80vw);
+  padding: var(--s-3) var(--s-4);
+  border: var(--glass-edge);
+  border-radius: var(--r-md);
+  background: var(--glass-tint-heavy);
+  backdrop-filter: var(--glass-blur);
+  animation: rise var(--dur) var(--ease-expo) both;
+}
+.director-why-rationale {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ink);
+  line-height: 1.5;
+}
+.director-why-considered {
+  margin: 0.5rem 0 0;
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  line-height: 1.45;
+}
+.director-why-meta {
+  margin: 0.5rem 0 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-ghost);
+}
+
+/* ── Learner marks on the board (CSE M8 T2, CSE-014): the learner acts on cognition; the Scene
+   keeps the note. A durable ✎ on a marked anchor + a soft ring — the audience is also an actor. */
+.mccr-el[data-marked="true"] {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--state-discovery) 40%, transparent);
+}
+.mccr-el-mark {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.5rem;
+  font-size: 0.72rem;
+  color: var(--state-discovery);
+  opacity: 0.9;
+}
+.mccr-el-action[title^="Mark"] {
+  color: var(--state-discovery);
+}
+
+/* ── Source Fusion (CSE M9 T1, CSE-015): many sources reconciled into one understanding — coverage,
+   corroboration, honest gaps. An on-demand overlay; provenance never blurred (each source named). */
+.fused-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: clamp(1rem, 6vh, 5rem) 1rem;
+}
+.fused-scrim {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: color-mix(in oklab, var(--void) 62%, transparent);
+  backdrop-filter: blur(3px);
+  cursor: pointer;
+}
+.fused-panel {
+  position: relative;
+  width: min(760px, 96vw);
+  max-height: 86vh;
+  overflow: auto;
+  border: var(--glass-edge);
+  border-radius: var(--r-lg);
+  background: var(--glass-tint-heavy);
+  backdrop-filter: var(--glass-blur);
+  padding: var(--s-5, 1.5rem);
+  animation: rise var(--dur-slow) var(--ease-expo) both;
+}
+.fused-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-2);
+  margin-bottom: var(--s-4);
+}
+.fused-eyebrow {
+  width: 100%;
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.fused-title {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--ink);
+  flex: 1;
+}
+.fused-run {
+  font: inherit;
+  font-size: 0.86rem;
+  color: var(--base);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+}
+.fused-note {
+  color: var(--ink-faint);
+  font-size: 0.84rem;
+}
+.fused-concept {
+  margin-bottom: var(--s-4);
+  padding-bottom: var(--s-4);
+  border-bottom: 1px solid var(--hairline);
+}
+.fused-concept-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+.fused-concept-name {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--ink);
+  flex: 1;
+}
+.fused-badge {
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+.fused-badge--corroborated {
+  color: var(--state-practice);
+  border-color: color-mix(in oklab, var(--state-practice) 40%, transparent);
+}
+.fused-confidence {
+  font-size: 0.68rem;
+  color: var(--ink-ghost);
+}
+.fused-treatments {
+  list-style: none;
+  margin: var(--s-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.fused-treatment {
+  padding: var(--s-2) var(--s-3);
+  border-left: 2px solid var(--hairline);
+  background: var(--surface-1);
+  border-radius: var(--r-sm);
+}
+.fused-treatment[data-coverage="absent"] {
+  opacity: 0.5;
+}
+.fused-treatment[data-coverage="full"] {
+  border-left-color: color-mix(in oklab, var(--state-practice) 50%, transparent);
+}
+.fused-treatment-source {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.fused-treatment-emphasis,
+.fused-treatment-coverage {
+  font-size: 0.62rem;
+  color: var(--ink-faint);
+  margin-left: 0.5rem;
+}
+.fused-treatment-quote {
+  margin: 0.35rem 0 0;
+  font-family: var(--font-reading, Georgia, serif);
+  font-style: italic;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+/* M9 Frontier T1 — the living-knowledge overlay (CSE-006 §3.2): the source stays sacred, the
+   frontier renders in its own reserved research channel, never annotating over evidence. */
+.frontier-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: var(--s-3);
+}
+.frontier-panel {
+  position: relative;
+  z-index: 1;
+  width: min(760px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  padding: var(--s-4);
+  border-radius: 14px;
+  background: var(--surface-raised, #14151b);
+  border: 1px solid color-mix(in oklab, var(--state-research, #6ea8fe) 30%, transparent);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+.frontier-eyebrow {
+  color: var(--state-research, #6ea8fe);
+}
+.frontier-provenance {
+  margin: 0 0 var(--s-2);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--state-research, #6ea8fe);
+}
+.frontier-entries {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--s-2);
+}
+.frontier-entry {
+  padding: var(--s-2);
+  border-radius: 10px;
+  border-left: 3px solid color-mix(in oklab, var(--state-research, #6ea8fe) 55%, transparent);
+  background: color-mix(in oklab, var(--state-research, #6ea8fe) 7%, transparent);
+}
+.frontier-kind {
+  display: inline-block;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--state-research, #6ea8fe);
+}
+.frontier-summary {
+  margin: 0.25rem 0 0;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.frontier-refs {
+  margin: 0.4rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.frontier-ref {
+  font-size: 0.7rem;
+  color: var(--state-research, #6ea8fe);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* M9 TKM T1 — the Temporal Knowledge Model (CSE-006 §3.3): the concept's trajectory through time,
+   an ordered strip in the reserved research channel, honestly sparse where the record thins. */
+.timeline-states {
+  margin: var(--s-2) 0 0;
+  padding: 0 0 0 var(--s-2);
+  list-style: none;
+  display: grid;
+  gap: var(--s-2);
+  border-left: 2px solid color-mix(in oklab, var(--state-research, #6ea8fe) 30%, transparent);
+}
+.timeline-state {
+  position: relative;
+  display: grid;
+  grid-template-columns: 0 1fr;
+  gap: var(--s-2);
+}
+.timeline-marker {
+  position: absolute;
+  left: calc(-1 * var(--s-2) - 5px);
+  top: 0.35rem;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--state-research, #6ea8fe);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--state-research, #6ea8fe) 20%, transparent);
+}
+.timeline-state[data-kind="open-problem"] .timeline-marker,
+.timeline-state[data-kind="current-debate"] .timeline-marker {
+  background: transparent;
+  border: 2px solid var(--state-research, #6ea8fe);
+}
+.timeline-state-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.timeline-era {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--state-research, #6ea8fe);
+  font-variant-numeric: tabular-nums;
+}
+.timeline-kind {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+}
+.timeline-label {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.timeline-summary {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+/* M9 T3 — the fused explanation (CSE-015 §3.1): one understanding woven from all sources */
+.fused-synthesis {
+  margin: var(--s-2) 0 var(--s-2);
+  padding: var(--s-2);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--state-discovery) 8%, transparent);
+  border: 1px solid color-mix(in oklab, var(--state-discovery) 22%, transparent);
+}
+.fused-synthesis[data-degraded="true"] {
+  background: color-mix(in oklab, var(--state-caution, #c9a227) 8%, transparent);
+  border-color: color-mix(in oklab, var(--state-caution, #c9a227) 22%, transparent);
+}
+.fused-synthesis-prose {
+  margin: 0;
+  font-family: var(--font-reading, Georgia, serif);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.fused-synthesis-meta {
+  margin: 0.4rem 0 0;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+}
+
+/* M9 T2 — Claim / Contradiction explorer (CSE-006 §3.1) */
+.fused-claims {
+  margin: var(--s-2) 0 0;
+}
+.fused-claims-title,
+.fused-contradictions-title {
+  margin: 0 0 var(--s-1);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+}
+.fused-claim-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+}
+.fused-claim {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+.fused-claim-source {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.fused-claim-status {
+  font-size: 0.64rem;
+  color: var(--ink-soft);
+  border: 1px solid var(--line-soft, rgba(120, 120, 140, 0.3));
+  border-radius: 999px;
+  padding: 0 0.4rem;
+}
+.fused-claim-statement {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+.fused-contradictions {
+  margin: var(--s-2) 0 0;
+  border-top: 1px solid color-mix(in oklab, var(--state-confusion) 30%, transparent);
+  padding-top: var(--s-2);
+}
+.fused-contradiction {
+  margin: var(--s-1) 0 0;
+  font-size: 0.76rem;
+}
+.fused-nature {
+  display: inline-block;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--state-confusion);
+  background: color-mix(in oklab, var(--state-confusion) 12%, transparent);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+}
+.fused-contradiction-pair {
+  margin: 0.3rem 0 0;
+  display: grid;
+  gap: 0.2rem;
+}
+.fused-contradiction-side {
+  margin: 0;
+  color: var(--ink-soft);
+}
+.fused-versus {
+  font-size: 0.66rem;
+  color: var(--state-confusion);
+  font-style: italic;
+}
+.fused-rationale {
+  margin: 0.25rem 0 0;
+  font-size: 0.72rem;
+  font-style: italic;
+  color: var(--ink-soft);
+}
+.fused-section-title {
+  margin: 0 0 var(--s-2);
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+.fused-gap-list {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.fused-gap-chip {
+  font-size: 0.68rem;
+  color: var(--state-discovery);
+  background: color-mix(in oklab, var(--state-discovery) 12%, transparent);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+
+/* ── M11 T1 — Creative Cognition (CSE-016, ADR-0049). Its own generative channel (violet =
+   authorship), distinct from research (blue) / practice (green). The learner's draft is visually
+   sacred (their words); assists render in a separate column, never inside the draft — the
+   no-ghostwriter law made visible. Amber stays reserved for degraded/unstable. ── */
+.creation-panel {
+  position: relative;
+  z-index: 1;
+  width: min(1080px, 96vw);
+  max-height: 88vh;
+  overflow: auto;
+  padding: var(--s-4);
+  border-radius: 14px;
+  background: var(--surface-raised, #14151b);
+  border: 1px solid color-mix(in oklab, var(--state-assessment, #a78bff) 30%, transparent);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+.creation-eyebrow {
+  color: var(--state-assessment, #a78bff);
+}
+.creation-law {
+  margin: 0 0 var(--s-3);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  padding: var(--s-2) var(--s-3);
+  border-left: 2px solid color-mix(in oklab, var(--state-assessment, #a78bff) 55%, transparent);
+  background: color-mix(in oklab, var(--state-assessment, #a78bff) 6%, transparent);
+  border-radius: var(--r-sm);
+}
+.creation-start {
+  display: grid;
+  gap: var(--s-3);
+  max-width: 460px;
+}
+.creation-field {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+}
+.creation-field select,
+.creation-field input {
+  font: inherit;
+  font-size: 0.9rem;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--ink);
+  background: var(--surface-1, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--hairline, rgba(255, 255, 255, 0.12));
+  border-radius: var(--r-sm);
+  padding: 0.5rem 0.65rem;
+}
+.creation-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: var(--s-4);
+  align-items: start;
+}
+@media (max-width: 820px) {
+  .creation-body {
+    grid-template-columns: 1fr;
+  }
+}
+.creation-draft-col {
+  display: grid;
+  gap: var(--s-2);
+}
+.creation-draft-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.creation-your-words {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--state-assessment, #a78bff);
+}
+.creation-status {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+}
+.creation-status[data-status="completed"] {
+  color: var(--state-mastery, #ffd98e);
+}
+.creation-draft {
+  font: inherit;
+  font-family: var(--font-reading, Georgia, serif);
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--surface-1, rgba(255, 255, 255, 0.04));
+  border: 1px solid color-mix(in oklab, var(--state-assessment, #a78bff) 26%, transparent);
+  border-radius: var(--r-sm);
+  padding: var(--s-3);
+  resize: vertical;
+  min-height: 320px;
+}
+.creation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.creation-assist-btn,
+.creation-complete-btn {
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  padding: 0.4rem 0.75rem;
+  border: 1px solid color-mix(in oklab, var(--state-assessment, #a78bff) 40%, transparent);
+  background: color-mix(in oklab, var(--state-assessment, #a78bff) 10%, transparent);
+  color: var(--ink);
+}
+.creation-complete-btn {
+  margin-left: auto;
+  border-color: color-mix(in oklab, var(--state-mastery, #ffd98e) 45%, transparent);
+  background: color-mix(in oklab, var(--state-mastery, #ffd98e) 10%, transparent);
+}
+.creation-assist-btn:disabled,
+.creation-complete-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.creation-contribute {
+  margin-top: var(--s-2);
+  padding: var(--s-3);
+  border-radius: var(--r-sm);
+  border: 1px solid color-mix(in oklab, var(--state-mastery, #ffd98e) 30%, transparent);
+  background: color-mix(in oklab, var(--state-mastery, #ffd98e) 6%, transparent);
+  display: grid;
+  gap: var(--s-2);
+}
+.creation-contribute-note {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+}
+.creation-contribute-btn {
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  justify-self: start;
+  border-radius: var(--r-sm);
+  padding: 0.45rem 0.85rem;
+  border: 1px solid color-mix(in oklab, var(--state-mastery, #ffd98e) 50%, transparent);
+  background: color-mix(in oklab, var(--state-mastery, #ffd98e) 14%, transparent);
+  color: var(--ink);
+}
+.creation-contribute-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.creation-contributed {
+  margin-top: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-sm);
+  background: color-mix(in oklab, var(--state-mastery, #ffd98e) 8%, transparent);
+  display: grid;
+  gap: var(--s-2);
+}
+.creation-contributed-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--state-mastery, #ffd98e);
+}
+.creation-revoke-btn {
+  justify-self: start;
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  padding: 0.35rem 0.7rem;
+  border: 1px solid color-mix(in oklab, var(--state-confusion, #ff9d6b) 45%, transparent);
+  background: color-mix(in oklab, var(--state-confusion, #ff9d6b) 10%, transparent);
+  color: var(--ink);
+}
+.creation-revoke-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.creation-assists-col {
+  display: grid;
+  gap: var(--s-2);
+  align-content: start;
+}
+.creation-assists {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s-3);
+}
+.creation-assist {
+  padding: var(--s-3);
+  border-radius: 12px;
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+  border-left: 3px solid color-mix(in oklab, var(--state-assessment, #a78bff) 55%, transparent);
+}
+.creation-assist-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+  margin-bottom: var(--s-2);
+}
+.creation-assist-kind {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--state-assessment, #a78bff);
+}
+.creation-assist-provenance {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+}
+.creation-slots,
+.creation-findings,
+.creation-questions,
+.creation-refs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.creation-slot {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px dashed var(--hairline, rgba(255, 255, 255, 0.14));
+  border-radius: var(--r-sm);
+}
+.creation-slot-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.creation-slot-hint {
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+}
+.creation-finding {
+  display: grid;
+  gap: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--hairline, rgba(255, 255, 255, 0.14));
+}
+.creation-finding[data-severity="blocking"] {
+  border-left-color: var(--state-confusion, #ff9d6b);
+}
+.creation-finding[data-severity="major"] {
+  border-left-color: var(--state-discovery, #ffc46b);
+}
+.creation-finding-sev {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+}
+.creation-finding-where {
+  font-family: var(--font-reading, Georgia, serif);
+  font-style: italic;
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+}
+.creation-finding-fix {
+  color: var(--state-practice, #63dfa1);
+  font-size: 0.74rem;
+}
+.creation-question {
+  font-size: 0.82rem;
+  color: var(--ink);
+  padding-left: 0.75rem;
+  position: relative;
+}
+.creation-question::before {
+  content: "?";
+  position: absolute;
+  left: 0;
+  color: var(--state-assessment, #a78bff);
+  font-weight: 700;
+}
+.creation-ref {
+  display: grid;
+  gap: 0.1rem;
+}
+.creation-ref-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.creation-ref-source {
+  font-size: 0.7rem;
+  color: var(--ink-faint);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* ── ADR-0053 — The knowledge commons: peers' contributed creations, discoverable + attributed.
+   Collective intelligence made tangible; rendered in the discovery channel. ── */
+.commons-panel {
+  position: relative;
+  z-index: 1;
+  width: min(760px, 94vw);
+  max-height: 88vh;
+  overflow: auto;
+  padding: var(--s-4);
+  border-radius: 14px;
+  background: var(--surface-raised, #14151b);
+  border: 1px solid color-mix(in oklab, var(--state-discovery, #ffc46b) 30%, transparent);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+.commons-eyebrow {
+  color: var(--state-discovery, #ffc46b);
+}
+.commons-list {
+  list-style: none;
+  margin: var(--s-2) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s-3);
+}
+.commons-entry {
+  padding: var(--s-3);
+  border-radius: 12px;
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+  border-left: 3px solid color-mix(in oklab, var(--state-discovery, #ffc46b) 45%, transparent);
+  display: grid;
+  gap: 0.35rem;
+}
+.commons-entry-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+.commons-entry-kind {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--state-discovery, #ffc46b);
+  border: 1px solid color-mix(in oklab, var(--state-discovery, #ffc46b) 35%, transparent);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+.commons-entry-title {
+  margin: 0;
+  font-size: 0.98rem;
+  color: var(--ink);
+}
+.commons-entry-meta {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+}
+.commons-attach-btn {
+  justify-self: start;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  padding: 0.4rem 0.8rem;
+  border: 1px solid color-mix(in oklab, var(--state-discovery, #ffc46b) 45%, transparent);
+  background: color-mix(in oklab, var(--state-discovery, #ffc46b) 12%, transparent);
+  color: var(--ink);
+}
+.commons-attach-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ── CSE-017 / ADR-0056 — the Source Dock: the acquisition front door. Reuses the commons overlay
+   shell; adds a drop zone, URL + paste rows, honest refusal, and the canonicalization narrative. ── */
+.source-dock-body {
+  display: grid;
+  gap: var(--s-3);
+  margin-top: var(--s-2);
+}
+.source-dock-drop {
+  display: grid;
+  justify-items: center;
+  gap: var(--s-2);
+  padding: var(--s-4);
+  border-radius: 12px;
+  border: 1.5px dashed color-mix(in oklab, var(--state-discovery, #ffc46b) 40%, transparent);
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+  text-align: center;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.source-dock-drop.is-drag {
+  border-color: var(--state-discovery, #ffc46b);
+  background: color-mix(in oklab, var(--state-discovery, #ffc46b) 10%, transparent);
+}
+.source-dock-drop-label {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ink-faint);
+}
+.source-dock-file-input {
+  display: none;
+}
+.source-dock-row {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+}
+.source-dock-input {
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--r-sm);
+  border: 1px solid color-mix(in oklab, var(--ink) 18%, transparent);
+  background: var(--surface-1, rgba(255, 255, 255, 0.04));
+  color: var(--ink);
+}
+.source-dock-paste summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+}
+.source-dock-textarea {
+  width: 100%;
+  margin: var(--s-2) 0;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--r-sm);
+  border: 1px solid color-mix(in oklab, var(--ink) 18%, transparent);
+  background: var(--surface-1, rgba(255, 255, 255, 0.04));
+  color: var(--ink);
+  resize: vertical;
+}
+.source-dock-refused {
+  color: var(--state-discovery, #ffc46b);
+}
+.source-dock-error {
+  color: var(--state-confusion, #e8927c);
+}
+.source-dock-narrative {
+  display: grid;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+}
+.source-dock-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+.source-dock-step {
+  font-size: 0.82rem;
+  color: var(--ink);
+}
+.source-dock-step.is-degraded {
+  color: var(--state-discovery, #ffc46b);
+}
+.source-dock-verdict {
+  margin: var(--s-2) 0;
+  font-size: 0.86rem;
+  color: var(--ink);
+}
+
+/* ── M12 T1 — Source Cognition deep-transparency (ADR-0050). The runtime made visible: activity
+   tiles, layer health (confidence + HONEST degradation), and a provenance-bearing reasoning feed.
+   Rendered in the research channel; degraded uses the reserved ember, never alarm. ── */
+.cognition-panel {
+  position: relative;
+  z-index: 1;
+  width: min(880px, 94vw);
+  max-height: 88vh;
+  overflow: auto;
+  padding: var(--s-4);
+  border-radius: 14px;
+  background: var(--surface-raised, #14151b);
+  border: 1px solid color-mix(in oklab, var(--state-research, #7fa8ff) 30%, transparent);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+.cognition-eyebrow {
+  color: var(--state-research, #7fa8ff);
+}
+.cognition-body {
+  display: grid;
+  gap: var(--s-4);
+}
+.cognition-cache {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--state-practice, #63dfa1);
+}
+.cognition-tiles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--s-2);
+}
+.cognition-tile {
+  display: grid;
+  gap: 0.15rem;
+  padding: var(--s-2) var(--s-3);
+  border-radius: 10px;
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--hairline, rgba(255, 255, 255, 0.1));
+}
+.cognition-tile[data-empty="true"] {
+  opacity: 0.45;
+}
+.cognition-tile-count {
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.cognition-tile-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+}
+.cognition-section-title {
+  margin: 0 0 var(--s-2);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+}
+.cognition-layers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.cognition-layer {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--state-practice, #63dfa1) 8%, transparent);
+  border: 1px solid color-mix(in oklab, var(--state-practice, #63dfa1) 26%, transparent);
+}
+.cognition-layer[data-degraded="true"] {
+  background: color-mix(in oklab, var(--state-confusion, #ff9d6b) 8%, transparent);
+  border-color: color-mix(in oklab, var(--state-confusion, #ff9d6b) 30%, transparent);
+}
+.cognition-layer-name {
+  font-size: 0.78rem;
+  color: var(--ink);
+}
+.cognition-layer-conf {
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+}
+.cognition-layer-badge {
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--state-confusion, #ff9d6b);
+}
+.cognition-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+.cognition-entry {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border-left: 2px solid var(--hairline, rgba(255, 255, 255, 0.12));
+  font-size: 0.8rem;
+}
+.cognition-entry[data-degraded="true"] {
+  border-left-color: var(--state-confusion, #ff9d6b);
+}
+.cognition-entry-producer {
+  font-size: 0.64rem;
+  color: var(--ink-faint);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.cognition-entry-summary {
+  color: var(--ink-soft);
+}
+.cognition-entry-conf {
+  font-size: 0.68rem;
+  color: var(--ink-faint);
 }

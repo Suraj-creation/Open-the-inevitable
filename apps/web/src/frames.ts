@@ -76,3 +76,27 @@ export function frameElements(frame: CognitiveFrame | null): readonly MccrElemen
 export function hasFrames(state: SurfaceState | null): boolean {
   return (state?.frames.length ?? 0) > 0;
 }
+
+/**
+ * A frame's pedagogical role for rendering (ADR-0055 D6). Prefers the typed `kind`; falls back to
+ * the retired title/archetype heuristic only for pre-1.7.0 logs so old sessions still classify on
+ * replay. `checkpoint` maps to `assessment` for styling/affordance purposes (both are non-teaching,
+ * verdict-bearing frames). Returns one of practice | assessment | teach.
+ */
+export function frameRole(frame: CognitiveFrame | null): "practice" | "assessment" | "teach" {
+  if (!frame) return "teach";
+  const kind = (frame as { kind?: string }).kind;
+  if (kind === "practice") return "practice";
+  if (kind === "assessment" || kind === "checkpoint") return "assessment";
+  if (kind === "teach") return "teach";
+  // pre-1.7.0 replay fallback (the retired heuristic).
+  const title = frame.title.toLowerCase();
+  if (title.startsWith("practice") || frame.layout?.archetype === "example-led") return "practice";
+  if (title.startsWith("checkpoint") || title.startsWith("ready to practice")) return "assessment";
+  return "teach";
+}
+
+/** Whether a frame carries the practice answer affordance (F14) — typed kind, title fallback. */
+export function isPracticeFrame(frame: CognitiveFrame | null): boolean {
+  return frameRole(frame) === "practice";
+}

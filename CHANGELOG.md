@@ -9,6 +9,385 @@ paragraph or a few bullets per milestone. Implementation detail lives in the own
 
 ## [Unreleased]
 
+### Added — CSE: the Representation Intelligence Agent (Production Goal II; audit R4; CSE-018, ADR-0058)
+
+Production Goal II — representation is now a governed, planned, replayable cognitive capability, not
+a fixed template. The full design is spec law (CSE-018: the `RepresentationPlan`, ten representation
+laws, MCCR 2.0 grammars, the deterministic-fallback rollout; ADR-0058 adopts it). Delivered:
+
+- **Deterministic RIA (R4a):** `surface.representation.planned` (SRF-002 1.11.0) folds into a
+  `representations` slice; `planRepresentation` maps each element onto a hierarchy
+  (primary/supporting/residue) + an epistemic role — parity metadata, so a frame with no plan renders
+  identically and the RIA can never regress a frame.
+- **Roles rendered (R4b):** each element carries its epistemic role + hierarchy; the CDL renders the
+  role as visual language (a separate semantic layer from element type) — the learner reads the KIND
+  of knowledge without labels (Law 5).
+- **Derivation grammar (R4c):** `key_formula.line_labels[]` (transformation captions) flow through to
+  the board + deck — a derivation reads as constructed reasoning (Law 2).
+- **Density verdict (R4d):** the plan measures element load against a budget; over-budget frames are
+  flagged to split upstream, never to hide content (Law 3).
+- **Model-backed RIA (R4-model):** the `agent.representation` unit assigns roles/hierarchy/exclusions
+  and an adaptivity note on the governed dispatch path — grounded to the composer's real elements,
+  with a degraded-empty fallback to the deterministic floor so a model failure never regresses a
+  frame. Wired end-to-end (gateway on).
+
+Remaining in R4: the misconception-dissolve grammar + the rest of the MCCR 2.0 grammar set + image
+rationale (R4e). `pnpm verify` green (27 tasks) throughout.
+
+### Changed — CSE: rendering the Cognitive Theater (audit R3; ADR-0057)
+
+The Theater's craft — the shot grammar, the Director's pacing, Scene lighting, and derivations — was
+emitted and folded into `SurfaceState` but had no client consumer: dead at render. R3 wires those
+consumers and adds the one missing producer (no new architecture; every motion reduced-motion-safe):
+
+- **Progressive derivation (R3a):** a multi-line `key_formula` stages its lines in sequence while it
+  is the spoken element — the learner watches the derivation constructed, not handed over whole.
+- **Director pacing (R3b):** the inter-segment playback hold now derives from the directive's
+  `pacing` (tempo scales the teacher's pause; `silence` holds the surface deliberately still),
+  replacing a fixed constant — the Director's pace is finally felt.
+- **Cinematography shots (R3c):** the active Scene's latest shot realizes as a subtle, meaningful
+  board move; the 14-shot grammar has a real consumer at last.
+- **Scene lighting (R3d):** the Scene's receded actors dim gently so the focus reads first (never
+  dimming the element being spoken; readability preserved).
+- **Attention budget + affect (R3e):** the theater path now PRODUCES `surface.attention.budgeted`
+  (a folded-but-unemitted slice), and the sensed affect + a low budget render as a learner-visible,
+  opt-out chip — sensing is legible and never a hidden score (CSE-005 §3.5).
+
+`pnpm verify` green throughout. Next: R4 (the Representation Intelligence Agent), R5 (compounding).
+
+### Changed — CSE source-anchored teaching: the pipeline inversion (audit R2; ADR-0057, CSE-008/011)
+
+The audit's central finding was that teaching was *source-adjacent* — even with a source attached, the
+lesson never read it (curriculum from the goal string, planner/composer prompts source-blind, the
+Director's region anchor hardcoded `null`, anchors bolted on post-hoc by lexical overlap with
+index-positional sync). R2 inverts the pipeline so the source becomes the medium of teaching. Every
+sub-phase falls back to goal-mode when no source is bound, so nothing regresses; `pnpm verify` stayed
+green.
+
+- **Source into the prompt (R2a):** the concept's anchored passages are resolved before dispatch and
+  threaded into the frame-planner + composer, which teach *from* the passage under a SOURCE MODE
+  directive.
+- **The Director points at the region (R2b):** `focus.source_anchor_ref` is populated (CSE-011 §4).
+- **The document becomes the timeline (R2c):** `SourceHub.curriculumFor` derives the curriculum from
+  the document's own concepts/sections; `POST /api/surface/:id/teach-source` walks it.
+- **Semantic sync + entailment gate (R2d):** each narration segment binds to the anchor it discusses,
+  the highlight role is typed from the MCCR slot, and a non-entailed segment lights **nothing** —
+  never a wrong pointer.
+- **Source-as-stage (R2e):** teaching from a source puts the document center-stage, the MCCR board a
+  companion gloss.
+
+Proven end-to-end deterministically (register → attach → teach-source → the timeline is the document's
+sections, a viewport plan exists, the Director's focus anchor is populated). Next: R3 (render the
+Theater), R4 (the Representation Intelligence Agent), R5 (compounding).
+
+### Changed — CSE production readiness: integrity + the acquisition front door (audit R0+R1; ADR-0055/0056, CSE-017)
+
+A production-readiness audit (`spec/research/cse-production-readiness-audit-2026-07.md`) found the CSE
+substrate strong but the learner experience unrealized — no way to bring a source in-product, a source
+plane that forgot consent revocations on restart, a web app that never distilled a session, and
+title-string pedagogy heuristics. The audit's first two roadmap phases shipped:
+
+- **Integrity & durability (ADR-0055).** The source plane is now durable under `COS_PERSIST_DIR`
+  (pure-`node:fs` catalog + content-addressed bytes); the hub rehydrates registrations under their
+  original ids, so a **consent revocation survives a deploy** (content still 410 Gone, commons stays
+  delisted) and a restarted surface rebinds its sources. The web **closes the session on leave**, so
+  episode/delta/resume-card distillation finally runs for web learners. Contribution emits its attach
+  event (fold ≡ server). Frames carry a typed `kind` (SRF-002 1.10.0), retiring the
+  `title.startsWith("practice")` heuristic to a replay-only fallback.
+- **The Source Dock (CSE-017, ADR-0056).** The front door: a `＋ Source` affordance opens a dock with
+  file drag/drop + picker (PDF/markdown/text/code/transcript), a governed URL crawl, and paste — with
+  modality inference, **honest refusal before upload** for unadaptered formats, a canonicalization
+  narrative built from the pipeline's own registration summary, and auto-attach so the Living Reference
+  appears. Closes the audit's severest gap (zero web callers of `/api/sources`).
+
+`pnpm verify` stayed green (28 tasks). Later audit phases (R2 source-anchored teaching, R3 the rendered
+Theater, R4 the Representation Intelligence Agent, R5 compounding) are the next frontier.
+
+### Added — The Cognitive Source Environment, implemented end to end (M1–M10; ADR-0032, 0035–0048)
+
+The CSE spec domain (ADR-0032/0033/0034) is now built: any knowledge artifact becomes a canonical,
+anchored, agent-orchestrated cognitive environment on the Surface. Every capability that reasons is
+model-backed (real Gemini, D3-recorded) and deterministic where it can be; all are gateway-on and
+CLI-untouched (a website capability). `pnpm verify` stayed green (28 tasks) throughout; each milestone
+was proven live.
+
+- **The substrate (M1–M3.5).** `@inevitable/source-environment` — the Source Anchor (multi-selector,
+  pure resolution, cross-version migration), content-addressed versions, the eight-layer artifact
+  model, progressive canonicalization behind modality adapters, the `source.*` event family, the
+  replay fold. Canonicalization became **governed cognition** (M3): the privileged `canonicalizer`
+  agent extracts the semantic + citation layers, grounded at the parser (hallucinated evidence
+  dropped). The **Cognitive Intelligence Persistence** plane (M3.5, ADR-0035, `@inevitable/intelligence`)
+  turns evaporating reasoning into durable, re-derivable intelligence (chronicle + governed
+  distillers). Supabase adapters (M2, ADR-0034) graduate persistence behind the eight-contract seam.
+- **Every source modality (M4, M10).** PDF (M4, ADR-0036, client-native fidelity by hash), and —
+  completing M10 — **code** (ADR-0046), **web** (ADR-0047, client-supplied HTML), and **video**
+  (ADR-0048, a timed transcript → the L4 temporal layer, the first implementation of that layer).
+  Each rides one `parse`/`parseBinary` seam; the whole pipeline works over all of them unchanged.
+- **The learner-visible surface (M5–M6).** The **Living Reference** (M5) puts source evidence on the
+  board (semantic viewports + a highlight grammar + the attention contract); the **Meaning
+  Representation Layer** + episodes + resume cards + the Understanding Map (M6, ADR-0037) make what a
+  passage does to a mind legible.
+- **The Cognitive Theater (M7–M8, ADR-0038/0039).** The **Director** (an authored pedagogy FSM), the
+  **Scene** (frames as living spaces), **Knowledge Cinematography** (a shot grammar, reduced-motion
+  conformant), and the **Interaction Grammar** (the learner as an actor who reshapes the Scene).
+- **Living knowledge (M9).** **Source Fusion** — deterministic reconciliation (T1, ADR-0040), the
+  **Claim Graph** + cross-source contradiction detection (T2, ADR-0041), and a model-woven **fused
+  explanation** citing every source (T3, ADR-0042). **Frontier overlays** via real governed web
+  grounding (ADR-0043 — no frontier entry without a citable origin), the **Temporal Knowledge Model**
+  (ADR-0044), and the **grounded proactive frontier** (ADR-0045 — the readiness gate now surfaces the
+  real, cited frontier, not an ungrounded breadcrumb). CSE-006 living knowledge is complete.
+
+### Added — The Cognitive Theater + Supabase backend graduation (ADR-0033, ADR-0034)
+
+- **The surface gains its missing conductor.** ADR-0033 adopts the Cognitive Theater — four organs
+  that turn the narrated slide deck into a directed, inhabitable space: the **Cognitive Director**
+  (CSE-011) which decides *what cognitive state the learner should enter next* across every
+  temporal scale from the moment to the lifetime (the CDL already named the states as hues;
+  nothing drove the transitions until now); the **Cognitive Scene** (CSE-012) which elevates
+  ADR-0030 frames into living spaces with actors, lighting, and in-place evolution; **Knowledge
+  Cinematography** (CSE-013), a pedagogical shot grammar (semantic zoom, spotlight, dissolve,
+  hold); and the **Cognitive Interaction Grammar** (CSE-014), ~25 semantic primitives where every
+  act is cognitive intent, not UI manipulation. All additive over the existing frame substrate,
+  all still folds, all replay-preserving, all backward-compatible.
+- **Two further capabilities elevated to first class:** **Source Fusion** (CSE-015) reconciles many
+  sources into one inhabitable environment (beyond side-by-side alignment); **Creative Cognition**
+  (CSE-016) makes creation — writing, hypothesis, design, invention — a first-class cognitive act
+  and the mission's contribution loop.
+- **Deepenings:** an inspectable progressive world model + an affective/attention channel (CSE-005);
+  a continuous research horizon exposing known→open in every lesson (CSE-006); deep cognitive
+  transparency — every pedagogical decision carries a uniform envelope of considered/rejected
+  alternatives, contributing/dissenting agents, evidence, and confidence (CSE-007). CDL v3 scopes
+  the design language across twelve sensory/temporal channels (proposed).
+- **The backend is chosen.** ADR-0034 graduates persistence to **Supabase-first** (Postgres +
+  pgvector + Storage + Auth + Realtime) behind the existing eight-contract adapter seam — new
+  Supabase adapters pass the same conformance harness, heavy clients stay out of the workspace via
+  guarded dynamic import, the append-only Postgres event table is the source of truth, and
+  Row-Level Security enforces learner governance at the database. NATS/Neo4j/Qdrant/Temporal remain
+  the documented graduation targets.
+- **A concrete, phase-by-phase build plan** lands at
+  `spec/implementation-roadmaps/cse-cognitive-theater-and-backend.md` (backend foundation → anchored
+  PDF → meaning/episodes → Director/Scene → cinematography/interaction/transformations → living
+  knowledge/fusion → temporal modalities → universe/human-sources/creation). Spec-only this
+  milestone; indexes, taxonomy, ecosystem map, and dependency graph updated.
+
+### Added — Cognitive Source Environment: the spec domain for turning knowledge artifacts into living cognition (ADR-0032)
+
+- **A new first-class COS subsystem, adopted spec-first.** `spec/source-environment/` (CSE-001…
+  CSE-010) is the architectural law for converting every form of external knowledge — books,
+  papers, videos, websites, code, datasets, and (under consent) people — into canonical, anchored,
+  agent-orchestrated cognitive environments projected onto the Cognitive Surface. It supersedes
+  the consolidated founding draft (preserved in `spec/research/`) and gives F15 its owning
+  architectural domain, activating Layer 3 (Knowledge) of ADR-0023.
+- **The load-bearing primitives:** the Source Anchor (stable, versioned addressing into any
+  modality), progressive attention-driven canonicalization across eight understanding layers
+  split along the Principle Zero seam, the Meaning Representation Layer, episode-centered memory
+  with Understanding Deltas, the transformation algebra, the Claim Graph and frontier overlays,
+  the Enrichment Decision loop with a governed interruption budget, and the source–surface
+  projection seam (semantic viewports, semantic highlight grammar, the attention contract;
+  proposed `surface.source.*` subfamily, schema 1.6.0).
+- No code shipped; indexes, taxonomy, ecosystem map, and F15 updated for full traceability.
+
+### Added — UCS production hardening: the surface becomes trustworthy (ADR-0031)
+
+- **Narration plays exactly once.** The audio pipeline was rebuilt around a single-owner playback
+  engine with epoch-guarded async edges: a segment can never repeat, a dead speaker can never
+  freeze the caption (reading-time degradation), and the word-sync clock is the audio element's
+  own time. The duplicate/silent/stalled narration bug class is closed structurally and pinned by
+  deterministic tests.
+- **The board became dense with real cognition.** The composer now composes complete cognitive
+  representations (5–7 anchors: worked examples, derivations, misconceptions, diagrams — never
+  filler), with a new first-class `misconception` anchor, multi-line formula derivations rendered
+  by KaTeX (publication-grade, lazily loaded), cycle diagrams, semantic per-role color identity,
+  and disclosure instead of truncation everywhere.
+- **The learner never waits in silence.** Every ask narrates its pipeline phases live
+  (`surface.ask.progress`), frame N+1 composes while frame N is being voiced, speculation moved
+  off the ask's critical path, and a second ask can no longer silently reset the first.
+- **Degradation is named truthfully.** Token-budget truncation reports as truncation; image
+  generation retries transient failures and the planner's full prompt now reaches the provider;
+  the Observatory gained a cognition-health panel, playback diagnostics, and a searchable raw
+  event inspector.
+- **A session is now a study artifact.** One click exports the journey as a formatted PowerPoint —
+  one cognitive frame per slide in the surface's own visual language, native vector diagrams,
+  narration as speaker notes — all derived from one canonical deck model built for future
+  PDF/Markdown/LaTeX exporters.
+
+### Added — The public ecosystem: the complete company website of Universal Cognitive Infrastructure
+
+- **From a landing page to a public manifestation.** The site is now a coherent ecosystem on one
+  design language: the continuous cinematic journey remains the Home, and eight substantive
+  regions open from it — Vision, Philosophy, Cognitive Surface, Source Environment,
+  Infrastructure, Research, Roadmap, and About — every one composed from CDL primitives
+  (state-graded ambient cognition on every page, whisper-glass navigation with a state-light
+  locator, lens-glass figures of the real product, law-lists, pipelines, the Ignorance→
+  Contribution ladder) and written from the vision/product/architecture corpus itself: honest,
+  calm, checkable claims only.
+- **One world, navigable.** Client routing with route-level code-splitting (each page ~2–3KB
+  gzip), a deterministic 2D living-substrate canvas on inner pages (the full WebGL world stays on
+  Home), the journey now ends by opening the ecosystem (footer past the paradigm reveal), a
+  shared/resumed surface (`?s=`) still enters cognition from any path, and the enter flow lives at
+  `/enter` under the same nav.
+- **Public-site hygiene.** SEO meta (description, OpenGraph, theme color), an SVG favicon (the
+  mote), per-page titles/descriptions, mobile glass-disclosure navigation, and reduced-motion
+  static fallbacks across every page.
+
+### Added — CDL v2 + the public landing: the first public experience of Universal Cognitive Infrastructure
+
+- **The design language became a world.** CDL v2 (`spec/design/cognitive-design-language-v2.md`,
+  ACTIVE) evolves v1 into a cinematic cognitive world: one continuous space instead of screens,
+  Liquid Glass as a real optical material (lens tier), camera-and-morph motion vocabulary
+  (emerge/traverse/crystallize/dissolve-forward/rack/swell-settle), an always-on living-cognition
+  substrate, atmospheric grading per cognitive state, and a hybrid WebGL + cinema + glass rendering
+  architecture — with v1's accessibility, determinism, and honesty laws intact.
+- **The landing is a journey, not a website.** At `/`, one deterministic WebGL particle system
+  morphs continuously through eight movements — a mote of curiosity becomes a neuron, a knowledge
+  graph (framing a real capture of the Cognitive Surface in lens glass), a lifelong companion, the
+  mastery ascent, a civilization-scale cognitive layer, and finally the paradigm reveal:
+  *Agriculture scaled food… Universal Cognitive Infrastructure scales understanding. The
+  Inevitable.* Scroll is traversal; nothing hard-cuts; the world breathes.
+- **Cinema that includes everyone.** Reduced-motion / no-WebGL visitors get the full story as a
+  static illustrated narrative; text always sits on legibility scrims; three.js is code-split so
+  first paint never waits for the world (main bundle 90KB gzip).
+- Higgsfield cinematic loops are specced shot-by-shot (one visual DNA) and pend workspace credits.
+
+### Added — Cognitive Design Language v1.1: motion, constellation, self-hosting (Phase 7, first tranche)
+
+- **The concept travels.** A frame that continues the same concept (explanation → its practice)
+  now morphs the core-concept anchor from its old position to its new one — true shared-element
+  continuity — while the rest of the board crossfades. Motion explains causality: one idea in
+  motion, not a whole screen sliding.
+- **The path is a constellation.** The learning graph is now a deterministic, replay-safe
+  force-directed star map with hard overlap resolution (node boxes and labels can never collide),
+  mastered concepts glowing as earned light.
+- **Knowledge becomes memory, visibly.** When a concept is mastered, a gold mote of it crystallizes
+  and drifts into the Path — the CDL `consolidate` motion, now wired.
+- **Fonts are self-hosted.** Fraunces, Space Grotesk, and Space Mono ship with the app (woff2,
+  preloaded) — no third-party CDN, no privacy leak, no external point of failure.
+
+### Added — Cognitive Design Language v1: the permanent visual language (Phase 4/5 of the CDL process)
+
+- **CDL v1 is law.** A complete design system — `spec/design/cognitive-design-language-v1.md` —
+  now governs every interface of the Universal Cognitive Infrastructure: one-sentence law
+  ("everything on screen is either cognition or light"), five principles, seven depth planes,
+  an eight-hue cognitive-state palette at three amplitudes, typography roles
+  (Canon/Gloss/Voice/Working/Instrument/Data/Whisper), breath spacing, and a motion vocabulary
+  (form/continue/focus/reveal/yield/breathe). The full UX audit and approved rationale live in
+  `spec/design/proposals/`.
+- **The web surface migrated.** The media-player HUD became the **Voice Line + Thread of
+  Understanding** (narration as ambient light at the bottom edge; instruments rise on approach;
+  progress and frame navigation as a filament thread). The alarm-red DEGRADED banner and status
+  cluster became the **System Gem** (one calm point of light; ember ring for honest degradation).
+  Practice answers, frontier nudges, and the continue affordance moved into **stage-owned layout
+  slots** — floating chrome can no longer occlude the board.
+- **The board recomposes instead of shrinking or clipping.** Scale-to-fit was retired for
+  **density recomposition**: overflowing anchors fold into disclosure chips (priority-ordered,
+  bidirectional, oscillation-guarded) and reopen on a glass focus plane. Anchor hierarchy makes
+  the core concept the visual Canon; narration focus recedes sibling anchors; frame transitions
+  distinguish a continuing concept from a newly forming one; graph labels can no longer collide.
+
+> **Closing the gap between a faithful architecture and the learner's experience.** Guided by the
+> comprehensive implementation review (`spec/research/ucs-implementation-review-2026-07.md`), the first
+> hardening pass fixes the deepest root causes: cognition no longer degrades silently, the production
+> gateway no longer runs on a frozen demo clock, and the board renders real mathematics and structured
+> diagrams instead of raw LaTeX and undifferentiated rings.
+
+### Added / Fixed — UCS experience last mile: accessibility, navigation, a thinking surface (review R2/R3, fifth pass)
+
+- **The board is now manipulable.** Hovering or focusing any MCCR anchor reveals Simpler / Deeper /
+  Why? affordances that reshape the lesson from *that idea* (F16 causal transparency) — the learner
+  acts on cognition instead of only watching it. Mastered concepts acquire a persistent gold-leaf
+  identity so the path visibly accumulates earned understanding, and a "research frontier" nudge lets a
+  ready learner step from learning into research (F10).
+- **Navigation by concept, and surfaces that persist.** Frame-level transport with named frame ticks
+  (not "Segment N") lets the learner jump between Cognitive Frames; a surface is now reflected in the
+  URL (`?s=…`) so it can be linked, resumed, and shared (the gateway rehydrates it).
+- **Accessibility floor.** Overlays trap and restore focus (`aria-modal`); the transport HUD keeps
+  play/pause visible when idle and restores fully on keyboard focus (no more stranding); scrub ticks
+  meet touch minima; the smallest informational text is ≥11px; fonts load non-blocking; and the
+  overstimulating multi-rate `breathe` pulses were calmed to one cadence.
+- **Feedback & instrumentation.** A long ask now narrates its pipeline phase (planning → composing →
+  distilling → voicing) from folded state; reshaping verbs acknowledge on press; agent disagreement is
+  reachable via an "another view" affordance; and the Observatory is split into "Understanding" (the
+  craft) vs "Instrumentation" (agents, reasoning, latency) for its two audiences. `pnpm verify` green.
+
+### Added / Fixed — UCS earned mastery, honest cognition & staged reveal (review R1/R2, fourth pass)
+
+- **Mastery is earned, not fabricated.** A new Grader agent (`AssessmentUnit`) grades the learner's
+  *actual* answer to a practice problem into evidence-bearing depth tests tied to what they wrote; the
+  practice frame now carries an answer box, and submitting it emits an honest
+  `surface.assessment.gate.evaluated` + an "Assessment —" frame with real feedback. Offline it degrades
+  honestly ("recorded, ungraded") — it never invents a pass. This closes the product's deepest
+  philosophical breach (F14).
+- **Silent cognitive degradation is over.** Every deterministic fallback now emits a typed
+  `surface.cognition.degraded` marker, folded into a health slice and surfaced as a "degraded: <units>"
+  badge in the HUD — a session running on fallbacks is no longer indistinguishable from a healthy one.
+- **Cognition unfolds before your eyes.** The active frame's MCCR anchors now reveal *as the narration
+  reaches them* (staged reveal) rather than the whole board popping at once — space reserved so nothing
+  reflows, reduced-motion collapses to instant.
+- **The Observatory tells the whole truth.** The image agent's prompt/rationale is now shown in the
+  Composition panel (was hidden), and every agent resolves to a friendly name (Challenger, Composer,
+  Planner, Illustrator) instead of raw ids. Timeline concept nodes are keyboard-activatable.
+  `pnpm verify` green (26/26 typecheck+test, 25/25 lint, format).
+
+### Added / Fixed — UCS learning loop, cognitive color & correctness (review R1/R2, third pass)
+
+- **Understanding compounds — the lesson no longer restarts.** A path-scoped `advance` command teaches
+  the next (or a chosen) concept on the *existing* curriculum without regenerating the DAG, so concept
+  ids stay stable and governed look-ahead can actually promote. A persistent **"Continue"** ribbon means
+  the learner is never stranded at a stopping point, and clicking a concept in the Path now *teaches* it
+  (it was a focus-only no-op). The web client carries a **learner identity** (bearer token in
+  localStorage), so a returning learner resumes their path and prior mastery seeds the new surface (F05);
+  the dev gateway persists to disk by default so this survives a restart.
+- **Pedagogy stops lying.** The board shows the Coach's *real* generated practice problem, not the
+  meta-prompt. The product surface no longer fabricates a 5/5 depth gate or claims the learner "solved"
+  anything — it records only what is true (the concept was explained and a problem presented) and labels
+  the checkpoint honestly ("Ready to practice"), reserving "Mastery verified" for a genuine graded gate.
+  (A learner answer-input → model-graded mastery upgrade is the next dedicated pass.)
+- **The board's light thinks with the learner.** A cognitive color language tints each frame by the kind
+  of thinking it carries — learning (cyan), practice (green), assessment (violet), research (blue) — a
+  pure client projection washed subtly into the stage and the highlight marker. The stranded design-token
+  regressions are fixed (the Educator overlay, chip borders, and readable image callouts return).
+- **The surface acknowledges the learner and never fails silently.** Asks get a "working" pulse; gateway
+  and transport failures surface as real, dismissible error states instead of unhandled rejections.
+- **Correctness hardening.** Narration segments fold idempotently (no duplicate speech on reconnect); the
+  SSE attach subscribes-before-replay with sequence dedupe (no dropped/doubled events); commands are
+  serialized per surface (two asks can't interleave and corrupt the canonical log). `pnpm verify` green
+  (26/26 typecheck+test, 25/25 lint, format).
+
+### Fixed — UCS experience alignment (review R0/R2, second pass)
+
+- **The board stops showing the system's plumbing.** The practice frame now carries the Coach's *real*
+  generated problem (extracted from the dispatch), never the meta-prompt ("Give one concrete practice
+  problem for…") that instructed it. The check segment carries a composed pause so the frame holds while
+  the learner works. (The full answerable-practice + learner-graded honest mastery gate — removing the
+  fabricated auto-pass — is the next dedicated pass, restructuring the teach→practice→assess flow.)
+- **Narration became a teacher's instrument.** `pause_after` is honored end-to-end (producer → segment
+  event → fold → choreographer), so composed teaching pauses are real. The moving highlight marker no
+  longer sits above its anchor: it measures within its own positioned ancestor and divides out the
+  fit-to-viewport scale (it was offset by the frame title and double-scaled). And a failed audio fetch,
+  a blocked autoplay, or a silent stall can **no longer freeze the surface** — an error listener, a
+  play()-reject fallback timer, and a watchdog always keep playback advancing.
+
+### Fixed — UCS experience alignment (review R0/R2, first pass)
+
+- **The model path actually fires.** The Frame Planner and Image Agent were falling back to their
+  deterministic paths on every live call because `gemini-2.5-flash` spends thinking tokens from the
+  output budget and their small `maxTokens` starved the response. Added a `thinkingBudget` control to the
+  model contract + Gemini adapter, raised timeouts to 60s and budgets across composer/planner/imageplanner,
+  sanitized the composer's response schema (empty-object array items 400'd Gemini), and salvage a rich
+  composition that omits only its heading rather than discarding it. Quota (429) now fails fast instead of
+  stacking retries onto an already-serialized ask.
+- **The system stops lying about time.** The gateway now runs on a real `SystemClock` (the CLI demo/tests
+  keep the deterministic `ManualClock`); onboarding leases are computed from the clock so a real-time
+  gateway never starts with expired leases; composer/planner/imageplanner dispatches emit real
+  `surface.agent.work.timing`. An image decision is recorded as `helps:true` only when an image actually
+  reached the board (never claims media the learner cannot see).
+- **The board renders cognition, not markup.** Key-formula anchors render as real mathematics (a
+  dependency-free, XSS-safe LaTeX→HTML renderer with the spoken `plain` form as fallback — no learner ever
+  sees `\sigma`); diagrams lay out by their `kind` (flow as a directed row, tree layered, axes as a plane,
+  node-graph as a ring) with arrowheads on directed edges; tables show a "+N more" cue instead of silently
+  truncating; sparse 2–3 anchor frames center and enlarge; the frame title no longer duplicates the
+  core-concept anchor. `pnpm verify` green (25/25).
+
 > **The board became the learner's visual memory, not the system's notepad.** The Universal Cognitive
 > Surface now holds only the **Minimal Complete Cognitive Representation (MCCR)** — distilled anchors —
 > while a **separate narration script** carries the teaching, and learning unfolds as viewport-complete

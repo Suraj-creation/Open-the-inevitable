@@ -21,6 +21,7 @@
     "@inevitable/shared": "workspace:*",
     "@inevitable/protocols": "workspace:*",
     "@inevitable/events": "workspace:*",
-    "@inevitable/contracts": "workspace:*"
+    "@inevitable/contracts": "workspace:*",
+    "@inevitable/source-environment": "workspace:*"
   }
 }

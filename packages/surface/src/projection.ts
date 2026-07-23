@@ -14,6 +14,7 @@ import type { CognitiveEvent } from "@inevitable/protocols";
 import type { CognitionBlock } from "./blocks";
 import {
   type CognitiveFrame,
+  type FrameKind,
   type ImageDecisionRecord,
   type Mccr,
   type NarrationIntent,
@@ -24,6 +25,40 @@ import {
   readMccr,
   readNarrationScriptSegments,
 } from "./frames";
+import {
+  type SourceBindingRecord,
+  type SourceHighlightRecord,
+  type SourceSyncBindingRecord,
+  type SourceViewportChangeRecord,
+  type SourceViewportPlanRecord,
+  readSourceBinding,
+  readSourceHighlight,
+  readSyncBinding,
+  readViewportChange,
+  readViewportPlan,
+} from "./source-projection";
+import {
+  type AffectSignalRecord,
+  type AttentionBudgetRecord,
+  type DirectiveRecord,
+  type DirectorState,
+  type SceneRecord,
+  readAffectSignal,
+  readAttentionBudget,
+  readDirective,
+  readSceneActor,
+  readSceneDelta,
+  readSceneLighting,
+  readSceneOpened,
+} from "./theater";
+import { readShot } from "./cinematography";
+import {
+  DENSITY_BUDGET,
+  type EpistemicRole,
+  type RepresentationHierarchy,
+  type RepresentationPlan,
+} from "./representation";
+import { type ExpressedIntentRecord, readExpressedIntent } from "./interaction";
 import type { TimelineProjection } from "./timeline";
 
 export type { EvaluationRecord, ProductMode };
@@ -88,6 +123,8 @@ export interface NarrationSegment {
   readonly anchor_ref: string | null;
   /** The pedagogical intent of this spoken segment. */
   readonly intent: NarrationIntent | null;
+  /** When true, the choreographer holds after this segment — a composed teaching pause (ADR-0030). */
+  readonly pause_after: boolean;
 }
 
 export type AgentPresenceState = "idle" | "thinking" | "contributing" | "speaking";
@@ -183,6 +220,14 @@ export interface ResearchFrontierRecord {
   readonly trigger_confidence: number;
   readonly trigger_gate_passed: boolean;
   readonly surfaced: boolean;
+  /** True when the surfaced frontier is web-grounded (CSE M9 LKS T1, ADR-0045); false = legacy breadcrumb. */
+  readonly grounded?: boolean;
+  /** The grounded frontier entries surfaced (present only when `grounded`); each cites real sources. */
+  readonly entries?: readonly {
+    readonly kind: string;
+    readonly summary: string;
+    readonly external_refs: readonly { readonly uri: string; readonly title: string }[];
+  }[];
   readonly hlc: string;
 }
 
@@ -221,6 +266,13 @@ export interface AgentReasoningRecord {
   readonly confidence: number;
   readonly determinism_level: string;
   readonly hlc: string;
+}
+
+/** A cognition-degradation marker: a unit fell back to its deterministic path (review §22). */
+export interface CognitionDegradedRecord {
+  readonly unit_id: string;
+  readonly reason: string;
+  readonly response_kind: string | null;
 }
 
 export type AgentWorkStatus = "admitted" | "dispatched" | "executing" | "completed" | "failed";
@@ -266,6 +318,8 @@ export interface SurfaceState {
   readonly narration_scripts: readonly NarrationScriptRecord[];
   /** Whether-an-image-helps decisions, append-only (UCS, ADR-0030). */
   readonly image_decisions: readonly ImageDecisionRecord[];
+  /** Cognition-degradation markers: a unit fell back to its deterministic path (review §22). Append-only. */
+  readonly cognition_health: readonly CognitionDegradedRecord[];
   /** Transient in-flight streamed MCCR element text, cleared by surface.frame.composed (UCS, ADR-0030). */
   readonly streaming_frame_elements: readonly StreamingFrameElementBuffer[];
   /** Multi-agent disagreements recorded on this surface (P4.1). Append-only for replay. */
@@ -290,8 +344,61 @@ export interface SurfaceState {
   readonly mode: ProductMode;
   /** The active projection layer on this surface: timeline-graph or scene-graph canvas (S4.4). Defaults to "timeline". */
   readonly current_projection: ProjectionMode;
+  /** The learner-visible phase of the in-flight ask ("ready" when idle) — an ask is never silent. */
+  readonly ask_progress: AskProgressRecord | null;
+  /** Canonical Source Environments bound to this session, upserted by source_version_id (CSE M5). */
+  readonly sources: readonly SourceBindingRecord[];
+  /** Semantic Viewport plans per frame, upserted by plan_id (CSE-008 §4). */
+  readonly viewport_plans: readonly SourceViewportPlanRecord[];
+  /** Viewport realizations/overrides, append-only — the client derives the current view (CSE-008 §4.2). */
+  readonly viewport_changes: readonly SourceViewportChangeRecord[];
+  /** Semantic highlights, upserted by highlight_id; bulk-clear marks `cleared`, never removes (CSE-008 §5). */
+  readonly source_highlights: readonly SourceHighlightRecord[];
+  /** Attention Contract instances — narration segments bound to viewports/highlights, by frame (CSE-008 §6). */
+  readonly sync_bindings: readonly SourceSyncBindingRecord[];
+  /** The returning learner's episode resume card, latest-wins (CSE M6, CSE-005 §4; ADR-0037). */
+  readonly resume_card: ResumeCardRecord | null;
+  /** Cognitive Director directives, append-only (CSE M7, CSE-011). Replay-safe (authored FSM). */
+  readonly director_directives: readonly DirectiveRecord[];
+  /** The current Director directive — latest-wins; drives the board's CDL state hue (CSE-011). */
+  readonly latest_directive: DirectiveRecord | null;
+  /** Behavioral/declared affect signals, append-only; learner-visible, opt-out (CSE-011 §3.3). */
+  readonly affect_signals: readonly AffectSignalRecord[];
+  readonly latest_affect: AffectSignalRecord | null;
+  /** The current attention budget, latest-wins (CSE-011 §3.3). */
+  readonly attention_budget: AttentionBudgetRecord | null;
+  /** Cognitive Scenes wrapping frames, upserted by scene_id with an in-place evolution log (CSE-012). */
+  readonly scenes: readonly SceneRecord[];
+  /** Typed cognitive intents interpreted from learner interactions, append-only (CSE M8, CSE-014). */
+  readonly expressed_intents: readonly ExpressedIntentRecord[];
+  /** The RIA's RepresentationPlans, upserted by frame_id (CSE-018, R4a) — hierarchy + epistemic role. */
+  readonly representations: readonly RepresentationPlan[];
   readonly version: number;
   readonly last_hlc: string | null;
+}
+
+/** The latest `surface.ask.progress` marker: which pipeline phase the current ask is in. */
+export interface AskProgressRecord {
+  readonly phase: string;
+  readonly detail: string | null;
+  readonly hlc: string;
+}
+
+/**
+ * A returning learner's episode resume card (CSE M6, CSE-005 §4; ADR-0037) — derived ONLY from
+ * the intelligence plane's latest episode + understanding-delta artifacts, never raw logs.
+ * Folded latest-wins from `surface.resume.projected`.
+ */
+export interface ResumeCardRecord {
+  readonly episode_ref: string;
+  readonly delta_ref: string | null;
+  /** One line, learner-readable — what was happening in their understanding. */
+  readonly summary: string;
+  readonly last_concept_ref: string | null;
+  readonly concepts_touched: readonly string[];
+  readonly open_confusions: readonly { description: string; concept_ref: string }[];
+  readonly days_since: number;
+  readonly hlc: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -319,6 +426,7 @@ interface MutableSurfaceState {
   speculative_frames: CognitiveFrame[];
   narration_scripts: NarrationScriptRecord[];
   image_decisions: ImageDecisionRecord[];
+  cognition_health: CognitionDegradedRecord[];
   streaming_frame_elements: StreamingFrameElementBuffer[];
   disagreements: DisagreementRecord[];
   proposals: ProposalRecord[];
@@ -331,6 +439,21 @@ interface MutableSurfaceState {
   evaluation_records: EvaluationRecord[];
   mode: ProductMode;
   current_projection: ProjectionMode;
+  ask_progress: AskProgressRecord | null;
+  sources: SourceBindingRecord[];
+  viewport_plans: SourceViewportPlanRecord[];
+  viewport_changes: SourceViewportChangeRecord[];
+  source_highlights: SourceHighlightRecord[];
+  sync_bindings: SourceSyncBindingRecord[];
+  resume_card: ResumeCardRecord | null;
+  director_directives: DirectiveRecord[];
+  latest_directive: DirectiveRecord | null;
+  affect_signals: AffectSignalRecord[];
+  latest_affect: AffectSignalRecord | null;
+  attention_budget: AttentionBudgetRecord | null;
+  scenes: SceneRecord[];
+  expressed_intents: ExpressedIntentRecord[];
+  representations: RepresentationPlan[];
   version: number;
   last_hlc: string | null;
 }
@@ -359,6 +482,75 @@ function upsertFrame(list: CognitiveFrame[], frame: CognitiveFrame): void {
 /** Read a full MCCR from a payload when present, else null (planned/speculative may lack content). */
 function readMccrOrNull(raw: Record<string, unknown> | undefined, frameId: string): Mccr | null {
   return raw ? readMccr(raw, frameId) : null;
+}
+
+/** Read a RepresentationPlan from a `surface.representation.planned` payload (R4a, CSE-018). */
+function readRepresentationPlan(
+  payload: Record<string, unknown>,
+  frameId: string,
+  hlc: string,
+): RepresentationPlan {
+  const rawComposition = Array.isArray(payload["composition"]) ? payload["composition"] : [];
+  const composition = rawComposition
+    .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
+    .map((c) => ({
+      element_id: typeof c["element_id"] === "string" ? c["element_id"] : "",
+      hierarchy: (typeof c["hierarchy"] === "string"
+        ? c["hierarchy"]
+        : "supporting") as RepresentationHierarchy,
+      epistemic_role: (typeof c["epistemic_role"] === "string"
+        ? c["epistemic_role"]
+        : "observation") as EpistemicRole,
+    }))
+    .filter((c) => c.element_id.length > 0);
+  const rawDensity = (payload["density"] ?? {}) as Record<string, unknown>;
+  const count = typeof rawDensity["count"] === "number" ? rawDensity["count"] : composition.length;
+  const budget = typeof rawDensity["budget"] === "number" ? rawDensity["budget"] : DENSITY_BUDGET;
+  return {
+    frame_id: frameId,
+    composition,
+    exclusions: Array.isArray(payload["exclusions"])
+      ? (payload["exclusions"] as unknown[]).filter((e): e is string => typeof e === "string")
+      : [],
+    density: {
+      count,
+      budget,
+      within_budget:
+        typeof rawDensity["within_budget"] === "boolean"
+          ? rawDensity["within_budget"]
+          : count <= budget,
+    },
+    plan_kind: payload["plan_kind"] === "model" ? "model" : "deterministic",
+    adaptivity: readAdaptivity(payload["adaptivity"]),
+    hlc,
+  };
+}
+
+/** Read the Law 8 adaptivity note from a `surface.representation.planned` payload (R4e). */
+function readAdaptivity(raw: unknown): RepresentationPlan["adaptivity"] {
+  if (!raw || typeof raw !== "object") return null;
+  const a = raw as Record<string, unknown>;
+  const expertise = a["expertise"];
+  if (expertise !== "novice" && expertise !== "intermediate" && expertise !== "expert") return null;
+  return { expertise, note: typeof a["note"] === "string" ? a["note"] : "" };
+}
+
+const FRAME_KINDS: readonly string[] = ["teach", "practice", "assessment", "checkpoint"];
+
+/**
+ * Read a frame's pedagogical kind (ADR-0055 D6). Prefers the explicit `kind` field; keeps an
+ * existing kind on re-upsert; and for pre-1.7.0 logs (no `kind`) falls back to the retired
+ * title heuristic so old sessions still surface the practice affordance on replay.
+ */
+function readFrameKind(
+  payload: Record<string, unknown>,
+  title: string | undefined,
+  existing: CognitiveFrame | undefined,
+): FrameKind {
+  const raw = payload["kind"];
+  if (typeof raw === "string" && FRAME_KINDS.includes(raw)) return raw as FrameKind;
+  if (existing) return existing.kind;
+  return (title ?? "").toLowerCase().startsWith("practice") ? "practice" : "teach";
 }
 
 /**
@@ -403,6 +595,7 @@ export function foldSurfaceEvents(
         speculative_frames: [],
         narration_scripts: [],
         image_decisions: [],
+        cognition_health: [],
         streaming_frame_elements: [],
         disagreements: [],
         proposals: [],
@@ -415,6 +608,21 @@ export function foldSurfaceEvents(
         evaluation_records: [],
         mode: (payload["mode"] as ProductMode | undefined) ?? "student",
         current_projection: "timeline",
+        ask_progress: null,
+        sources: [],
+        viewport_plans: [],
+        viewport_changes: [],
+        source_highlights: [],
+        sync_bindings: [],
+        resume_card: null,
+        director_directives: [],
+        latest_directive: null,
+        affect_signals: [],
+        latest_affect: null,
+        attention_budget: null,
+        scenes: [],
+        expressed_intents: [],
+        representations: [],
         version: 1,
         last_hlc: event.hlc,
       };
@@ -558,7 +766,7 @@ export function foldSurfaceEvents(
                 provider_id: (voiceRaw["provider_id"] as string | undefined) ?? "",
               }
             : null;
-          state.narration.push({
+          const segment = {
             segment_id: segmentId,
             block_id: (payload["block_id"] as string | null | undefined) ?? null,
             concept_id: (payload["concept_id"] as string | null | undefined) ?? null,
@@ -570,16 +778,24 @@ export function foldSurfaceEvents(
             frame_id: (payload["frame_id"] as string | null | undefined) ?? null,
             anchor_ref: (payload["anchor_ref"] as string | null | undefined) ?? null,
             intent: (payload["intent"] as NarrationIntent | null | undefined) ?? null,
-          });
+            pause_after: payload["pause_after"] === true,
+          };
+          // Upsert by segment_id (N12): SSE redelivery on reconnect must not duplicate a spoken
+          // segment (blocks upsert; narration must too). Idempotent fold ⇒ replay-safe.
+          const existing = state.narration.findIndex((s) => s.segment_id === segmentId);
+          if (existing >= 0) state.narration[existing] = segment;
+          else state.narration.push(segment);
           // A narration segment that carries a focus directive also moves the surface's attention.
           if (focus) state.focus = focus;
-          // UCS (ADR-0030): link the segment to the frame it voices, in order.
+          // UCS (ADR-0030): link the segment to the frame it voices, in order (no duplicate on redelivery).
           const frameId = payload["frame_id"] as string | undefined;
           if (frameId) {
             const fi = state.frames.findIndex((fr) => fr.frame_id === frameId);
             if (fi >= 0) {
               const fr = state.frames[fi] as CognitiveFrame;
-              state.frames[fi] = { ...fr, segment_ids: [...fr.segment_ids, segmentId] };
+              if (!fr.segment_ids.includes(segmentId)) {
+                state.frames[fi] = { ...fr, segment_ids: [...fr.segment_ids, segmentId] };
+              }
             }
           }
         }
@@ -657,6 +873,7 @@ export function foldSurfaceEvents(
               surface_id: state.surface_id,
               ordinal: (payload["ordinal"] as number | undefined) ?? 0,
               status: "planned",
+              kind: readFrameKind(payload, payload["title"] as string | undefined, existing),
               concept_id: (payload["concept_id"] as string | null | undefined) ?? null,
               title: (payload["title"] as string | undefined) ?? "",
               layout: readFrameLayout(
@@ -688,6 +905,11 @@ export function foldSurfaceEvents(
             surface_id: state.surface_id,
             ordinal: (payload["ordinal"] as number | undefined) ?? existing?.ordinal ?? 0,
             status: "composed",
+            kind: readFrameKind(
+              payload,
+              (payload["title"] as string | undefined) ?? existing?.title,
+              existing,
+            ),
             concept_id:
               (payload["concept_id"] as string | null | undefined) ?? existing?.concept_id ?? null,
             title: (payload["title"] as string | undefined) ?? existing?.title ?? "",
@@ -777,6 +999,25 @@ export function foldSurfaceEvents(
         }
         break;
       }
+      case "surface.ask.progress": {
+        // Latest-wins: the fold keeps only the current phase (a pure progress projection).
+        state.ask_progress = {
+          phase: (payload["phase"] as string | undefined) ?? "",
+          detail: (payload["detail"] as string | null | undefined) ?? null,
+          hlc: event.hlc,
+        };
+        break;
+      }
+      case "surface.cognition.degraded": {
+        // Fallback health (review §22): a unit fell back to deterministic. Append-only, surfaced in
+        // the HUD so silent degradation becomes visible. Never enters block/frame content.
+        state.cognition_health.push({
+          unit_id: (payload["unit_id"] as string | undefined) ?? "unknown",
+          reason: (payload["reason"] as string | undefined) ?? "unknown",
+          response_kind: (payload["response_kind"] as string | null | undefined) ?? null,
+        });
+        break;
+      }
       case "surface.frame.speculation.prepared": {
         // UCS (ADR-0030): a discardable look-ahead frame. Lives in speculative_frames[] until
         // promoted; never rendered as on-screen state.
@@ -787,6 +1028,7 @@ export function foldSurfaceEvents(
             surface_id: state.surface_id,
             ordinal: (payload["ordinal"] as number | undefined) ?? 0,
             status: "speculative",
+            kind: readFrameKind(payload, payload["title"] as string | undefined, undefined),
             concept_id: (payload["concept_id"] as string | null | undefined) ?? null,
             title: (payload["title"] as string | undefined) ?? "",
             layout: readFrameLayout(payload["mccr_layout"] as Record<string, unknown> | undefined),
@@ -988,11 +1230,38 @@ export function foldSurfaceEvents(
         // detection record as surfaced; creates a new record if no prior detection (edge case).
         const conceptId = payload["concept_id"] as string | undefined;
         if (conceptId) {
+          // LKS T1 (ADR-0045): a grounded surfacing carries real, cited frontier entries.
+          const grounded = payload["grounded"] === true;
+          const rawEntries =
+            grounded && Array.isArray(payload["entries"]) ? payload["entries"] : null;
+          const entries = rawEntries
+            ? rawEntries
+                .map((e) => {
+                  const en = e as Record<string, unknown>;
+                  return {
+                    kind: typeof en["kind"] === "string" ? en["kind"] : "",
+                    summary: typeof en["summary"] === "string" ? en["summary"] : "",
+                    external_refs: (Array.isArray(en["external_refs"]) ? en["external_refs"] : [])
+                      .map((r) => {
+                        const rr = r as Record<string, unknown>;
+                        return {
+                          uri: typeof rr["uri"] === "string" ? rr["uri"] : "",
+                          title: typeof rr["title"] === "string" ? rr["title"] : "",
+                        };
+                      })
+                      .filter((r) => r.uri),
+                  };
+                })
+                .filter((e) => e.kind && e.summary)
+            : undefined;
+          const groundedFields = grounded
+            ? { grounded: true, ...(entries ? { entries } : {}) }
+            : {};
           let found = false;
           for (let j = state.research_frontiers.length - 1; j >= 0; j--) {
             const r = state.research_frontiers[j];
             if (r && r.concept_id === conceptId && !r.surfaced) {
-              state.research_frontiers[j] = { ...r, surfaced: true };
+              state.research_frontiers[j] = { ...r, surfaced: true, ...groundedFields };
               found = true;
               break;
             }
@@ -1003,6 +1272,7 @@ export function foldSurfaceEvents(
               trigger_confidence: (payload["confidence"] as number | undefined) ?? 0,
               trigger_gate_passed: (payload["gate_passed"] as boolean | undefined) ?? false,
               surfaced: true,
+              ...groundedFields,
               hlc: event.hlc,
             });
           }
@@ -1045,6 +1315,253 @@ export function foldSurfaceEvents(
       }
       case "surface.scene.block.placed": {
         // S4.4: block spatial position recorded for observability only (D5: layout non-canonical).
+        break;
+      }
+      case "surface.source.attached": {
+        // CSE M5: a Canonical Source Environment bound to this session. Upsert by version id —
+        // re-attachment (e.g. SSE redelivery) never duplicates a binding.
+        const record = readSourceBinding(payload, event.hlc);
+        if (record.source_version_id) {
+          const index = state.sources.findIndex(
+            (s) => s.source_version_id === record.source_version_id,
+          );
+          if (index >= 0) state.sources[index] = record;
+          else state.sources.push(record);
+        }
+        break;
+      }
+      case "surface.source.viewport.planned": {
+        // CSE-008 §4.2: the Semantic Viewport plan for a frame — the expert gaze, recorded.
+        const record = readViewportPlan(payload, event.hlc);
+        if (record.plan_id) {
+          const index = state.viewport_plans.findIndex((p) => p.plan_id === record.plan_id);
+          if (index >= 0) state.viewport_plans[index] = record;
+          else state.viewport_plans.push(record);
+        }
+        break;
+      }
+      case "surface.source.viewport.changed": {
+        // CSE-008 §4.2: append-only realization history; the client derives the current view from
+        // the latest change per source (canonical state records history, never a "current pane").
+        const record = readViewportChange(payload, event.hlc);
+        if (record.viewport_id) state.viewport_changes.push(record);
+        break;
+      }
+      case "surface.source.highlight.applied": {
+        // CSE-008 §5: the typed semantic highlight grammar. Upsert by highlight_id.
+        const record = readSourceHighlight(payload, event.hlc);
+        if (record.highlight_id) {
+          const index = state.source_highlights.findIndex(
+            (h) => h.highlight_id === record.highlight_id,
+          );
+          if (index >= 0) state.source_highlights[index] = record;
+          else state.source_highlights.push(record);
+        }
+        break;
+      }
+      case "surface.source.highlight.cleared": {
+        // Bulk-clear by scope: highlights are marked cleared, never removed (replay-preserving).
+        const scope = (payload["scope"] ?? {}) as Record<string, unknown>;
+        const frameId = typeof scope["frame_id"] === "string" ? scope["frame_id"] : null;
+        const ids = Array.isArray(scope["highlight_ids"])
+          ? new Set((scope["highlight_ids"] as unknown[]).filter((h) => typeof h === "string"))
+          : null;
+        for (let j = 0; j < state.source_highlights.length; j++) {
+          const h = state.source_highlights[j]!;
+          const inScope =
+            (frameId !== null && h.frame_id === frameId) ||
+            (ids !== null && ids.has(h.highlight_id));
+          if (inScope && !h.cleared) {
+            state.source_highlights[j] = { ...h, cleared: true, hlc: event.hlc };
+          }
+        }
+        break;
+      }
+      case "surface.source.sync.bound": {
+        // CSE-008 §6.1: the Attention Contract instance for a frame. Upsert by frame_id.
+        const record = readSyncBinding(payload, event.hlc);
+        if (record.frame_id) {
+          const index = state.sync_bindings.findIndex((b) => b.frame_id === record.frame_id);
+          if (index >= 0) state.sync_bindings[index] = record;
+          else state.sync_bindings.push(record);
+        }
+        break;
+      }
+      case "surface.resume.projected": {
+        // CSE M6 (ADR-0037): the returning learner's resume card, latest-wins. Derived upstream
+        // from intelligence-plane artifacts only — the fold just carries it.
+        const episodeRef = payload["episode_ref"];
+        if (typeof episodeRef === "string" && episodeRef) {
+          const confusionsRaw = Array.isArray(payload["open_confusions"])
+            ? (payload["open_confusions"] as unknown[])
+            : [];
+          state.resume_card = {
+            episode_ref: episodeRef,
+            delta_ref: (payload["delta_ref"] as string | null | undefined) ?? null,
+            summary: (payload["summary"] as string | undefined) ?? "",
+            last_concept_ref: (payload["last_concept_ref"] as string | null | undefined) ?? null,
+            concepts_touched: Array.isArray(payload["concepts_touched"])
+              ? (payload["concepts_touched"] as unknown[]).filter(
+                  (c): c is string => typeof c === "string",
+                )
+              : [],
+            open_confusions: confusionsRaw.map((c) => {
+              const cr = (c ?? {}) as Record<string, unknown>;
+              return {
+                description: (cr["description"] as string | undefined) ?? "",
+                concept_ref: (cr["concept_ref"] as string | undefined) ?? "",
+              };
+            }),
+            days_since: (payload["days_since"] as number | undefined) ?? 0,
+            hlc: event.hlc,
+          };
+        }
+        break;
+      }
+      case "surface.director.directive": {
+        // CSE M7 (CSE-011): the Director issued a directive. Append + latest-wins (drives the hue).
+        const record = readDirective(payload, event.hlc);
+        if (record.directive_id) {
+          state.director_directives.push(record);
+          state.latest_directive = record;
+        }
+        break;
+      }
+      case "surface.director.state.entered": {
+        // Annotate the referenced directive with the state the learner is judged to have entered.
+        const directiveId = payload["directive_id"] as string | undefined;
+        const enteredState = payload["state"] as DirectorState | undefined;
+        if (directiveId && enteredState) {
+          const annotate = (d: DirectiveRecord): DirectiveRecord =>
+            d.directive_id === directiveId ? { ...d, entered_state: enteredState } : d;
+          state.director_directives = state.director_directives.map(annotate);
+          if (state.latest_directive) state.latest_directive = annotate(state.latest_directive);
+        }
+        break;
+      }
+      case "surface.director.pacing.set": {
+        // Pacing/intensity changed without a state change — re-fold the referenced directive's pacing.
+        const directiveId = payload["directive_id"] as string | undefined;
+        if (directiveId) {
+          const patch = (d: DirectiveRecord): DirectiveRecord =>
+            d.directive_id === directiveId
+              ? {
+                  ...d,
+                  pacing: {
+                    tempo:
+                      (payload["tempo"] as DirectiveRecord["pacing"]["tempo"] | undefined) ??
+                      d.pacing.tempo,
+                    dwell_hint_ms: d.pacing.dwell_hint_ms,
+                    silence: payload["silence"] === true,
+                  },
+                  intensity:
+                    (payload["intensity"] as DirectiveRecord["intensity"] | undefined) ??
+                    d.intensity,
+                }
+              : d;
+          state.director_directives = state.director_directives.map(patch);
+          if (state.latest_directive) state.latest_directive = patch(state.latest_directive);
+        }
+        break;
+      }
+      case "surface.affect.observed": {
+        // CSE-011 §3.3: an affect signal — behavioral-inferred or learner-declared. Append + latest.
+        const record = readAffectSignal(payload, event.hlc);
+        state.affect_signals.push(record);
+        state.latest_affect = record;
+        break;
+      }
+      case "surface.attention.budgeted": {
+        // CSE-011 §3.3: the attention budget was (re)computed. Latest-wins.
+        state.attention_budget = readAttentionBudget(payload, event.hlc);
+        break;
+      }
+      case "surface.scene.opened": {
+        // CSE-012 §5: a composed frame wrapped as a living Scene. Upsert by scene_id (the
+        // evolution log survives a re-open on SSE redelivery).
+        const record = readSceneOpened(payload, event.hlc);
+        if (record.scene_id) {
+          const index = state.scenes.findIndex((s) => s.scene_id === record.scene_id);
+          if (index >= 0) {
+            state.scenes[index] = { ...record, evolution_log: state.scenes[index]!.evolution_log };
+          } else {
+            state.scenes.push(record);
+          }
+        }
+        break;
+      }
+      case "surface.scene.actor.entered": {
+        // CSE-012 §5: a cognitive actor joined the stage. Upsert by actor_id within the scene.
+        const sceneId = payload["scene_id"] as string | undefined;
+        const actorRaw = payload["actor"] as Record<string, unknown> | undefined;
+        const index = state.scenes.findIndex((s) => s.scene_id === sceneId);
+        if (index >= 0 && actorRaw) {
+          const actor = readSceneActor(actorRaw);
+          const scene = state.scenes[index]!;
+          const ai = scene.actors.findIndex((a) => a.actor_id === actor.actor_id);
+          const actors =
+            ai >= 0
+              ? scene.actors.map((a) => (a.actor_id === actor.actor_id ? actor : a))
+              : [...scene.actors, actor];
+          state.scenes[index] = { ...scene, actors };
+        }
+        break;
+      }
+      case "surface.scene.evolved": {
+        // CSE-012 §3.3: a scene delta mutated the Scene in place. Append to its evolution log.
+        const sceneId = payload["scene_id"] as string | undefined;
+        const index = state.scenes.findIndex((s) => s.scene_id === sceneId);
+        if (index >= 0) {
+          const scene = state.scenes[index]!;
+          state.scenes[index] = {
+            ...scene,
+            evolution_log: [...scene.evolution_log, readSceneDelta(payload, event.hlc)],
+          };
+        }
+        break;
+      }
+      case "surface.scene.lighting.changed": {
+        // CSE-012 §4: focus/recession changed. Replace the scene's lighting.
+        const sceneId = payload["scene_id"] as string | undefined;
+        const index = state.scenes.findIndex((s) => s.scene_id === sceneId);
+        if (index >= 0) {
+          state.scenes[index] = { ...state.scenes[index]!, lighting: readSceneLighting(payload) };
+        }
+        break;
+      }
+      case "surface.scene.closed": {
+        // CSE-012 §5: the Scene retired (topic move / session end). Mark closed, never removed.
+        const sceneId = payload["scene_id"] as string | undefined;
+        const index = state.scenes.findIndex((s) => s.scene_id === sceneId);
+        if (index >= 0) state.scenes[index] = { ...state.scenes[index]!, closed: true };
+        break;
+      }
+      case "surface.shot.planned": {
+        // CSE M8 (CSE-013): a pedagogical camera move over a scene. Append to the scene's shot list.
+        const record = readShot(payload, event.hlc);
+        const index = state.scenes.findIndex((s) => s.scene_id === record.scene_ref);
+        if (index >= 0 && record.shot_id) {
+          const scene = state.scenes[index]!;
+          state.scenes[index] = { ...scene, shots: [...scene.shots, record] };
+        }
+        break;
+      }
+      case "surface.intent.expressed": {
+        // CSE M8 (CSE-014): a learner interaction interpreted into typed cognitive intent.
+        const record = readExpressedIntent(payload, event.hlc);
+        if (record.interaction_id) state.expressed_intents.push(record);
+        break;
+      }
+      case "surface.representation.planned": {
+        // R4a (CSE-018): the RIA's plan for a frame — hierarchy + epistemic role per element.
+        // Upsert by frame_id (a re-plan replaces the frame's plan).
+        const frameId = payload["frame_id"] as string | undefined;
+        if (frameId) {
+          const plan = readRepresentationPlan(payload, frameId, event.hlc);
+          const idx = state.representations.findIndex((r) => r.frame_id === frameId);
+          if (idx >= 0) state.representations[idx] = plan;
+          else state.representations.push(plan);
+        }
         break;
       }
       default:

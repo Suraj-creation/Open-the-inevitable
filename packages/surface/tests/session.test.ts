@@ -32,6 +32,7 @@ import { foldSurfaceEvents } from "../src/projection";
 import type { MediaGenerator } from "../src/providers";
 import { TextSurfaceRenderer } from "../src/renderer";
 import { SurfaceSession, type GovernedDispatcher, type SurfaceAskInput } from "../src/session";
+import type { SurfaceFrontierProvider } from "../src/source-projection";
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -281,6 +282,8 @@ function makeFixture(
     imagePlannerModel?: ModelRuntime;
     media?: MediaGenerator;
     motivationDispatcher?: GovernedDispatcher;
+    /** Grounded-frontier provider (CSE M9 LKS T1, ADR-0045). */
+    frontierProvider?: SurfaceFrontierProvider;
     /** Look-ahead budget (UCS, ADR-0030; Phase 3). Absent/0 ⇒ no speculation (the default). */
     lookaheadBudget?: number;
   } = {},
@@ -434,6 +437,7 @@ function makeFixture(
     nodeId: "surface-session",
     ...(options.media ? { media: options.media } : {}),
     ...(options.motivationDispatcher ? { motivationDispatcher: options.motivationDispatcher } : {}),
+    ...(options.frontierProvider ? { frontierProvider: options.frontierProvider } : {}),
     ...(composerDispatcher ? { composerDispatcher } : {}),
     ...(framePlannerDispatcher ? { framePlannerDispatcher } : {}),
     ...(imagePlannerDispatcher ? { imagePlannerDispatcher } : {}),
@@ -910,11 +914,13 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
     await surface.start("Teach me Neural Networks");
 
     // Ask 1: teach linear-algebra. After clean mastery the NEXT concept (gradient-descent) is
-    // pre-composed as a speculative frame — recorded but NEVER surfaced.
+    // pre-composed as a speculative frame — recorded but NEVER surfaced. Speculation runs OFF the
+    // ask's critical path (review §22), so quiescence requires settle() before asserting.
     const first = await surface.ask(teachMeNeuralNetworks());
     expect(first.ok).toBe(true);
     if (!first.ok) throw first.error;
-    const afterFirst = first.value.state;
+    await surface.settle();
+    const afterFirst = surface.state()!;
 
     const spec = afterFirst.speculative_frames;
     expect(spec).toHaveLength(1);
@@ -934,7 +940,8 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
     const second = await surface.ask(askForConcept("gradient-descent"));
     expect(second.ok).toBe(true);
     if (!second.ok) throw second.error;
-    const afterSecond = second.value.state;
+    await surface.settle();
+    const afterSecond = surface.state()!;
 
     // The speculative entry is now promoted, and a promoted frame stands on the canonical line.
     expect(afterSecond.speculative_frames.find((f) => f.frame_id === specFrameId)?.status).toBe(
@@ -964,14 +971,16 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
     const first = await surface.ask(teachMeNeuralNetworks()); // focus linear-algebra ⇒ speculate gradient-descent
     expect(first.ok).toBe(true);
     if (!first.ok) throw first.error;
-    const specFrameId = first.value.state.speculative_frames[0]!.frame_id;
-    expect(first.value.state.speculative_frames[0]?.concept_id).toBe("gradient-descent");
+    await surface.settle(); // speculation is detached from the ask's critical path
+    const specFrameId = surface.state()!.speculative_frames[0]!.frame_id;
+    expect(surface.state()!.speculative_frames[0]?.concept_id).toBe("gradient-descent");
 
     // Ask 2: the learner jumps to perceptron instead — the bet failed.
     const second = await surface.ask(askForConcept("perceptron"));
     expect(second.ok).toBe(true);
     if (!second.ok) throw second.error;
-    const afterSecond = second.value.state;
+    await surface.settle();
+    const afterSecond = surface.state()!;
 
     // The gradient-descent speculation is invalidated and NEVER copied into the frame line.
     const invalidated = afterSecond.speculative_frames.find((f) => f.frame_id === specFrameId);
@@ -1292,5 +1301,67 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
     const events = bus.replay({ subject: "surface.>" }).map((e) => e.event_type);
     expect(events).not.toContain("surface.motivation.surfaced");
     expect(surface.state()?.motivation_surfaced).toBe(false);
+  });
+
+  test("LKS T1: verified mastery surfaces the GROUNDED frontier (ADR-0045), cited, not the breadcrumb", async () => {
+    const grounded: SurfaceFrontierProvider = {
+      async researchFrontier(conceptId) {
+        return {
+          concept_ref: conceptId,
+          degraded: false,
+          entries: [
+            {
+              kind: "latest-research",
+              summary: "Adaptive step-size methods are an active direction.",
+              external_refs: [{ uri: "https://arxiv.org/abs/2401.1", title: "A 2024 Survey" }],
+            },
+          ],
+        };
+      },
+    };
+    const { surface, bus } = makeFixture("surface-grounded-frontier", {
+      frontierProvider: grounded,
+    });
+    await surface.start("Teach me Neural Networks");
+    const asked = await surface.ask(teachMeNeuralNetworks());
+    expect(asked.ok).toBe(true);
+    if (!asked.ok) throw asked.error;
+
+    // The frontier is surfaced (grounded), and only ONE surfaced event — no ungrounded breadcrumb.
+    const surfaced = bus
+      .replay({ subject: "surface.research.frontier.surfaced" })
+      .map((e) => e.payload as Record<string, unknown>);
+    expect(surfaced).toHaveLength(1);
+    expect(surfaced[0]?.["grounded"]).toBe(true);
+
+    // Folded: the record is grounded and carries the cited entries.
+    const record = asked.value.state.research_frontiers.find((r) => r.surfaced);
+    expect(record?.grounded).toBe(true);
+    expect(record?.entries?.[0]?.external_refs[0]?.uri).toBe("https://arxiv.org/abs/2401.1");
+
+    // A grounded research block was contributed (not the ungrounded frontier/gap/hypothesis shape).
+    const block = asked.value.blocks.find((b) => b.block_type === "research");
+    expect(block?.content["grounded"]).toBe(true);
+    expect(block?.content["frontier"]).toBeUndefined();
+  });
+
+  test("LKS T1: no citable frontier ⇒ honest deferral (never the ungrounded breadcrumb)", async () => {
+    const empty: SurfaceFrontierProvider = {
+      async researchFrontier(conceptId) {
+        return { concept_ref: conceptId, degraded: true, entries: [] };
+      },
+    };
+    const { surface, bus } = makeFixture("surface-frontier-defer", { frontierProvider: empty });
+    await surface.start("Teach me Neural Networks");
+    const asked = await surface.ask(teachMeNeuralNetworks());
+    expect(asked.ok).toBe(true);
+    if (!asked.ok) throw asked.error;
+
+    const events = bus.replay({ subject: "surface.>" }).map((e) => e.event_type);
+    // Detected (readiness fired) + deferred (nothing citable) — never surfaced.
+    expect(events).toContain("surface.research.frontier.detected");
+    expect(events).toContain("surface.research.frontier.deferred");
+    expect(events).not.toContain("surface.research.frontier.surfaced");
+    expect(asked.value.blocks.find((b) => b.block_type === "research")).toBeUndefined();
   });
 });

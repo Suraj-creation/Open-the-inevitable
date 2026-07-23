@@ -70,6 +70,20 @@ export interface ModelGenerationRequest {
   temperature?: number;
   seed?: number;
   responseSchema?: Record<string, unknown>;
+  /**
+   * Thinking-token budget for reasoning models (e.g. gemini-2.5-flash). Thinking tokens are drawn
+   * from the output budget; on structured-output calls an uncapped thinking budget can starve the
+   * visible response, so callers that need a full JSON payload bound it (0 disables thinking).
+   * Adapters that do not support a thinking phase ignore this field.
+   */
+  thinkingBudget?: number;
+  /**
+   * Request web-grounded generation (a governed external fetch). The adapter attaches a search tool
+   * and returns real `citations` in the result; it is mutually exclusive with `responseSchema`
+   * (grounded output is lenient text, not structured JSON). CSE-006 §4: no frontier without a
+   * citable origin. Adapters without web access ignore this and return no citations.
+   */
+  webSearch?: boolean;
   invocation_key?: string;
 }
 
@@ -78,6 +92,8 @@ export interface ModelGenerationResult {
   model: string;
   finishReason?: "stop" | "max_tokens" | "refusal" | "safety" | "other";
   usage?: { inputTokens?: number; outputTokens?: number };
+  /** Real grounding citations for web-grounded generation (fetchable origins). D3-recorded. */
+  citations?: readonly { readonly uri: string; readonly title: string }[];
 }
 
 /** Model runtime adapter (hosted LLMs, local vLLM, future models). Capability-, not vendor-bound. */

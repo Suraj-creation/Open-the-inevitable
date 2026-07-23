@@ -6,17 +6,22 @@ spec:
   domain: surface
   status: draft
   owner: product-architecture
-  last_reviewed: 2026-06-11
+  last_reviewed: 2026-07-10
   upstream_dependencies:
     - surface/cognitive-surface-runtime
     - events/event-taxonomy
     - protocols/cognitive-event-protocol
+    - source-environment/CSE-008-source-surface-projection
+    - source-environment/CSE-011-cognitive-director
+    - source-environment/CSE-012-cognitive-scene
+    - source-environment/CSE-013-knowledge-cinematography
+    - source-environment/CSE-014-cognitive-interaction-grammar
   downstream_dependencies:
     - packages/surface
     - indexes/event-index
   related_protocols: [cognitive-event-protocol, cognition-packet-protocol, memory-mutation-protocol]
   related_events:
-    [surface.created, surface.session.closed, surface.timeline.generated, surface.timeline.updated, surface.timeline.completed, surface.block.generated, surface.block.delta, surface.block.modified, surface.agent.joined, surface.agent.contributed, surface.agent.disagreed, surface.agent.reasoning.summary, surface.agent.work.timing, surface.memory.attached, surface.visual.generated, surface.simulation.started, surface.explanation.expanded, surface.reasoning.recorded, surface.contribution.dropped, surface.narration.segment, surface.narration.script.produced, surface.focus.changed, surface.presence.updated, surface.proposal.proposed, surface.synthesis.recorded, surface.graph.expanded, surface.graph.entrypoint.changed, surface.interaction.received, surface.interaction.applied, surface.frame.planned, surface.frame.composed, surface.frame.element.delta, surface.image.decided, surface.frame.speculation.prepared, surface.frame.speculation.invalidated, surface.frame.promoted]
+    [surface.created, surface.session.closed, surface.timeline.generated, surface.timeline.updated, surface.timeline.completed, surface.block.generated, surface.block.delta, surface.block.modified, surface.agent.joined, surface.agent.contributed, surface.agent.disagreed, surface.agent.reasoning.summary, surface.agent.work.timing, surface.memory.attached, surface.visual.generated, surface.simulation.started, surface.explanation.expanded, surface.reasoning.recorded, surface.contribution.dropped, surface.narration.segment, surface.narration.script.produced, surface.focus.changed, surface.presence.updated, surface.proposal.proposed, surface.synthesis.recorded, surface.graph.expanded, surface.graph.entrypoint.changed, surface.interaction.received, surface.interaction.applied, surface.frame.planned, surface.frame.composed, surface.frame.element.delta, surface.image.decided, surface.frame.speculation.prepared, surface.frame.speculation.invalidated, surface.frame.promoted, surface.source.attached, surface.source.viewport.planned, surface.source.viewport.changed, surface.source.highlight.applied, surface.source.highlight.cleared, surface.source.sync.bound, surface.resume.projected, surface.director.directive, surface.director.state.entered, surface.director.pacing.set, surface.affect.observed, surface.attention.budgeted, surface.scene.opened, surface.scene.actor.entered, surface.scene.evolved, surface.scene.lighting.changed, surface.scene.closed, surface.shot.planned, surface.shot.cut, surface.intent.expressed]
   related_runtime_systems: [universal-cognitive-bus, world-state-graph]
   related_governance_systems: [governance-kernel]
   related_observability_systems: [cognitive-observability, otel-edge]
@@ -49,11 +54,11 @@ the Universal Cognitive Bus under topic `cos.<event_type>`. Family registration:
 {
   "family": "surface",
   "owner": "surface",
-  "schema_version": "1.4.0",
+  "schema_version": "1.9.0",
   "retention": "permanent",
   "replay_behavior": "replayable",
   "classification": "internal",
-  "producers": ["surface-session", "agent-contribution-runtime", "surface-timeline-builder", "surface-composer", "frame-planner"],
+  "producers": ["surface-session", "agent-contribution-runtime", "surface-timeline-builder", "surface-composer", "frame-planner", "source-projection", "cognitive-director", "cinematographer", "interaction-grammar"],
   "consumers": ["surface-projection", "observability", "memory", "future-ui-clients"],
   "failure_behavior": "publish failure fails the surface transition (state-then-event ordering)"
 }
@@ -91,8 +96,8 @@ causal tracing.
 | `surface.synthesis.recorded` | the arbiter synthesized proposals into surfaced cognition | `topic`, `chosen_proposal_ids[]`, `block_ids[]`, `rationale`, `producer_cid` |
 | `surface.graph.expanded` | the cognitive-graph projection grew/changed edges or nodes (S1.1) | `timeline_id`, `added_node_ids[]?`, `added_edges[]?` ({from, to, edge_type}), `reason` |
 | `surface.graph.entrypoint.changed` | learner re-projected the graph at a different entry layer | `timeline_id`, `entry_point` ("beginner"\|"intermediate"\|"advanced"\|"research") |
-| `surface.interaction.received` | a learner interaction command was governed and accepted (S1.3, ADR-0024) | `interaction_id`, `kind` ("interrupt"\|"jump"\|"branch"\|"challenge"\|"request_depth"\|"request_simplify"\|"request_example"), `target_id?`, `args?` |
-| `surface.interaction.applied` | the runtime applied/realized a prior interaction | `interaction_id`, `effect` ("cancelled"\|"refocused"\|"dispatched"\|"reprojected"), `reason` |
+| `surface.interaction.received` | a learner interaction command was governed and accepted (S1.3, ADR-0024; grammar extended CSE-014/ADR-0039) | `interaction_id`, `kind` (ADR-0024 seven \| the CSE-014 grammar: `annotate`\|`circle`\|`highlight`\|`pin`\|`ask_why`\|`ask_simpler`\|`ask_deeper`\|`ask_example`\|`define`\|…), `target_id?`, `note?`, `args?` |
+| `surface.interaction.applied` | the runtime applied/realized a prior interaction | `interaction_id`, `effect` ("cancelled"\|"refocused"\|"dispatched"\|"reprojected"\|"scene-evolved"\|"annotated"), `reason` |
 | `surface.contribution.dropped` | late/invalid contribution rejected | `agent_cid`, `reason` |
 | `surface.session.closed` | session closed | `block_count`, `reason` |
 | `surface.mode.set` | the surface mode was set or changed (S4.3) | `surface_id`, `mode` ("student"\|"educator"\|"institution"\|"researcher"\|"open") |
@@ -107,6 +112,26 @@ causal tracing.
 | `surface.frame.speculation.prepared` | a discardable look-ahead frame was pre-composed for a likely next concept (UCS, ADR-0030) | `frame_id`, `speculative_of`, `concept_id`, `mccr_layout`, `trigger_assumption`, `planner_packet_id?` |
 | `surface.frame.speculation.invalidated` | a prepared speculative frame no longer matches the learner's trajectory and is discarded (UCS, ADR-0030) | `frame_id`, `reason` |
 | `surface.frame.promoted` | a prepared speculative frame matched a real learner signal and is promoted into the canonical frame line (UCS, ADR-0030) | `frame_id`, `ordinal` (final) |
+| `surface.source.attached` | a Canonical Source Environment was bound to this session (CSE M5, CSE-008 §3.1) | `source_id`, `source_version_id`, `modality`, `title`, `layers_available[]`, `content_ref` (out-of-band; bytes served by the gateway source-content route, never on the stream) |
+| `surface.source.viewport.planned` | a Viewport Plan was reserved for a frame — the expert gaze over the source (CSE-008 §4) | `plan_id`, `frame_id`, `source_version_id`, `viewports[]` ({viewport_id, anchor_ref, emphasis ("focus"\|"context"\|"orientation"), ordinal, region {path, page?, bbox?, char_start, char_end, quote}}) |
+| `surface.source.viewport.changed` | a planned viewport was realized or overridden (CSE-008 §4.2) | `viewport_id`, `plan_id?`, `source_version_id`, `cause` ("plan"\|"learner"\|"citation"\|"resume") |
+| `surface.source.highlight.applied` | a semantic highlight lit an anchored region (CSE-008 §5) | `highlight_id`, `frame_id`, `source_version_id`, `anchor_ref`, `role` (CSE-008 §5.1 registry), `amplitude` ("whisper"\|"active"\|"focal"), `lifetime` ("pulse"\|"held"\|"persistent-tint"), `provenance_class` ("evidence"\|"inference"\|"frontier"), `decided_by`, `region` (resolved {path, page?, bbox?, char_start, char_end, quote}) |
+| `surface.source.highlight.cleared` | highlights were cleared in bulk by scope (CSE-008 §5.1) | `scope` ({frame_id?} \| {plan_id?} \| {highlight_ids[]?}) |
+| `surface.source.sync.bound` | the Attention Contract instance for a frame — narration segments bound to viewports/highlights (CSE-008 §6.1) | `frame_id`, `script_id`, `bindings[]` ({segment_id, viewport_ref (viewport_id \| null), highlight_refs[]}) |
+| `surface.resume.projected` | a returning learner's episode resume card was projected at session start, derived only from the intelligence plane's latest episode + understanding-delta artifacts (CSE-005 §4; ADR-0037) | `episode_ref`, `delta_ref`, `summary` (learner-readable), `last_concept_ref?`, `concepts_touched[]`, `open_confusions[]` ({description, concept_ref}), `days_since` |
+| `surface.director.directive` | the Cognitive Director issued a Directive — the cognitive state to enter next and at what pace (CSE-011 §3.2; ADR-0038) | full Directive: `directive_id`, `scale` ("concept" in T1), `target_state` (CSE-011 §3.1), `pacing` ({tempo, dwell_hint_ms, silence}), `intensity`, `focus` ({concept_ref, source_anchor_ref?}), `rationale`, `considered[]` ({alternative_state, rejected_because}), `evidence_refs[]`, `confidence` |
+| `surface.director.state.entered` | the learner is judged to have entered a target cognitive state (CSE-011 §6) | `directive_id`, `scale`, `state`, `evidence_refs[]` |
+| `surface.director.pacing.set` | pacing/intensity changed without a state change (CSE-011 §6) | `directive_id`, `tempo`, `intensity`, `silence`, `reason` |
+| `surface.affect.observed` | an affect/attention signal was recorded — behavioral-inferred or learner-declared; learner-visible, opt-out (CSE-011 §3.3, CSE-005 §7) | `affect_state` ("engaged"\|"curious"\|"frustrated"\|"overloaded"\|"bored"\|"fatigued"\|"confident"), `source` ("behavioral-inference"\|"learner-declared"), `signals[]` (evidence refs), `confidence` |
+| `surface.attention.budgeted` | the attention budget was (re)computed (CSE-011 §3.3) | `remaining` ("high"\|"medium"\|"low"\|"depleted"), `session_minutes` |
+| `surface.scene.opened` | a composed frame was wrapped as a living Scene with a target state (CSE-012 §5; ADR-0038) | `scene_id`, `frame_ref`, `concept_ref`, `state`, `directive_ref`, `actors[]` (§CSE-012 3.2), `lighting` ({focus_actor_ref, cdl_state, recession[]}) |
+| `surface.scene.actor.entered` | a cognitive actor joined the stage (CSE-012 §5) | `scene_id`, `actor` ({actor_id, kind, content_ref, role, provenance_class, can_evolve}), `entrance_shot_ref?` |
+| `surface.scene.evolved` | a scene delta mutated a live Scene in place, without a new ask (CSE-012 §3.3) | full scene delta: `delta_id`, `scene_id`, `op` ("actor.enter"\|"actor.transform"\|"actor.exit"\|"lighting.change"\|"reveal"\|"annotate"\|"branch"), `cause` ("director"\|"agent"\|"learner"\|"cinematography"), `payload`, `interaction_ref?` |
+| `surface.scene.lighting.changed` | the Scene's focus/recession changed (CSE-012 §4) | `scene_id`, `focus_actor_ref`, `cdl_state`, `recession[]?` |
+| `surface.scene.closed` | a Scene retired (topic move / session end) (CSE-012 §5) | `scene_id`, `reason` |
+| `surface.shot.planned` | the Cinematographer selected a pedagogical camera move over a Scene (CSE-013 §3; ADR-0039) | `shot_id`, `scene_ref`, `kind` (establish\|semantic-zoom-in/-out\|pan\|spotlight\|reveal\|dissolve\|morph\|split\|merge\|macro-to-micro\|orientation\|rack-focus\|hold), `subject` (actor_id \| null), `intent`, `narration_anchor_ref?`, `reduced_motion` (the discrete realization), `cause` ("director"\|"scene"\|"cinematography"\|"learner") |
+| `surface.shot.cut` | a client confirmed a shot's realization (optional; reserved — T1 reuses viewport.changed/lighting.changed) (CSE-013 §4) | `shot_id`, `scene_ref` |
+| `surface.intent.expressed` | a learner interaction was interpreted into typed cognitive intent (CSE-014 §4) | `interaction_id`, `kind`, `class` (attend\|mark\|ask\|reason\|express\|navigate\|govern-flow), `cognitive_intent`, `target_anchor_ref?` |
 
 **Choreography & timing (Phase 2D).** `surface.narration.segment`, `surface.focus.changed`, and
 `surface.presence.updated` form the *choreography sub-family* that turns the surface from a static
@@ -166,6 +191,58 @@ and discardable: speculative frames are recorded for the Observatory but never s
 learner signal promotes them, and any unexpected signal invalidates them — generated live and
 continuously re-planned, never statically pre-generated (SRF-001 §2; ADR-0030).
 
+**Source–surface projection (CSE M5, CSE-008).** The `surface.source.*` subfamily projects a
+Canonical Source Environment into the session — the seam where the source becomes something the
+learner stands inside. `surface.source.attached` binds a source version (bytes stay out-of-band:
+clients fetch canonical bytes from the gateway source-content route and may prove fidelity by
+hashing them against the version's `content_hash` — ADR-0036). `surface.source.viewport.planned`
+records the **Semantic Viewport** plan for a frame: an ordered gaze over anchored regions, planned
+as a composer role at frame-composition time (one compose→record→render path; blueprint decision).
+Each viewport carries its **resolved region** (structural path + page/bbox geometry + the exact
+quote), so clients never re-resolve anchors; an anchor that fails to resolve is *skipped, never
+mis-highlighted* (CSE-008 §12). `surface.source.highlight.applied` is the typed highlight grammar —
+role/amplitude/lifetime/provenance-class over an anchor; CDL owns the optics, the event carries only
+semantics. `surface.source.sync.bound` is the **Attention Contract**: narration segments bound to
+viewports and highlights, realized by the client choreographer in segment order (timing is a client
+projection, ADR-0007; learner scroll cancels pending realization and never fights). Like all
+choreography, these carry logical order only — never wall-clock positions.
+
+**The Cognitive Theater — Director + Scene (CSE M7 T1, ADR-0033/0038).** The `surface.director.*`
+subfamily makes the missing conductor visible: `surface.director.directive` carries the typed
+**Cognitive Directive** — the target cognitive state, pacing, and intensity, with rationale,
+rejected alternatives, evidence refs, and confidence (CSE-011 §3.2). The Director *conducts, it
+never renders* (ADR-0033 L1): a directive contains no presentation; the client realizes it by
+tinting the board to the target state's CDL hue and offering a "why this pace" affordance over the
+rationale (a client projection, ADR-0007). In T1 the Director is an **authored pedagogy FSM**, a
+pure function of folded signals (mastery, depth-gates, prerequisite descents, affect) — every
+directive is deterministic and replay re-derives it identically (CSE-011 §5/§10). The **affect
+channel** (`surface.affect.observed` / `surface.attention.budgeted`) is behavioral-inferred in T1,
+learner-visible and opt-out (CSE-005 §7); learner-declared check-ins outrank inference when the
+interaction grammar lands (M8). The `surface.scene.*` subfamily elevates a composed frame into a
+living **Scene** (CSE-012): `surface.scene.opened` wraps `surface.frame.composed` with the frame's
+MCCR elements as **actors** and initial **lighting** (one focal actor, siblings recede — CDL);
+`surface.scene.evolved` mutates the Scene *in place* via typed scene deltas without a new ask.
+Frames are not discarded (ADR-0033 L2): a 1.7.0 log with no scene/director events folds to the
+identical frame view. All directives, scenes, actors, deltas, and affect signals are folds — no
+wall-clock, no `active_scene_id` in canonical state (ADR-0007/L3).
+
+**The Cognitive Theater — Cinematography + Interaction (CSE M8 T2, ADR-0033/0039).** The
+`surface.shot.*` subfamily makes motion a *grammar of understanding*: the Cinematographer (a
+composer role, CSE-013 §8) plans pedagogical camera moves over a Scene — `establish` on open
+(orient before detail), `spotlight` per narration segment (the camera follows the voice), `hold`
+under a `demanding`/silent directive (stillness, ADR-0033 L6). `planShots` is a pure function of
+the Scene, directive, and recorded segments — deterministic, replay-safe; selection is pedagogy,
+rendering is design (CDL). **Every shot carries its reduced-motion realization** (CSE-013 §6): a
+discrete, non-animated form is mandatory and test-enforced — motion is an enhancement over it,
+never a requirement. Timing is a client projection over ordered shots + audio (ADR-0007); canonical
+state carries the shot *list*, never a pixel timeline. The `surface.intent.expressed` event closes
+the **Interaction Grammar** (CSE-014): every learner act is interpreted deterministically into typed
+`cognitive_intent` and routed — Mark-class acts (annotate/circle/highlight/pin) evolve the Scene in
+place via a learner-caused `surface.scene.evolved` (the evolution channel M7 built, now driven by
+the learner — the "audience is also an actor" organ), Ask-class re-frames cognition, Navigate/
+Govern-flow re-plan the Director. The learner always wins (ADR-0033 L5): an interaction pre-empts
+pending directives and shots.
+
 ## 5. Protocols and Contracts
 
 - `producer_cid`: the CID of the acting identity (learner CID for session lifecycle events,
@@ -200,6 +277,22 @@ Ordering laws:
     existing `element_id`).
 11. `surface.frame.speculation.invalidated` and `surface.frame.promoted` follow that frame's
     `surface.frame.speculation.prepared`; a promoted frame thereafter obeys laws 8–10.
+12. `surface.source.attached` for a `source_version_id` precedes any other `surface.source.*`
+    event referencing it. `surface.source.viewport.planned` and `surface.source.sync.bound` for a
+    `frame_id` follow that frame's `surface.frame.composed` (bindings reference recorded script
+    segment ids, so the script precedes the contract). A `surface.source.viewport.changed` with
+    `cause:"plan"` follows its plan's `surface.source.viewport.planned`.
+13. `surface.scene.opened` with `frame_ref` follows that frame's `surface.frame.composed` (the MCCR
+    is the Scene's skeleton, CSE-012 §2); its `directive_ref` follows the referenced
+    `surface.director.directive`. `surface.scene.actor.entered`, `surface.scene.evolved`,
+    `surface.scene.lighting.changed`, and `surface.scene.closed` for a `scene_id` follow that
+    scene's `surface.scene.opened`. `surface.director.state.entered` and
+    `surface.director.pacing.set` reference an existing `directive_id`.
+14. `surface.shot.planned` with `scene_ref` follows that scene's `surface.scene.opened`; a
+    `spotlight` shot's `narration_anchor_ref` references a segment of the frame's recorded script.
+    `surface.intent.expressed` for an `interaction_id` follows that interaction's
+    `surface.interaction.received`; a learner-caused `surface.scene.evolved`
+    (`cause:"learner"`) carries the `interaction_ref` of the interaction that produced it.
 
 HLC is monotone within a surface (single producer runtime per session in Phase 2A/2D).
 
@@ -226,9 +319,30 @@ planned); `surface.narration.script.produced` upserts `narration_scripts[]` by `
 `surface.frame.composed`, so it never affects settled state); `surface.frame.speculation.prepared`
 upserts `speculative_frames[]` by `frame_id`, `surface.frame.speculation.invalidated` marks the
 matching speculative entry (and is **never** copied into `frames[]`), and `surface.frame.promoted`
-copies the speculative entry into `frames[]` (status `promoted`, final ordinal). Non-state events
-(`surface.visual.generated`, `surface.simulation.started`, `surface.contribution.dropped`) fold into
-version count only.
+copies the speculative entry into `frames[]` (status `promoted`, final ordinal). The **episodic
+projection** (CSE M6, ADR-0037) is state-affecting: `surface.resume.projected` folds latest-wins
+into `resume_card`. The **Theater** subfamily (CSE M7 T1, ADR-0038) is state-affecting:
+`surface.director.directive` appends to `director_directives[]` and replaces `latest_directive`;
+`surface.director.state.entered`/`surface.director.pacing.set` annotate the referenced directive
+record; `surface.affect.observed` appends to `affect_signals[]` and replaces `latest_affect`;
+`surface.attention.budgeted` replaces `attention_budget`; `surface.scene.opened` upserts
+`scenes[]` by `scene_id`; `surface.scene.actor.entered`/`surface.scene.evolved`/`.lighting.changed`
+mutate the matching scene (actors upsert by actor_id, deltas append to its `evolution_log`,
+lighting replaces); `surface.scene.closed` marks the scene closed. The **cinematography +
+interaction** subfamily (CSE M8 T2, ADR-0039) is state-affecting: `surface.shot.planned` appends
+to the matching scene's `shots[]` (a shot list per scene); `surface.intent.expressed` appends to
+`expressed_intents[]`; the extended `surface.interaction.received` kinds fold into `interactions[]`
+exactly as the ADR-0024 kinds do, and a learner-caused `surface.scene.evolved` appends to the
+scene's `evolution_log` (as in T1). The **source
+projection** subfamily (CSE M5) is state-affecting: `surface.source.attached` upserts `sources[]`
+by `source_version_id`; `surface.source.viewport.planned` upserts `viewport_plans[]` by `plan_id`;
+`surface.source.viewport.changed` appends to `viewport_changes[]` (the client derives the current
+view from the latest change per source — canonical state records the history, never a "current
+pane"); `surface.source.highlight.applied` upserts `source_highlights[]` by `highlight_id`;
+`surface.source.highlight.cleared` marks matching highlights `cleared` (they are never removed —
+replay-preserving); `surface.source.sync.bound` upserts `sync_bindings[]` by `frame_id`. Non-state
+events (`surface.visual.generated`, `surface.simulation.started`, `surface.contribution.dropped`)
+fold into version count only.
 
 ## 8. Observability
 
@@ -271,3 +385,56 @@ sub-family (`surface.frame.planned`, `surface.frame.composed`, `surface.narratio
 `surface.image.decided`, `surface.frame.element.delta`, `surface.frame.speculation.prepared`,
 `surface.frame.speculation.invalidated`, `surface.frame.promoted`) activates in the UCS Cognitive-Frames
 milestone (schema_version 1.4.0; ADR-0030) — additive, forward-compatible, and replay-preserving.
+The **production-hardening** additions (schema_version 1.5.0; ADR-0031) are:
+`surface.ask.progress` `{ surface_id, phase, detail }` (latest-wins `ask_progress` fold slice — the
+learner-visible phase of an in-flight ask; pure progress projection, no cognition);
+the `misconception` MCCR element type (text; the common wrong belief + correction as a first-class
+anchor); `key_formula.lines[]` (an optional multi-line LaTeX derivation); and `diagram.kind: "cycle"`.
+All additive, forward-compatible, and replay-preserving (1.4.0 logs fold unchanged).
+The **source-projection** subfamily (schema_version 1.6.0; CSE-008, ADR-0032/0036) activates in
+CSE M5: `surface.source.attached`, `surface.source.viewport.planned`, `surface.source.viewport.changed`,
+`surface.source.highlight.applied`/`.cleared`, `surface.source.sync.bound`, plus the
+`source_viewport` MCCR element type (a frame element carrying an anchored evidence region —
+`{source_version_id, anchor_ref, region, quote}` — beside the distilled anchors; CSE-008 §3.2).
+The remaining CSE-008 §8 events (`surface.source.overlay.applied`,
+`surface.source.alignment.composed`, `surface.source.media.intent`,
+`surface.source.annotation.recorded`) stay declared in CSE-008 and activate with their owning
+milestones (living knowledge M9; video/web M10; learner annotations with the CSE-014 interaction
+grammar). All additive, forward-compatible, and replay-preserving (1.5.0 logs fold unchanged).
+The **episodic-projection** addition (schema_version 1.7.0; CSE-005 §4, ADR-0037) activates in
+CSE M6: `surface.resume.projected` — a returning learner's resume card at session start, derived
+only from the intelligence plane's latest episode + understanding-delta artifacts (never raw
+logs; no artifacts ⇒ no event). Folds latest-wins into `resume_card`. Additive,
+forward-compatible, replay-preserving (1.6.0 logs fold unchanged).
+The **Cognitive Theater T1** addition (schema_version 1.8.0; CSE-011/012, ADR-0033/0038) activates
+in CSE M7: the `surface.director.*` subfamily (`directive`, `state.entered`, `pacing.set`,
+`affect.observed`, `attention.budgeted`) and the `surface.scene.*` subfamily (`opened`,
+`actor.entered`, `evolved`, `lighting.changed`, `closed`). The Director is an authored FSM (a pure
+function of folded signals — deterministic, replay-safe); Scenes wrap frames additively so a 1.7.0
+log with no scene/director events folds to the identical frame view (ADR-0033 L2). All additive,
+forward-compatible, and replay-preserving (1.7.0 logs fold unchanged).
+The **Cognitive Theater T2** addition (schema_version 1.9.0; CSE-013/014, ADR-0033/0039) activates
+in CSE M8: the `surface.shot.*` subfamily (`planned`, `cut`) and `surface.intent.expressed`, plus
+the extended `surface.interaction.received` grammar (the ~25 CSE-014 kinds) and the two new
+`surface.interaction.applied` effects (`scene-evolved`, `annotated`). The Cinematographer is a
+composer role (pure `planShots`, every shot carrying a mandatory reduced-motion realization); the
+interaction grammar interprets each act into typed `cognitive_intent` and routes Mark-class acts to
+learner-caused `surface.scene.evolved` deltas — the Scene evolution channel M7 built, now driven by
+the learner. A 1.8.0 log with no shot/intent events folds identically. All additive,
+forward-compatible, and replay-preserving.
+The **typed frame kind** addition (schema_version 1.10.0; ADR-0055 D6) adds an optional
+`kind: "teach" | "practice" | "assessment" | "checkpoint"` to `surface.frame.planned` /
+`surface.frame.composed` / `surface.frame.speculation.prepared`, folded onto `CognitiveFrame.kind`.
+It replaces the fragile `title.startsWith("practice")` heuristic that carried the practice answer
+affordance and grading join. Producers set it at every frame-creation site; the fold and all
+clients read `kind` first and fall back to the retired title heuristic **only** for pre-1.10.0 logs
+(no `kind`), so old sessions classify identically on replay. Additive, forward-compatible,
+replay-preserving (1.9.0 logs fold unchanged).
+The **Representation Intelligence** addition (schema_version 1.11.0; CSE-018, ADR-0058) adds
+`surface.representation.planned` `{ frame_id, composition: [{element_id, hierarchy, epistemic_role}],
+exclusions, plan_kind }`, folded (upsert by frame_id) into the `representations` slice — the RIA's
+plan of each element's representational hierarchy + epistemic role over the closed MCCR vocabulary.
+R4a emits the **deterministic** plan (parity metadata over the same elements; a frame with no plan
+renders identically), so it is purely additive and cannot regress a frame; the model-backed plan
+(exclusion reasoning, density verdict, adaptivity) is `plan_kind: "model"` in R4d. Additive,
+forward-compatible, replay-preserving (1.10.0 logs fold unchanged).

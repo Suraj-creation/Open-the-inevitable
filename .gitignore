@@ -33,3 +33,6 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+
+# Durable gateway data (dev default; cross-session continuity)
+.cos-data/

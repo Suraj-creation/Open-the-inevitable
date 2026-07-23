@@ -151,6 +151,8 @@ export interface NarrateScriptSegmentInput {
   /** The resolved MCCR element id to spotlight while speaking, or null for a whole-frame remark. */
   readonly element_id: string | null;
   readonly intent: string;
+  /** When true, the choreographer holds after this segment (a teaching pause / time to work). */
+  readonly pause_after?: boolean;
 }
 
 export interface NarrateScriptInput {
@@ -327,6 +329,7 @@ export class SurfaceChoreographer {
         text: seg.text,
         focus,
         reveal_ids: seg.element_id ? [seg.element_id] : [],
+        pause_after: seg.pause_after === true,
         voice,
       });
       if (voice) {

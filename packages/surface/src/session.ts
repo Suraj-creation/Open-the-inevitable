@@ -38,11 +38,32 @@ import {
 import type { WorldStateGraph } from "@inevitable/world-state";
 
 import type { CognitionBlock } from "./blocks";
-import { MCCR_ELEMENT_TYPES, type CognitiveFrame, type MccrElementType } from "./frames";
+import {
+  MCCR_ELEMENT_TYPES,
+  type CognitiveFrame,
+  type FrameKind,
+  type MccrElementType,
+} from "./frames";
 import { AgentContributionRuntime, contributionFromDispatch } from "./contribution";
 import { SurfaceChoreographer, type VoiceSynthesizer } from "./narration";
 import type { MediaGenerator } from "./providers";
 import { foldSurfaceEvents, type SurfaceState } from "./projection";
+import {
+  planSourceProjection,
+  type SourceEvidenceAnchorView,
+  type SourceEvidenceProvider,
+  type SurfaceFrontierProvider,
+} from "./source-projection";
+import { decideDirective, inferAffect, type DirectorSignals } from "./theater";
+import {
+  planRepresentation,
+  expertiseFromMastery,
+  type ExpertiseLevel,
+  type RepresentationElementPlan,
+  type RepresentationPlan,
+} from "./representation";
+import { planShots } from "./cinematography";
+import { interpretIntent } from "./interaction";
 import { SurfaceTimelineBuilder, type TimelineProjection } from "./timeline";
 import { traceBlock, type BlockTrace } from "./trace";
 
@@ -85,6 +106,21 @@ function revealChunks(content: Record<string, unknown>): string[] {
   }
   if (buf) chunks.push(buf);
   return chunks;
+}
+
+/**
+ * The learner-facing text a model-backed dispatch actually produced (summary → layer_0 → text). Used
+ * to put the Coach's REAL generated practice problem on the board, never the meta-prompt that
+ * instructed it (UCS review N3: the board holds cognition, not the system's plumbing).
+ */
+function dispatchText(dispatch: ProductDispatchResult): string {
+  const content = (dispatch.responsePackets[0]?.content ?? {}) as Record<string, unknown>;
+  const layers = content["layers"] as Record<string, unknown> | undefined;
+  const summary = typeof content["summary"] === "string" ? (content["summary"] as string) : "";
+  const layer0 =
+    layers && typeof layers["layer_0"] === "string" ? (layers["layer_0"] as string) : "";
+  const text = typeof content["text"] === "string" ? (content["text"] as string) : "";
+  return (summary || layer0 || text).trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +172,24 @@ function readPlanEntries(raw: unknown): FramePlanEntry[] {
   return entries;
 }
 
+/** A frame reserved + composed but not yet surfaced — the unit of the one-ahead compose pipeline. */
+interface PreparedFrame {
+  readonly frameId: string;
+  readonly ordinal: number;
+  readonly frameTitle: string;
+  readonly artifacts: {
+    mccr: Record<string, unknown>;
+    scriptSegments: Record<string, unknown>[];
+    imagePlan: { helps: boolean; modality: string; prompt: string | null; rationale: string };
+    composerCid: string;
+    composerPacketId: string | null;
+    confidence: number;
+    reasoning: string;
+    trace: ReasoningTrace | null;
+    workId: string | null;
+  };
+}
+
 /** One look-ahead bet read from the planner's `frame_plan.lookahead` (UCS, ADR-0030; Phase 3). */
 interface LookaheadPlanEntry {
   readonly title: string;
@@ -185,6 +239,93 @@ function mccrTextSlot(
   };
 }
 
+/** Map an MCCR element type to a Cognitive Scene actor kind (CSE-012 §3.2). */
+function actorKindFor(type: string): string {
+  switch (type) {
+    case "key_formula":
+      return "equation";
+    case "diagram":
+      return "diagram";
+    case "table":
+      return "table";
+    case "image":
+      return "image";
+    case "source_viewport":
+      return "citation";
+    default:
+      return "text-anchor";
+  }
+}
+
+/**
+ * Derive the Scene's actors from a composed frame's MCCR (CSE M7 T1, CSE-012 §3.2): each present
+ * MCCR element becomes a cognitive actor, reusing its element id as `content_ref` (the Scene
+ * composes existing content, it invents no storage). The core concept is the protagonist; the
+ * source_viewport carries the evidence provenance channel. Deterministic given the id stream.
+ */
+function actorsFromMccr(
+  mccr: Record<string, unknown>,
+  idGenerator: IdGenerator,
+): Array<Record<string, unknown>> {
+  const actors: Array<Record<string, unknown>> = [];
+  for (const type of MCCR_ELEMENT_TYPES) {
+    const element = mccr[type] as Record<string, unknown> | undefined;
+    if (!element) continue;
+    const elementId =
+      typeof element["element_id"] === "string" ? element["element_id"] : `el-${type}`;
+    actors.push({
+      actor_id: `act-${idGenerator.hex(8)}`,
+      kind: actorKindFor(type),
+      content_ref: elementId,
+      role:
+        type === "core_concept"
+          ? "protagonist"
+          : type === "source_viewport"
+            ? "evidence"
+            : "support",
+      provenance_class: type === "source_viewport" ? "evidence" : "inference",
+      can_evolve: true,
+    });
+  }
+  return actors;
+}
+
+/**
+ * Inject the frame's `source_viewport` MCCR element (CSE M5, CSE-008 §3.2): the primary resolved
+ * evidence anchor on the board, in its own provenance channel. Non-destructive — the composer's
+ * distilled elements are untouched; an existing `source_viewport` (unexpected) is preserved.
+ */
+function withSourceViewportElement(
+  mccr: Record<string, unknown>,
+  conceptId: string,
+  anchor: SourceEvidenceAnchorView,
+): Record<string, unknown> {
+  if (mccr["source_viewport"]) return mccr;
+  return {
+    ...mccr,
+    source_viewport: {
+      element_id: "el-source_viewport",
+      type: "source_viewport",
+      slot: "source_viewport",
+      reveal_order: MCCR_ELEMENT_TYPES.length, // revealed last — evidence after the distillation
+      concept_id: conceptId,
+      content: {
+        kind: "source_viewport",
+        source_version_id: anchor.source_version_id,
+        anchor_ref: anchor.anchor_id,
+        quote: anchor.region.quote,
+        region: {
+          path: anchor.region.path,
+          page: anchor.region.page,
+          bbox: anchor.region.bbox,
+          char_start: anchor.region.char_start,
+          char_end: anchor.region.char_end,
+        },
+      },
+    },
+  };
+}
+
 export interface SurfaceSessionDeps {
   readonly session: OnboardingSession;
   readonly world: WorldStateGraph;
@@ -214,6 +355,13 @@ export interface SurfaceSessionDeps {
    */
   readonly researchDispatcher?: GovernedDispatcher;
   /**
+   * Optional grounded frontier provider (CSE M9 LKS T1, ADR-0045). When present, research-readiness
+   * surfaces the REAL web-grounded frontier (ADR-0043) instead of the ungrounded `researchDispatcher`
+   * breadcrumb — grounded-or-deferred, never fabricated. Takes precedence over `researchDispatcher`;
+   * absent ⇒ the legacy ungrounded path runs (CLI/tests stay byte-identical).
+   */
+  readonly frontierProvider?: SurfaceFrontierProvider;
+  /**
    * Optional motivation dispatcher (S3.3). When present, dispatches `agent.motivation` when the
    * learner barely passed mastery (0.6 ≤ confidence < 0.75); emits `surface.motivation.surfaced`
    * and contributes a motivation block. Absent ⇒ event still emitted but no block follows.
@@ -240,12 +388,48 @@ export interface SurfaceSessionDeps {
    */
   readonly framePlannerDispatcher?: GovernedDispatcher;
   /**
+   * Optional Representation Intelligence dispatcher (RIA; CSE-018, ADR-0058, R4-model). When present,
+   * the model assigns each element's epistemic role + hierarchy (and exclusions/adaptivity); absent
+   * or degraded ⇒ the deterministic `planRepresentation` floor (parity — never regresses a frame).
+   */
+  readonly representationDispatcher?: GovernedDispatcher;
+  /**
+   * Optional learner-expertise signal (CSE-018 Law 8, R4e). When present, the RepresentationPlan
+   * adapts to it — an expert sees redundant scaffolding (worked examples, analogies) recede to
+   * residue (expertise reversal). Absent ⇒ the un-adapted floor (parity; `adaptivity: null`). Same
+   * inversion-of-control pattern as `getDepthBias`: the callback closes over live learner state, no
+   * upward dependency. Live derivation from mastery history is the intended hookup (deferred).
+   */
+  readonly getExpertise?: () => ExpertiseLevel;
+  /**
    * Optional Image Agent dispatcher (UCS, ADR-0030; Phase 4). When present, the image-as-cognition
    * decision is owned by a dedicated governed agent (decide/prompt/refine) that produces the prompt
    * plus an explanatory caption + callout labels, replacing the composer's inline `image_plan` on the
    * frame path. Absent ⇒ the composer's inline image decision drives generation (Phase 1–3 behaviour).
    */
   readonly imagePlannerDispatcher?: GovernedDispatcher;
+  /**
+   * Optional Grader dispatcher (F14): when present, `submitAnswer` grades a learner's actual answer to
+   * a practice problem into a genuine, evidence-bearing depth-gate — mastery earned from real learner
+   * evidence, never fabricated. Absent ⇒ the answer is recorded but the honest gate degrades to ungraded.
+   */
+  readonly assessmentDispatcher?: GovernedDispatcher;
+  /**
+   * Optional source-evidence seam (CSE M5, CSE-008): resolved anchors for a concept across the
+   * surface's attached Canonical Source Environments. When present, composed frames carry a
+   * `source_viewport` MCCR element and the session plans/emits the `surface.source.*` projection
+   * (viewport plan, semantic highlights, attention contract) as a composer role. Absent ⇒ frames
+   * compose exactly as before — no source projection (honest absence, F16 §12 graceful fallback).
+   */
+  readonly sourceEvidence?: SourceEvidenceProvider;
+  /**
+   * Enable the Cognitive Theater (CSE M7 T1, ADR-0033/0038): after each composed frame the
+   * Director (an authored pedagogy FSM — deterministic) issues a directive naming the cognitive
+   * state to enter and at what pace, the behavioral affect channel records a signal, and the
+   * frame is wrapped as a living Scene (actors + lighting). All additive; absent ⇒ frames compose
+   * byte-identically to today (ADR-0033 L2). The gateway sets this; the CLI/tests leave it off.
+   */
+  readonly theater?: boolean;
   /**
    * Look-ahead budget (UCS, ADR-0030; Phase 3): number of discardable speculative frames the planner
    * may pre-compose ahead of the learner. Default 0 (off) — deterministic, no speculation.
@@ -306,6 +490,12 @@ function sessionError(message: string, details?: Record<string, unknown>): CosEr
 // Interaction protocol (S1.3, ADR-0024)
 // ---------------------------------------------------------------------------
 
+/**
+ * The learner interaction vocabulary. The original ADR-0024 seven plus the CSE-014 grammar
+ * (CSE M8 T2): Mark-class acts evolve the Scene in place; Ask-class re-frame cognition. Kept as a
+ * broad string union so the grammar registry (interaction.ts) stays the single source of truth for
+ * classification/routing — an unrecognized kind interprets to a safe `ask-why` (CSE-014 §7).
+ */
 export type SurfaceInteractionKind =
   | "interrupt"
   | "jump"
@@ -313,7 +503,19 @@ export type SurfaceInteractionKind =
   | "challenge"
   | "request_depth"
   | "request_simplify"
-  | "request_example";
+  | "request_example"
+  // CSE-014 grammar (M8 T2) — Mark class (evolve the Scene in place):
+  | "annotate"
+  | "circle"
+  | "highlight"
+  | "pin"
+  // Ask class:
+  | "ask_why"
+  | "ask_again"
+  | "ask_simpler"
+  | "ask_deeper"
+  | "ask_example"
+  | "define";
 
 export interface SurfaceInteractionInput {
   readonly kind: SurfaceInteractionKind;
@@ -325,7 +527,13 @@ export interface SurfaceInteractionInput {
 
 export interface SurfaceInteractionResult {
   readonly interaction_id: string;
-  readonly effect: "cancelled" | "refocused" | "dispatched" | "reprojected";
+  readonly effect:
+    | "cancelled"
+    | "refocused"
+    | "dispatched"
+    | "reprojected"
+    | "scene-evolved"
+    | "annotated";
 }
 
 // ---------------------------------------------------------------------------
@@ -358,6 +566,10 @@ export class SurfaceSession {
     entries: LookaheadPlanEntry[];
     plannerPacketId: string | null;
   } | null = null;
+  /** One ask at a time — a second ask mid-flight is refused, never a silent state reset. */
+  private askInFlight = false;
+  /** Detached background cognition (speculative pre-composition) — settled at next ask / close. */
+  private backgroundWork: Promise<void> | null = null;
 
   constructor(private readonly deps: SurfaceSessionDeps) {
     this.world = deps.world;
@@ -458,13 +670,101 @@ export class SurfaceSession {
   }
 
   /**
+   * Bind a Canonical Source Environment to this session (CSE M5, CSE-008 §3.1): emits
+   * `surface.source.attached`. Bytes never enter the event — clients fetch canonical content
+   * out-of-band via the gateway source-content route (`content_ref`) and may prove fidelity by
+   * hashing it against the version's content hash (ADR-0036). Idempotent at the fold (upsert by
+   * `source_version_id`), so re-attachment is safe.
+   */
+  async attachSource(input: {
+    readonly sourceId: string;
+    readonly sourceVersionId: string;
+    readonly modality: string;
+    readonly title: string;
+    readonly layersAvailable: readonly string[];
+    readonly contentRef: string;
+  }): Promise<Result<void, CosError>> {
+    if (!this.surfaceId) return err(sessionError("surface session not started"));
+    if (this.closed) return err(sessionError("surface session is closed"));
+    await this.emit("surface.source.attached", {
+      surface_id: this.surfaceId,
+      source_id: input.sourceId,
+      source_version_id: input.sourceVersionId,
+      modality: input.modality,
+      title: input.title,
+      layers_available: input.layersAvailable,
+      content_ref: input.contentRef,
+    });
+    return ok(undefined);
+  }
+
+  /**
+   * Project a returning learner's episode resume card (CSE M6, CSE-005 §4; ADR-0037): emits
+   * `surface.resume.projected`, folded latest-wins into `SurfaceState.resume_card`. The caller
+   * (the gateway host) derives the card ONLY from the intelligence plane's latest episode +
+   * understanding-delta artifacts — this method never sees raw history, and a learner with no
+   * artifacts gets no card (honest absence, never a fabricated welcome-back).
+   */
+  async projectResumeCard(card: {
+    readonly episodeRef: string;
+    readonly deltaRef: string | null;
+    readonly summary: string;
+    readonly lastConceptRef: string | null;
+    readonly conceptsTouched: readonly string[];
+    readonly openConfusions: readonly { description: string; concept_ref: string }[];
+    readonly daysSince: number;
+  }): Promise<Result<void, CosError>> {
+    if (!this.surfaceId) return err(sessionError("surface session not started"));
+    if (this.closed) return err(sessionError("surface session is closed"));
+    await this.emit("surface.resume.projected", {
+      surface_id: this.surfaceId,
+      episode_ref: card.episodeRef,
+      delta_ref: card.deltaRef,
+      summary: card.summary,
+      last_concept_ref: card.lastConceptRef,
+      concepts_touched: card.conceptsTouched,
+      open_confusions: card.openConfusions,
+      days_since: card.daysSince,
+    });
+    return ok(undefined);
+  }
+
+  /**
    * One ask cycle: living timeline → governed learning cycle (supervisor routing, agent
    * dispatches, mastery) → cognition blocks → timeline re-projection.
+   *
+   * Concurrency law: ONE ask at a time. A second ask mid-flight is refused (never silently resets
+   * session state under the first — review §25); the learner interrupts via `interact` instead.
+   * Any detached background cognition from the previous ask (speculation) settles first.
    */
   async ask(input: SurfaceAskInput): Promise<Result<SurfaceAskResult, CosError>> {
     if (!this.surfaceId) return err(sessionError("surface session not started"));
     if (this.closed) return err(sessionError("surface session is closed"));
-    const surfaceId = this.surfaceId;
+    if (this.askInFlight) {
+      return err(sessionError("an ask is already in flight — interrupt it or wait"));
+    }
+    this.askInFlight = true;
+    try {
+      await this.settle();
+      return await this.runAsk(input);
+    } finally {
+      this.askInFlight = false;
+    }
+  }
+
+  /**
+   * Await any detached background cognition (speculative pre-composition runs OFF the ask's
+   * critical path — review §22). Called automatically at the next ask and at close; tests call it
+   * for quiescence before asserting on the event log.
+   */
+  async settle(): Promise<void> {
+    const work = this.backgroundWork;
+    this.backgroundWork = null;
+    if (work) await work;
+  }
+
+  private async runAsk(input: SurfaceAskInput): Promise<Result<SurfaceAskResult, CosError>> {
+    const surfaceId = this.surfaceId as string;
     const learner = this.deps.session;
     // A fresh ask clears any prior interrupt and is the reshaping baseline (S1.3).
     this.interrupted = false;
@@ -490,7 +790,13 @@ export class SurfaceSession {
     });
     if (!built.ok) return built;
 
-    // 2. The governed learning cycle on the existing substrate.
+    // 2. The governed learning cycle on the existing substrate. The learner sees each phase of the
+    //    multi-step pipeline as it happens (surface.ask.progress — an ask is never silent).
+    await this.emitAskProgress(
+      surfaceId,
+      "interpreting",
+      input.concepts.find((c) => c.id === input.focusConceptId)?.title ?? input.focusConceptId,
+    );
     const loopResult = await this.deps.loop.run({
       session: learner,
       pathId: input.pathId,
@@ -698,6 +1004,10 @@ export class SurfaceSession {
       // sees the problem as a viewport-complete state, voiced separately. The block remains the
       // canonical/observable backing; the frame is the progressive on-screen state.
       if (onPlannerFramePath) {
+        // Put the Coach's REAL generated problem on the board (N3), not `input.practicePrompt` (the
+        // meta-instruction that produced it). The check segment `pause_after` holds so the frame
+        // gives the learner time to work it before the lesson moves on.
+        const practiceProblem = dispatchText(cycle.practice) || input.practicePrompt;
         await this.composeDeterministicFrame({
           surfaceId,
           conceptId: input.focusConceptId,
@@ -708,19 +1018,21 @@ export class SurfaceSession {
           agentId: "practice",
           role: "coach",
           reason: "practice rendered as a Cognitive Frame",
+          kind: "practice",
           mccr: {
             core_concept: mccrTextSlot(
               "core_concept",
               `Practice — ${focusTitle}`,
               input.focusConceptId,
             ),
-            key_example: mccrTextSlot("key_example", input.practicePrompt, input.focusConceptId),
+            key_example: mccrTextSlot("key_example", practiceProblem, input.focusConceptId),
           },
           segments: [
             {
               text: "Now make it your own — work through this before we move on.",
               anchor_ref: "key_example",
               intent: "check",
+              pause_after: true,
             },
           ],
         });
@@ -795,33 +1107,36 @@ export class SurfaceSession {
         state: "contributing",
         block_id: assessmentBlock.value.block_id,
       });
-      // UCS (ADR-0030; Phase 2): the mastery checkpoint closes the lesson as its own Cognitive Frame.
+      // UCS (ADR-0030; Phase 2): the checkpoint closes the lesson as its own Cognitive Frame. It is
+      // labeled HONESTLY (review N2): only a real five-test depth gate is called "mastery verified";
+      // absent a graded gate this is a readiness self-check ("taught — practice to verify"), never a
+      // fabricated claim that the learner passed tests they were never given.
       if (onPlannerFramePath) {
-        const passedSummary = gatePassed
-          ? `Mastery verified — confidence ${Math.round(input.mastery.confidence * 100)}%.`
-          : "Not yet — let's reinforce the gaps and return.";
-        const cueText = depthGate
-          ? `${depthGate.passedCount}/${depthGate.totalCount} depth checks passed.`
-          : passedSummary;
+        const summary = !gatePassed
+          ? "Not yet — let's reinforce the gaps and return."
+          : depthGate
+            ? `Mastery verified — ${depthGate.passedCount}/${depthGate.totalCount} depth checks passed.`
+            : "Concept taught — work the practice to verify your mastery.";
+        const frameTitle =
+          depthGate || !gatePassed
+            ? `Checkpoint — ${focusTitle}`
+            : `Ready to practice — ${focusTitle}`;
         await this.composeDeterministicFrame({
           surfaceId,
           conceptId: input.focusConceptId,
           conceptNodeId,
-          frameTitle: `Checkpoint — ${focusTitle}`,
+          frameTitle,
           archetype: "concept-first",
           producerCid: input.mastery.assessorCid,
           agentId: "assessment",
           role: "assessor",
           reason: "mastery checkpoint rendered as a Cognitive Frame",
+          kind: "checkpoint",
           mccr: {
-            core_concept: mccrTextSlot(
-              "core_concept",
-              `Checkpoint — ${focusTitle}`,
-              input.focusConceptId,
-            ),
-            memory_cue: mccrTextSlot("memory_cue", cueText, input.focusConceptId),
+            core_concept: mccrTextSlot("core_concept", frameTitle, input.focusConceptId),
+            memory_cue: mccrTextSlot("memory_cue", summary, input.focusConceptId),
           },
-          segments: [{ text: passedSummary, anchor_ref: "memory_cue", intent: "reinforce" }],
+          segments: [{ text: summary, anchor_ref: "memory_cue", intent: "reinforce" }],
         });
       }
     }
@@ -873,10 +1188,16 @@ export class SurfaceSession {
     // 11. UCS (ADR-0030; Phase 3) — Governed look-ahead: after clean forward progress (mastery ran,
     // no confusion descent), pre-compose the likely NEXT frame within the budget. Recorded but never
     // surfaced until a future ask promotes it. A descent means the learner struggled — no speculation.
+    // DETACHED (review §22): speculation's cost is never paid inside the learner's ask latency —
+    // the response returns now, the speculative events stream in behind it, and `settle()` (next
+    // ask / close / tests) awaits completion.
     if (onPlannerFramePath && !descentInfo && cycle.mastery) {
-      await this.prepareLookahead({ surfaceId, input });
+      this.backgroundWork = this.prepareLookahead({ surfaceId, input })
+        .catch(() => undefined)
+        .then(() => undefined);
     }
 
+    await this.emitAskProgress(surfaceId, "ready", focusTitle);
     return ok({
       routing: cycle.routing,
       blocks,
@@ -900,10 +1221,13 @@ export class SurfaceSession {
   }
 
   /**
-   * Plan a concept's Cognitive Frames (UCS, ADR-0030; Phase 2), then compose each in sequence. The
-   * Frame Planner decomposes the concept into a progressive series of viewport-complete frames
+   * Plan a concept's Cognitive Frames (UCS, ADR-0030; Phase 2), then compose them as a PIPELINE.
+   * The Frame Planner decomposes the concept into a progressive series of viewport-complete frames
    * (intuition → definition → example → connection); the Surface Composer distills each one's MCCR +
-   * narration. A blocked planner dispatch degrades to a single default frame (teaching still happens).
+   * narration. Frame N+1's composition dispatch starts BEFORE frame N is voiced (one-ahead — the
+   * learner listens while the next board forms; review §22 "the learner should almost never wait"),
+   * while frames still SURFACE strictly in order. A blocked planner dispatch degrades to a single
+   * default frame (teaching still happens). The learner's interrupt is honored between frames.
    */
   private async planAndComposeFrames(args: {
     surfaceId: string;
@@ -915,16 +1239,31 @@ export class SurfaceSession {
     // Phase 3): a bet on THIS concept is promoted (its pre-composed opening frame surfaces + voices,
     // skipping recompute); every other pending bet is invalidated. Never surfaces until promoted.
     const promoted = await this.reconcileSpeculations(args);
+    await this.emitAskProgress(args.surfaceId, "planning", args.focusTitle);
     const { plannerPacketId, frames } = await this.dispatchFramePlan(args);
     // If a speculative opening frame was promoted for this concept, it already stands as frame 1 —
     // compose only the remaining plan entries so the sequence never double-opens.
     const toCompose = promoted ? frames.slice(1) : frames;
-    for (const entry of toCompose) {
-      const composed = await this.composeFrameViaComposer({
-        ...args,
-        plan: { entry, plannerPacketId },
-      });
-      if (!composed.ok) return composed;
+    let next: Promise<PreparedFrame | null> | null =
+      toCompose.length > 0
+        ? this.prepareFrameEntry({ ...args, plan: { entry: toCompose[0]!, plannerPacketId } })
+        : null;
+    for (let i = 0; next !== null; i++) {
+      const prepared = await next;
+      // One-ahead: the next frame's composition starts now, overlapping this frame's voicing.
+      next =
+        i + 1 < toCompose.length && !this.interrupted
+          ? this.prepareFrameEntry({
+              ...args,
+              plan: { entry: toCompose[i + 1]!, plannerPacketId },
+            })
+          : null;
+      if (prepared) await this.surfaceFrameEntry({ ...args, prepared });
+      if (this.interrupted) {
+        // Drain the in-flight composition (its events must land coherently), then stop surfacing.
+        if (next) await next;
+        break;
+      }
     }
     return ok(undefined);
   }
@@ -973,6 +1312,10 @@ export class SurfaceSession {
     const fallback = { plannerPacketId: null, frames: [defaultPlanEntry(args.focusTitle)] };
     if (!dispatcher) return fallback;
 
+    const startedMs = this.clock.nowMs();
+    // R2a (ADR-0057 D1): when a source is bound, feed the concept's anchored passages INTO the plan
+    // so the planner decomposes the DOCUMENT, not just the title. Empty ⇒ goal-mode (unchanged).
+    const sourceExcerpts = await this.sourceExcerptsFor(args.input.focusConceptId, args.focusTitle);
     const dispatched = await dispatcher.dispatch({
       session: this.deps.session,
       targetAgentId: "frameplanner",
@@ -982,12 +1325,14 @@ export class SurfaceSession {
         concept_id: args.input.focusConceptId,
         concept_title: args.focusTitle,
         goal: args.input.goal,
+        ...(sourceExcerpts.length > 0 ? { source_excerpts: sourceExcerpts } : {}),
         ...(args.input.explanationPrompt ? { prompt: args.input.explanationPrompt } : {}),
       },
     });
     if (!dispatched.ok) return fallback;
     const response = dispatched.value.responsePackets[0];
     const content = (response?.content ?? {}) as Record<string, unknown>;
+    await this.emitDegradedIfFallback(args.surfaceId, "frameplanner", content);
     const frames = readPlanEntries(content["frame_plan"]);
     if (frames.length === 0) return fallback;
 
@@ -995,9 +1340,18 @@ export class SurfaceSession {
     const lookahead = readLookaheadEntries(content["frame_plan"]);
     this.pendingLookahead = { entries: lookahead, plannerPacketId: response?.packet_id ?? null };
 
-    // Observatory (ADR-0029): the planner's decomposition reasoning is inspectable.
+    // Observatory (ADR-0029): the planner's decomposition reasoning + real latency are inspectable.
     const trace = dispatched.value.emissions.trace;
     const plannerCid = response?.source_cid ?? "agent.frameplanner";
+    await this.emitFrameWorkTiming({
+      surfaceId: args.surfaceId,
+      agentId: "frameplanner",
+      agentCid: plannerCid,
+      workId: dispatched.value.workItem.work_id,
+      packetId: response?.packet_id ?? null,
+      workType: dispatched.value.workItem.work_type,
+      startedMs,
+    });
     if (trace) {
       await this.emit("surface.agent.reasoning.summary", {
         surface_id: args.surfaceId,
@@ -1022,6 +1376,8 @@ export class SurfaceSession {
    * steered to the frame's `sub_focus` so each frame distills DIFFERENT anchors. Generates the planned
    * image inline (when it helps); then emits composed → image.decided → script.produced → reasoning →
    * voiced narration. A blocked/empty dispatch degrades observably (no composed frame; SRF-001 §10).
+   * Split into prepare (reserve + compose) and surface (land + voice) so the planner path can
+   * pipeline them — frame N+1 composing while frame N is voiced.
    */
   private async composeFrameViaComposer(args: {
     surfaceId: string;
@@ -1030,9 +1386,26 @@ export class SurfaceSession {
     conceptNodeId: string;
     plan: { entry: FramePlanEntry; plannerPacketId: string | null } | null;
   }): Promise<Result<void, CosError>> {
+    const prepared = await this.prepareFrameEntry(args);
+    if (prepared) await this.surfaceFrameEntry({ ...args, prepared });
+    return ok(undefined);
+  }
+
+  /**
+   * Prepare one frame: reserve its layout (planner path), dispatch the composer, return the
+   * artifacts UNSURFACED. Ordinals are allocated here, in call order, so pipelined preparation
+   * never reorders the sequence. Returns null on a blocked/empty dispatch (observable degradation).
+   */
+  private async prepareFrameEntry(args: {
+    surfaceId: string;
+    input: SurfaceAskInput;
+    focusTitle: string;
+    conceptNodeId: string;
+    plan: { entry: FramePlanEntry; plannerPacketId: string | null } | null;
+  }): Promise<PreparedFrame | null> {
     const { surfaceId, input, focusTitle, conceptNodeId, plan } = args;
     const dispatcher = this.deps.composerDispatcher;
-    if (!dispatcher) return ok(undefined);
+    if (!dispatcher) return null;
 
     const frameId = `cfr-${this.idGenerator.hex(12)}`;
     const ordinal = this.nextFrameOrdinal();
@@ -1046,6 +1419,7 @@ export class SurfaceSession {
         ordinal,
         concept_id: input.focusConceptId,
         title: frameTitle,
+        kind: "teach",
         mccr_layout: this.buildFrameLayout(plan.entry.archetype, plan.entry.slots),
         planner_packet_id: plan.plannerPacketId,
         producer_cid: "agent.frameplanner",
@@ -1053,6 +1427,7 @@ export class SurfaceSession {
         world_state_nodes: [conceptNodeId],
       });
     }
+    await this.emitAskProgress(surfaceId, "composing", frameTitle);
 
     const artifacts = await this.dispatchComposerForConcept({
       surfaceId,
@@ -1065,14 +1440,26 @@ export class SurfaceSession {
     });
     // Degrade observably: a blocked dispatch (untrusted learner / scheduler rejection) yields no
     // composed frame, exactly as the legacy path yields no explanation block (SRF-001 §10).
-    if (!artifacts) return ok(undefined);
+    if (!artifacts) return null;
+    return { frameId, ordinal, frameTitle, artifacts };
+  }
 
+  /** Surface a prepared frame: land its MCCR + records, then voice its narration script. */
+  private async surfaceFrameEntry(args: {
+    surfaceId: string;
+    input: SurfaceAskInput;
+    conceptNodeId: string;
+    prepared: PreparedFrame;
+  }): Promise<void> {
+    const { surfaceId, input, conceptNodeId, prepared } = args;
+    const { artifacts } = prepared;
+    await this.emitAskProgress(surfaceId, "voicing", prepared.frameTitle);
     await this.emitFrameArtifacts({
       surfaceId,
-      frameId,
-      ordinal,
+      frameId: prepared.frameId,
+      ordinal: prepared.ordinal,
       conceptId: input.focusConceptId,
-      frameTitle,
+      frameTitle: prepared.frameTitle,
       conceptNodeId,
       mccr: artifacts.mccr,
       scriptSegments: artifacts.scriptSegments,
@@ -1087,7 +1474,15 @@ export class SurfaceSession {
       role: "explainer",
       reason: "surface composer distilled the focus concept into a Cognitive Frame",
     });
-    return ok(undefined);
+  }
+
+  /** The learner-visible phase of an in-flight ask (surface.ask.progress) — an ask is never silent. */
+  private async emitAskProgress(surfaceId: string, phase: string, detail?: string): Promise<void> {
+    await this.emit("surface.ask.progress", {
+      surface_id: surfaceId,
+      phase,
+      detail: detail ?? null,
+    });
   }
 
   /**
@@ -1121,6 +1516,10 @@ export class SurfaceSession {
     if (!dispatcher) return null;
     const { surfaceId, conceptId, conceptTitle } = args;
 
+    const startedMs = this.clock.nowMs();
+    // R2a (ADR-0057 D1): feed the concept's anchored passages INTO composition so the board + voice
+    // are grounded in the document (the composer quotes it, never invents beyond it). Empty ⇒ goal-mode.
+    const sourceExcerpts = await this.sourceExcerptsFor(conceptId, conceptTitle);
     const dispatched = await dispatcher.dispatch({
       session: this.deps.session,
       targetAgentId: "composer",
@@ -1130,6 +1529,7 @@ export class SurfaceSession {
         concept_id: conceptId,
         concept_title: conceptTitle,
         goal: args.goal,
+        ...(sourceExcerpts.length > 0 ? { source_excerpts: sourceExcerpts } : {}),
         ...(args.subFocus ? { sub_focus: args.subFocus } : {}),
         ...(args.frameFocus ? { frame_focus: args.frameFocus } : {}),
         ...(args.explanationPrompt ? { prompt: args.explanationPrompt } : {}),
@@ -1138,6 +1538,7 @@ export class SurfaceSession {
     if (!dispatched.ok) return null;
     const response = dispatched.value.responsePackets[0];
     const content = (response?.content ?? {}) as Record<string, unknown>;
+    await this.emitDegradedIfFallback(surfaceId, "composer", content);
     const mccr = content["mccr"] as Record<string, unknown> | undefined;
     if (!mccr || typeof mccr !== "object") return null;
 
@@ -1163,6 +1564,7 @@ export class SurfaceSession {
     // as the `image` element (in the concept's region), with its caption + labels. Pre-warming a
     // speculative frame's image here means promotion is a true skip-recompute.
     let mccrForEvent: Record<string, unknown> = mccr;
+    let imageRendered = false;
     if (plan.helps && plan.prompt && this.deps.media) {
       const ref = await this.deps.media.generate({
         request_id: `med-${this.idGenerator.hex(8)}`,
@@ -1173,6 +1575,7 @@ export class SurfaceSession {
         concept_ids: [conceptId],
       });
       if (ref) {
+        imageRendered = true;
         await this.emit("surface.visual.generated", {
           surface_id: surfaceId,
           block_id: null,
@@ -1200,20 +1603,41 @@ export class SurfaceSession {
               prompt: plan.prompt,
               caption: plan.caption,
               labels: plan.labels,
+              // R4e (ADR-0058; CSE-018 Law 9): the image carries its own recorded rationale onto
+              // the board — an image on the surface is never mute decoration; the learner can see
+              // WHY it earns its place (F16 causal transparency).
+              rationale: plan.rationale || null,
             },
           },
         };
       }
     }
 
+    // Record-honest image decision (N10): `surface.image.decided` (folded from this) must reflect what
+    // actually reached the board, not merely the agent's intent. If an image was planned but never
+    // rendered (no generator wired, or generation failed), record helps:false with a reason — the
+    // canonical record never claims an image the learner cannot see.
+    const decisionDegraded = plan.helps && !imageRendered;
+    const effectiveHelps = plan.helps && imageRendered;
+    await this.emitFrameWorkTiming({
+      surfaceId,
+      agentId: "composer",
+      agentCid: composerCid,
+      workId: dispatched.value.workItem.work_id,
+      packetId: response?.packet_id ?? null,
+      workType: dispatched.value.workItem.work_type,
+      startedMs,
+    });
     return {
       mccr: mccrForEvent,
       scriptSegments,
       imagePlan: {
-        helps: plan.helps,
-        modality: plan.modality,
+        helps: effectiveHelps,
+        modality: effectiveHelps ? plan.modality : "none",
         prompt: plan.prompt,
-        rationale: plan.rationale,
+        rationale: decisionDegraded
+          ? `${plan.rationale} (image planned but not rendered — no generator or generation failed)`
+          : plan.rationale,
       },
       composerCid,
       composerPacketId: response?.packet_id ?? null,
@@ -1268,6 +1692,7 @@ export class SurfaceSession {
   } | null> {
     const dispatcher = this.deps.imagePlannerDispatcher;
     if (!dispatcher) return null;
+    const startedMs = this.clock.nowMs();
     const dispatched = await dispatcher.dispatch({
       session: this.deps.session,
       targetAgentId: "imageplanner",
@@ -1284,11 +1709,21 @@ export class SurfaceSession {
     if (!dispatched.ok) return null;
     const response = dispatched.value.responsePackets[0];
     const content = (response?.content ?? {}) as Record<string, unknown>;
+    await this.emitDegradedIfFallback(args.surfaceId, "imageplanner", content);
     const raw = content["image_plan"] as Record<string, unknown> | undefined;
     if (!raw) return null;
 
-    // Observatory (ADR-0029): the image agent's decide/refine reasoning is inspectable.
+    // Observatory (ADR-0029): the image agent's decide/refine reasoning + real latency are inspectable.
     const trace = dispatched.value.emissions.trace;
+    await this.emitFrameWorkTiming({
+      surfaceId: args.surfaceId,
+      agentId: "imageplanner",
+      agentCid: response?.source_cid ?? "agent.imageplanner",
+      workId: dispatched.value.workItem.work_id,
+      packetId: response?.packet_id ?? null,
+      workType: dispatched.value.workItem.work_type,
+      startedMs,
+    });
     if (trace) {
       await this.emit("surface.agent.reasoning.summary", {
         surface_id: args.surfaceId,
@@ -1336,7 +1771,9 @@ export class SurfaceSession {
     role: string;
     reason: string;
     mccr: Record<string, unknown>;
-    segments: { text: string; anchor_ref: string | null; intent: string }[];
+    segments: { text: string; anchor_ref: string | null; intent: string; pause_after?: boolean }[];
+    /** Pedagogical role (ADR-0055 D6): practice/assessment/checkpoint frames set this. */
+    kind?: FrameKind;
   }): Promise<void> {
     const frameId = `cfr-${this.idGenerator.hex(12)}`;
     const ordinal = this.nextFrameOrdinal();
@@ -1346,6 +1783,7 @@ export class SurfaceSession {
       ordinal,
       concept_id: args.conceptId,
       title: args.frameTitle,
+      kind: args.kind ?? "teach",
       mccr_layout: this.buildFrameLayout(args.archetype, Object.keys(args.mccr)),
       planner_packet_id: null,
       producer_cid: args.producerCid,
@@ -1360,7 +1798,7 @@ export class SurfaceSession {
       frameTitle: args.frameTitle,
       conceptNodeId: args.conceptNodeId,
       mccr: args.mccr,
-      scriptSegments: args.segments.map((s) => ({ ...s, pause_after: false })),
+      scriptSegments: args.segments.map((s) => ({ ...s, pause_after: s.pause_after ?? false })),
       imagePlan: { helps: false, modality: "none", prompt: null, rationale: "deterministic frame" },
       composerCid: args.producerCid,
       composerPacketId: null,
@@ -1371,6 +1809,7 @@ export class SurfaceSession {
       agentId: args.agentId,
       role: args.role,
       reason: args.reason,
+      ...(args.kind ? { kind: args.kind } : {}),
     });
   }
 
@@ -1399,8 +1838,20 @@ export class SurfaceSession {
     agentId: string;
     role: string;
     reason: string;
+    /** Pedagogical role of this frame (ADR-0055 D6); defaults to `teach`. */
+    kind?: FrameKind;
   }): Promise<void> {
-    const { surfaceId, frameId, mccr } = args;
+    const { surfaceId, frameId } = args;
+
+    // CSE M5 (CSE-008 §3.2): resolved source evidence for this concept joins the board as a
+    // `source_viewport` element — the source's own words in the evidence provenance channel.
+    // Best-effort: a provider failure degrades to a frame without source projection, never a
+    // failed composition. Injected BEFORE the composed emit so the fold carries it canonically.
+    const evidence = await this.sourceEvidenceFor(args.conceptId, args.frameTitle);
+    const mccr =
+      evidence.length > 0
+        ? withSourceViewportElement(args.mccr, args.conceptId, evidence[0]!)
+        : args.mccr;
 
     // The frame's MCCR lands (the only thing on the board), with multi-producer provenance.
     await this.emit("surface.frame.composed", {
@@ -1409,6 +1860,7 @@ export class SurfaceSession {
       ordinal: args.ordinal,
       concept_id: args.conceptId,
       title: args.frameTitle,
+      kind: args.kind ?? "teach",
       mccr,
       confidence: args.confidence,
       reasoning: args.reasoning,
@@ -1418,15 +1870,89 @@ export class SurfaceSession {
       world_state_nodes: [args.conceptNodeId],
     });
 
+    // R4a (ADR-0058): the RIA's RepresentationPlan — each element's hierarchy + epistemic role, over
+    // the closed MCCR vocabulary. Deterministic parity floor (metadata over the same elements), so it
+    // never changes the render; R4b consumes the roles, R4d makes it model-backed. Emitted after the
+    // composed frame so the plan references existing element ids.
+    const planElements = Object.values(mccr)
+      .filter(
+        (v): v is { element_id: string; type: string } =>
+          !!v &&
+          typeof v === "object" &&
+          typeof (v as { element_id?: unknown }).element_id === "string" &&
+          typeof (v as { type?: unknown }).type === "string",
+      )
+      .map((v) => ({ element_id: v.element_id, type: v.type }));
+    if (planElements.length > 0) {
+      const plan = await this.planRepresentationFor(frameId, args.conceptId, planElements);
+      await this.emit("surface.representation.planned", {
+        surface_id: surfaceId,
+        frame_id: frameId,
+        composition: plan.composition,
+        exclusions: plan.exclusions,
+        density: plan.density,
+        plan_kind: plan.plan_kind,
+        adaptivity: plan.adaptivity,
+      });
+    }
+
     // The image decision + the SEPARATE narration script are recorded (the spoken teaching, off the
     // board). Shared with Phase 3 speculation — a prepared frame records these too, but is not voiced.
-    await this.recordFrameArtifacts({
+    const script = await this.recordFrameArtifacts({
       surfaceId,
       frameId,
       mccr,
       scriptSegments: args.scriptSegments,
       imagePlan: args.imagePlan,
     });
+
+    // Source projection as a composer role (CSE M5; SRF-002 law 12): the viewport plan, semantic
+    // highlights, and the attention contract land AFTER the composed frame + recorded script, so
+    // every binding references existing segment ids. Deterministic given anchors + the id stream.
+    if (evidence.length > 0) {
+      const planned = planSourceProjection({
+        frameId,
+        scriptId: script.scriptId,
+        segmentIds: script.segmentIds,
+        // R2d (ADR-0057 D4): the segments carry text + slot so the binder is semantic + gated + typed.
+        segments: script.segments,
+        anchors: evidence,
+        hex: (bytes) => this.idGenerator.hex(bytes),
+      });
+      if (planned) {
+        await this.emit("surface.source.viewport.planned", {
+          surface_id: surfaceId,
+          ...planned.plan,
+        });
+        for (const highlight of planned.highlights) {
+          await this.emit("surface.source.highlight.applied", {
+            surface_id: surfaceId,
+            ...highlight,
+          });
+        }
+        await this.emit("surface.source.sync.bound", { surface_id: surfaceId, ...planned.sync });
+        await this.emit("surface.source.viewport.changed", {
+          surface_id: surfaceId,
+          ...planned.initialChange,
+        });
+      }
+    }
+
+    // The Cognitive Theater (CSE M7 T1, ADR-0033/0038): the Director conducts + the Scene wraps
+    // this composed frame. Emitted AFTER frame.composed + source projection (so scene actors and
+    // the directive_ref reference existing records; SRF-002 law 13), BEFORE the voiced narration.
+    if (this.deps.theater) {
+      await this.emitTheaterForFrame({
+        surfaceId,
+        frameId,
+        conceptId: args.conceptId,
+        frameTitle: args.frameTitle,
+        kind: args.kind ?? "teach",
+        // R2b (ADR-0057 D2): the focus source anchor the Director points at (null in goal-mode).
+        sourceAnchorRef: evidence[0]?.anchor_id ?? null,
+        mccr,
+      });
+    }
 
     // Observability (ADR-0029): the composer's reasoning is inspectable in the Agent Observatory.
     if (args.trace) {
@@ -1460,9 +1986,174 @@ export class SurfaceSession {
           anchor_ref: anchorRef,
           element_id: anchorRef ? this.elementIdFor(mccr, anchorRef) : null,
           intent: typeof s["intent"] === "string" ? (s["intent"] as string) : "build",
+          pause_after: s["pause_after"] === true,
         };
       }),
     });
+  }
+
+  /**
+   * The Cognitive Theater for one composed frame (CSE M7 T1; CSE-011/012, ADR-0033/0038).
+   *
+   * Reads the current folded signals, runs the behavioral affect channel + the authored Director
+   * FSM (both pure, deterministic — replay re-derives the same directive), and emits, in law-13
+   * order: `surface.affect.observed` → `surface.director.directive` → `surface.director.state.entered`
+   * → `surface.scene.opened` (with the frame's MCCR elements as actors + initial lighting) →
+   * `surface.scene.actor.entered` per actor → `surface.scene.lighting.changed`. The Director
+   * conducts, it never renders (ADR-0033 L1); the client tints the board to the target state.
+   */
+  private async emitTheaterForFrame(args: {
+    surfaceId: string;
+    frameId: string;
+    conceptId: string;
+    frameTitle: string;
+    kind: FrameKind;
+    /** The source anchor this frame teaches FROM (R2b, ADR-0057 D2); null in goal-mode. */
+    sourceAnchorRef?: string | null;
+    mccr: Record<string, unknown>;
+  }): Promise<void> {
+    const state = this.state();
+    const conceptId = args.conceptId;
+    const title =
+      state?.timeline?.nodes.find((n) => n.concept_id === conceptId)?.title ?? "this concept";
+    const lastGate = [...(state?.depth_gates ?? [])]
+      .reverse()
+      .find((g) => g.concept_id === conceptId);
+    const sub = {
+      inDescent: (state?.prerequisite_descents ?? []).some(
+        (d) => d.to_concept_id === conceptId && !d.completed,
+      ),
+      lastGatePassed: lastGate ? lastGate.passed : null,
+      mastered:
+        state?.timeline?.nodes.find((n) => n.concept_id === conceptId)?.status === "mastered",
+      framesComposed: Math.max(0, (state?.frames.length ?? 1) - 1),
+    };
+
+    // Behavioral affect first — honest absence when there is no evidence (never a guessed emotion).
+    const affect = inferAffect(sub);
+    if (affect) {
+      await this.emit("surface.affect.observed", {
+        surface_id: args.surfaceId,
+        affect_state: affect.affect_state,
+        source: "behavioral-inference",
+        signals: affect.signals,
+        confidence: affect.confidence,
+      });
+    }
+
+    // Typed frame kind drives the Director signals (ADR-0055 D6); the title is no longer consulted.
+    const signals: DirectorSignals = {
+      conceptRef: conceptId,
+      conceptTitle: title,
+      mastered: sub.mastered,
+      lastGatePassed: sub.lastGatePassed,
+      inDescent: sub.inDescent,
+      frontierSurfaced: (state?.research_frontiers ?? []).some(
+        (r) => r.concept_id === conceptId && r.surfaced,
+      ),
+      affect: affect?.affect_state ?? null,
+      framesComposed: sub.framesComposed,
+      isPractice: args.kind === "practice",
+      isAssessment: args.kind === "assessment",
+      sourceAnchorRef: args.sourceAnchorRef ?? null,
+    };
+    const directiveId = `dir-${this.idGenerator.hex(10)}`;
+    const directive = decideDirective(signals, { directiveId, hlc: "" });
+    await this.emit("surface.director.directive", {
+      surface_id: args.surfaceId,
+      directive_id: directive.directive_id,
+      scale: directive.scale,
+      target_state: directive.target_state,
+      pacing: directive.pacing,
+      intensity: directive.intensity,
+      focus: directive.focus,
+      rationale: directive.rationale,
+      considered: directive.considered,
+      evidence_refs: [`frame:${args.frameId}`],
+      confidence: directive.confidence,
+    });
+    // The learner is judged to enter the target state as this frame composes (evidence = the frame).
+    await this.emit("surface.director.state.entered", {
+      surface_id: args.surfaceId,
+      directive_id: directive.directive_id,
+      scale: directive.scale,
+      state: directive.target_state,
+      evidence_refs: [`frame:${args.frameId}`],
+    });
+
+    // R3e (ADR-0057; CSE-011 §9/§10): the attention budget — a session-time heuristic over frames
+    // composed ("start heuristic", §10). This produces the `surface.attention.budgeted` slice that
+    // was declared + folded but never emitted, so the Director's silence-on-depletion (§9) and the
+    // learner-visible budget rest on a real signal rather than an empty slot.
+    const framesSoFar = sub.framesComposed;
+    const remaining =
+      framesSoFar < 5 ? "high" : framesSoFar < 9 ? "medium" : framesSoFar < 13 ? "low" : "depleted";
+    await this.emit("surface.attention.budgeted", {
+      surface_id: args.surfaceId,
+      remaining,
+      session_minutes: Math.round(framesSoFar * 0.75),
+    });
+
+    // Wrap the frame as a living Scene: its MCCR elements become actors, the protagonist is lit.
+    const actors = actorsFromMccr(args.mccr, this.idGenerator);
+    const protagonist = actors.find((a) => a.role === "protagonist") ?? actors[0] ?? null;
+    const lighting = {
+      focus_actor_ref: protagonist?.actor_id ?? null,
+      cdl_state: directive.target_state,
+      recession: actors.filter((a) => a.actor_id !== protagonist?.actor_id).map((a) => a.actor_id),
+    };
+    const sceneId = `scn-${this.idGenerator.hex(12)}`;
+    await this.emit("surface.scene.opened", {
+      surface_id: args.surfaceId,
+      scene_id: sceneId,
+      frame_ref: args.frameId,
+      concept_ref: conceptId,
+      state: directive.target_state,
+      directive_ref: directive.directive_id,
+      actors,
+      lighting,
+    });
+    for (const actor of actors) {
+      await this.emit("surface.scene.actor.entered", {
+        surface_id: args.surfaceId,
+        scene_id: sceneId,
+        actor,
+      });
+    }
+    await this.emit("surface.scene.lighting.changed", {
+      surface_id: args.surfaceId,
+      scene_id: sceneId,
+      focus_actor_ref: lighting.focus_actor_ref,
+      cdl_state: lighting.cdl_state,
+      recession: lighting.recession,
+    });
+
+    // Cinematography (CSE M8 T2, CSE-013): the Cinematographer (a composer role) plans the scene's
+    // shots — establish on open, spotlights per narration segment (the camera follows the voice),
+    // a hold under demanding/silent pacing. Deterministic; realized client-side (ADR-0007). The
+    // recorded script is already folded (recordFrameArtifacts ran before this), so read its segments.
+    const script = (state?.narration_scripts ?? []).find((s) => s.frame_id === args.frameId);
+    const shots = planShots({
+      sceneId,
+      actors: actors.map((a) => ({
+        actor_id: a["actor_id"] as string,
+        role: a["role"] as string,
+        content_ref: a["content_ref"] as string,
+      })),
+      directive: {
+        target_state: directive.target_state,
+        intensity: directive.intensity,
+        silence: directive.pacing.silence,
+      },
+      segments: (script?.segments ?? []).map((s) => ({
+        segment_id: s.segment_id,
+        element_id: s.reveal_ids[0] ?? null,
+      })),
+      hex: (bytes) => this.idGenerator.hex(bytes),
+    });
+    for (const shot of shots) {
+      await this.emit("surface.shot.planned", { surface_id: args.surfaceId, ...shot });
+    }
   }
 
   /**
@@ -1476,7 +2167,12 @@ export class SurfaceSession {
     mccr: Record<string, unknown>;
     scriptSegments: Record<string, unknown>[];
     imagePlan: { helps: boolean; modality: string; prompt: string | null; rationale: string };
-  }): Promise<void> {
+  }): Promise<{
+    scriptId: string;
+    segmentIds: readonly string[];
+    /** Segments with text + slot for the R2d semantic source binder (ADR-0057 D4). */
+    segments: ReadonlyArray<{ segment_id: string; text: string; anchor_ref: string | null }>;
+  }> {
     await this.emit("surface.image.decided", {
       surface_id: args.surfaceId,
       frame_id: args.frameId,
@@ -1503,6 +2199,126 @@ export class SurfaceSession {
       script_id: scriptId,
       segments: recordedSegments,
     });
+    return {
+      scriptId,
+      segmentIds: recordedSegments.map((s) => s.segment_id),
+      segments: recordedSegments.map((s) => ({
+        segment_id: s.segment_id,
+        text: s.text,
+        anchor_ref: s.anchor_ref,
+      })),
+    };
+  }
+
+  /**
+   * Resolved source-evidence anchors for a concept (CSE M5) — best-effort over the optional
+   * provider seam. A provider error yields `[]`: the frame composes without a source projection
+   * (honest degradation, never a failed frame; CSE-008 §12).
+   */
+  private async sourceEvidenceFor(
+    conceptId: string,
+    conceptTitle: string,
+  ): Promise<readonly SourceEvidenceAnchorView[]> {
+    const provider = this.deps.sourceEvidence;
+    if (!provider) return [];
+    try {
+      return await provider.anchorsForConcept(conceptId, conceptTitle);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * R2a (ADR-0057 D1): the concept's anchored source passages, compacted for the planner/composer
+   * prompt — `{anchor_ref, quote, path}`, ≤3 excerpts, each quote bounded so a long region can't
+   * blow the prompt budget. Empty when no source is bound (goal-mode teaching, unchanged).
+   */
+  private async sourceExcerptsFor(
+    conceptId: string,
+    conceptTitle: string,
+  ): Promise<ReadonlyArray<{ anchor_ref: string; quote: string; path: string }>> {
+    const anchors = await this.sourceEvidenceFor(conceptId, conceptTitle);
+    return anchors.slice(0, 3).map((a) => ({
+      anchor_ref: a.anchor_id,
+      quote: a.region.quote.slice(0, 600),
+      path: a.region.path,
+    }));
+  }
+
+  /**
+   * The frame's RepresentationPlan (CSE-018, ADR-0058). Starts from the deterministic parity floor
+   * (`planRepresentation`); when the RIA dispatcher is wired, the model refines each element's
+   * epistemic role + hierarchy and names exclusions (plan_kind → `model`). A missing/degraded/empty
+   * model plan keeps the floor — a model failure can never regress a frame (ADR-0058 D3). Density
+   * stays session-computed either way. Every element keeps a role (model where assigned, else floor).
+   */
+  private async planRepresentationFor(
+    frameId: string,
+    conceptId: string,
+    elements: ReadonlyArray<{ element_id: string; type: string }>,
+  ): Promise<RepresentationPlan> {
+    // Law 8 (R4e) + live signal (R5): an explicit `getExpertise` override wins; otherwise derive the
+    // learner's expertise from their in-session mastery (null → un-adapted floor when unknown).
+    const expertise =
+      this.deps.getExpertise?.() ??
+      expertiseFromMastery(this.state()?.timeline?.nodes ?? []) ??
+      undefined;
+    const base = planRepresentation({ frameId, elements, ...(expertise ? { expertise } : {}) });
+    const dispatcher = this.deps.representationDispatcher;
+    if (!dispatcher) return base;
+    try {
+      const state = this.state();
+      const conceptTitle =
+        state?.timeline?.nodes.find((n) => n.concept_id === conceptId)?.title ?? conceptId;
+      const dispatched = await dispatcher.dispatch({
+        session: this.deps.session,
+        targetAgentId: "representation",
+        intent: `plan representation: ${conceptTitle}`,
+        conceptIds: [conceptId],
+        content: { concept_id: conceptId, concept_title: conceptTitle, elements },
+      });
+      if (!dispatched.ok) return base;
+      const content = (dispatched.value.responsePackets[0]?.content ?? {}) as Record<
+        string,
+        unknown
+      >;
+      const product = content["representation"] as
+        | {
+            composition?: { element_id: string; epistemic_role: string; hierarchy: string }[];
+            exclusions?: string[];
+            adaptivity?: string;
+            degraded?: boolean;
+          }
+        | undefined;
+      const comp = Array.isArray(product?.composition) ? product!.composition : [];
+      if (!product || product.degraded || comp.length === 0) return base;
+      const byId = new Map(comp.map((c) => [c.element_id, c]));
+      const composition: RepresentationElementPlan[] = base.composition.map((c) => {
+        const m = byId.get(c.element_id);
+        return m
+          ? {
+              element_id: c.element_id,
+              hierarchy: m.hierarchy as RepresentationElementPlan["hierarchy"],
+              epistemic_role: m.epistemic_role as RepresentationElementPlan["epistemic_role"],
+            }
+          : c;
+      });
+      // Carry the model's adaptivity reasoning (Law 8) — otherwise it is emitted then discarded.
+      // The expertise label comes from the session signal; the note is the model's own words.
+      const modelAdaptivity =
+        typeof product.adaptivity === "string" && product.adaptivity.trim()
+          ? { expertise: expertise ?? "intermediate", note: product.adaptivity.trim() }
+          : base.adaptivity;
+      return {
+        ...base,
+        composition,
+        exclusions: Array.isArray(product.exclusions) ? product.exclusions : [],
+        adaptivity: modelAdaptivity,
+        plan_kind: "model",
+      };
+    } catch {
+      return base;
+    }
   }
 
   /**
@@ -1595,6 +2411,7 @@ export class SurfaceSession {
       speculative_of: null,
       concept_id: nextConcept.id,
       title: bet?.title ?? nextConcept.title,
+      kind: "teach", // look-ahead frames are always the next teach frame (ADR-0055 D6)
       trigger_assumption: triggerAssumption,
       mccr_layout: this.buildFrameLayout(archetype, slots),
       mccr: artifacts.mccr,
@@ -1718,6 +2535,8 @@ export class SurfaceSession {
   async close(reason = "session-ended"): Promise<Result<void, CosError>> {
     if (!this.surfaceId) return err(sessionError("surface session not started"));
     if (this.closed) return ok(undefined);
+    // Background speculation settles before the surface closes (no events after close).
+    await this.settle();
     const setStatus = this.world.apply({
       kind: "set_node_prop",
       id: `surface:${this.surfaceId}`,
@@ -1753,10 +2572,39 @@ export class SurfaceSession {
       interaction_id: interactionId,
       kind: input.kind,
       ...(input.target_id ? { target_id: input.target_id } : {}),
+      ...(input.note ? { note: input.note } : {}),
+    });
+
+    // Interpret the act into typed cognitive intent (CSE-014 §3, deterministic) and record it —
+    // "interaction is expression, not control": the grammar classifies + routes it.
+    const intent = interpretIntent(input.kind, input.target_id ?? null, input.note ?? null);
+    await this.emit("surface.intent.expressed", {
+      surface_id: surfaceId,
+      interaction_id: interactionId,
+      kind: input.kind,
+      class: intent.cls,
+      cognitive_intent: intent.cognitive_intent,
+      ...(intent.target_anchor_ref ? { target_anchor_ref: intent.target_anchor_ref } : {}),
     });
 
     let effect: SurfaceInteractionResult["effect"];
     let reason: string;
+    // Mark-class acts (annotate/circle/highlight/pin) evolve the current Scene in place, driven by
+    // the learner — the CSE-012 evolution channel M7 built, now with a learner-caused producer
+    // (CSE-014 §4). No new ask, no teleport (spatial stability; the learner always wins, L5).
+    if (intent.cls === "mark") {
+      const evolved = await this.evolveSceneFromMark(surfaceId, interactionId, intent);
+      effect = evolved ? "scene-evolved" : "annotated";
+      reason = `learner marked ${intent.target_anchor_ref ?? "the board"} — ${intent.cognitive_intent}`;
+      await this.emit("surface.interaction.applied", {
+        surface_id: surfaceId,
+        interaction_id: interactionId,
+        effect,
+        reason,
+      });
+      return ok({ interaction_id: interactionId, effect });
+    }
+
     switch (input.kind) {
       case "interrupt":
         this.interrupted = true;
@@ -1794,6 +2642,202 @@ export class SurfaceSession {
       reason,
     });
     return ok({ interaction_id: interactionId, effect });
+  }
+
+  /**
+   * Evolve the current Scene in place from a learner Mark (CSE M8 T2; CSE-012 §3.3, CSE-014 §4).
+   * Emits a learner-caused `surface.scene.evolved` (`annotate` delta) on the most recently opened
+   * Scene, carrying the interaction that produced it. Returns true when a live Scene received the
+   * delta, false when there is no Scene yet (the interaction is still recorded + intent-expressed —
+   * honest: an annotation with nowhere to land is not silently lost, just not scene-scoped).
+   */
+  private async evolveSceneFromMark(
+    surfaceId: string,
+    interactionId: string,
+    intent: { kind: string; cognitive_intent: string; target_anchor_ref: string | null },
+  ): Promise<boolean> {
+    const scenes = this.state()?.scenes ?? [];
+    const scene = [...scenes].reverse().find((s) => !s.closed);
+    if (!scene) return false;
+    await this.emit("surface.scene.evolved", {
+      surface_id: surfaceId,
+      scene_id: scene.scene_id,
+      delta_id: `scd-${this.idGenerator.hex(8)}`,
+      op: "annotate",
+      cause: "learner",
+      payload: {
+        kind: intent.kind,
+        target_anchor_ref: intent.target_anchor_ref,
+        note: intent.cognitive_intent,
+      },
+      interaction_ref: interactionId,
+    });
+    return true;
+  }
+
+  /**
+   * Grade a learner's actual answer to a practice problem (F14 made real). The answer is recorded as a
+   * genuine interaction, graded by the Assessment unit into evidence-bearing depth tests, and emitted
+   * as an HONEST `surface.assessment.gate.evaluated` + an assessment Cognitive Frame with the feedback.
+   * Mastery is earned from real learner evidence — never fabricated. Absent a grader the answer is
+   * recorded and the gate honestly reports "ungraded".
+   */
+  async submitAnswer(input: {
+    conceptId: string;
+    answer: string;
+  }): Promise<Result<SurfaceInteractionResult, CosError>> {
+    if (!this.surfaceId) return err(sessionError("surface session not started"));
+    if (this.closed) return err(sessionError("surface session is closed"));
+    const surfaceId = this.surfaceId;
+    const answer = input.answer.trim();
+    if (!answer) return err(sessionError("answer text is required"));
+    const conceptId = input.conceptId;
+    const conceptNodeId = `concept:${conceptId}`;
+    const { title, problem } = this.findPracticeContext(conceptId);
+    const interactionId = `ix-${this.idGenerator.hex(8)}`;
+
+    // 1. The learner's answer is genuine input — recorded, folded, replayable.
+    await this.emit("surface.interaction.received", {
+      surface_id: surfaceId,
+      interaction_id: interactionId,
+      kind: "answer",
+      target_id: conceptId,
+      note: answer,
+    });
+
+    // 2. Grade it — genuine, evidence-bearing — or degrade honestly (recorded, ungraded).
+    type Verdict = {
+      passed: boolean;
+      confidence: number;
+      feedback: string;
+      tests: { kind: string; passed: boolean; confidence: number; evidence: string }[];
+      graded: boolean;
+    };
+    let verdict: Verdict = {
+      passed: false,
+      confidence: 0,
+      feedback: "",
+      tests: [],
+      graded: false,
+    };
+    const dispatcher = this.deps.assessmentDispatcher;
+    if (dispatcher) {
+      const startedMs = this.clock.nowMs();
+      const dispatched = await dispatcher.dispatch({
+        session: this.deps.session,
+        targetAgentId: "assessment",
+        intent: `grade answer: ${title}`,
+        conceptIds: [conceptId],
+        content: { concept_id: conceptId, concept_title: title, problem, answer },
+      });
+      if (dispatched.ok) {
+        const response = dispatched.value.responsePackets[0];
+        const content = (response?.content ?? {}) as Record<string, unknown>;
+        await this.emitDegradedIfFallback(surfaceId, "assessment", content);
+        const graded = content["assessment"] as Verdict | undefined;
+        if (graded) verdict = graded;
+        await this.emitFrameWorkTiming({
+          surfaceId,
+          agentId: "assessment",
+          agentCid: response?.source_cid ?? "agent.assessment",
+          workId: dispatched.value.workItem.work_id,
+          packetId: response?.packet_id ?? null,
+          workType: dispatched.value.workItem.work_type,
+          startedMs,
+        });
+        const trace = dispatched.value.emissions.trace;
+        if (trace) {
+          await this.emit("surface.agent.reasoning.summary", {
+            surface_id: surfaceId,
+            agent_cid: response?.source_cid ?? "agent.assessment",
+            agent_id: "assessment",
+            packet_id: response?.packet_id ?? null,
+            work_id: dispatched.value.workItem.work_id,
+            task_interpretation: trace.task_interpretation,
+            strategy: trace.strategy,
+            decision: trace.decision,
+            self_critique: trace.self_critique ?? null,
+            confidence: verdict.confidence,
+            determinism_level: trace.determinism_level,
+          });
+        }
+      }
+    }
+
+    // 3. The honest gate — driven entirely by the learner's real answer (never fabricated).
+    const total = verdict.tests.length;
+    const passedCount = verdict.tests.filter((t) => t.passed).length;
+    await this.emit("surface.assessment.gate.evaluated", {
+      surface_id: surfaceId,
+      concept_id: conceptId,
+      passed: verdict.passed,
+      passed_count: passedCount,
+      total_count: total,
+      threshold: total > 0 ? Math.ceil(total * 0.8) : 0,
+      graded: verdict.graded,
+      tests: verdict.tests.map((t) => ({
+        kind: t.kind,
+        passed: t.passed,
+        confidence: t.confidence,
+        evidence: t.evidence,
+      })),
+    });
+
+    // 4. Close the loop with an assessment frame carrying the real verdict + feedback.
+    const summary = !verdict.graded
+      ? "Answer recorded — live grading is unavailable right now."
+      : verdict.passed
+        ? `Mastery demonstrated${verdict.feedback ? ` — ${verdict.feedback}` : "."}`
+        : `Not yet${verdict.feedback ? ` — ${verdict.feedback}` : " — let's revisit this together."}`;
+    await this.composeDeterministicFrame({
+      surfaceId,
+      conceptId,
+      conceptNodeId,
+      frameTitle: `Assessment — ${title}`,
+      archetype: "concept-first",
+      producerCid: "agent.assessment",
+      agentId: "assessment",
+      role: "assessor",
+      reason: "learner answer graded into a Cognitive Frame",
+      kind: "assessment",
+      mccr: {
+        core_concept: mccrTextSlot("core_concept", `Assessment — ${title}`, conceptId),
+        memory_cue: mccrTextSlot("memory_cue", summary, conceptId),
+      },
+      segments: [{ text: summary, anchor_ref: "memory_cue", intent: "reinforce" }],
+    });
+
+    await this.emit("surface.interaction.applied", {
+      surface_id: surfaceId,
+      interaction_id: interactionId,
+      effect: "dispatched",
+      reason: verdict.graded ? "learner answer graded" : "learner answer recorded (ungraded)",
+    });
+    if (this.timeline) {
+      const refreshed = await this.timeline.refresh("answer-graded");
+      if (!refreshed.ok) return refreshed;
+    }
+    return ok({ interaction_id: interactionId, effect: "dispatched" });
+  }
+
+  /** The concept's display title + the practice problem shown on its practice frame (for grading). */
+  private findPracticeContext(conceptId: string): { title: string; problem: string } {
+    const frames = this.state()?.frames ?? [];
+    const conceptFrames = frames.filter((f) => f.concept_id === conceptId);
+    const stripPrefix = (t: string): string =>
+      t
+        .replace(/^Practice —\s*/i, "")
+        .replace(/^Checkpoint —\s*/i, "")
+        .replace(/^Ready to practice —\s*/i, "")
+        .trim();
+    const title = stripPrefix(conceptFrames[0]?.title ?? conceptId) || conceptId;
+    // Prefer the typed kind (ADR-0055 D6); fall back to the title only for pre-1.7.0 replays.
+    const practice = [...conceptFrames]
+      .reverse()
+      .find((f) => f.kind === "practice" || f.title.toLowerCase().startsWith("practice"));
+    const example = practice?.mccr?.key_example?.content;
+    const problem = example && example.kind === "text" ? example.text : "";
+    return { title, problem };
   }
 
   private async focusConcept(
@@ -2023,7 +3067,12 @@ export class SurfaceSession {
         confidence: input.mastery.confidence,
         gate_passed: depthGate?.passed ?? false,
       });
-      if (this.deps.researchDispatcher) {
+      // LKS T1 (ADR-0045): the grounded provider takes precedence — a proactive frontier is real +
+      // cited, or honestly deferred. Only when no provider is wired do we fall back to the legacy
+      // ungrounded research breadcrumb (CLI/tests), preserving ADR-0026 behavior there.
+      if (this.deps.frontierProvider) {
+        await this.runGroundedFrontier(surfaceId, input, blocks);
+      } else if (this.deps.researchDispatcher) {
         await this.runResearchFrontier(surfaceId, input, blocks);
       }
     } else {
@@ -2046,6 +3095,73 @@ export class SurfaceSession {
    * the same pattern as all other surface block emissions. Best-effort: errors are swallowed so
    * the primary `ask()` result is unaffected even when the research dispatch fails.
    */
+  /**
+   * Surface the REAL web-grounded frontier after verified mastery (CSE M9 LKS T1, ADR-0045). The
+   * grounded provider (ADR-0043) is asked for the mastered concept's frontier; if it returns cited
+   * entries they are surfaced (`surface.research.frontier.surfaced { grounded: true, entries }`) +
+   * contributed as a research block. If nothing citable is found, we DEFER honestly — a proactive
+   * frontier is grounded or it is not shown (never the ungrounded breadcrumb). Best-effort: any
+   * failure defers, never blocks or fabricates.
+   */
+  private async runGroundedFrontier(
+    surfaceId: string,
+    input: SurfaceAskInput,
+    blocks: CognitionBlock[],
+  ): Promise<void> {
+    const provider = this.deps.frontierProvider;
+    if (!provider) return;
+    const focusTitle =
+      input.concepts.find((c) => c.id === input.focusConceptId)?.title ?? input.focusConceptId;
+    const conceptNodeId = `concept:${input.focusConceptId}`;
+
+    let overlay: Awaited<ReturnType<SurfaceFrontierProvider["researchFrontier"]>> = null;
+    try {
+      overlay = await provider.researchFrontier(input.focusConceptId, focusTitle);
+    } catch {
+      overlay = null; // best-effort — treat as no grounded frontier
+    }
+    const entries = overlay?.entries ?? [];
+    if (entries.length === 0) {
+      // Honest deferral: no citable frontier ⇒ nothing surfaced (never the ungrounded breadcrumb).
+      await this.emit("surface.research.frontier.deferred", {
+        surface_id: surfaceId,
+        concept_id: input.focusConceptId,
+        confidence: input.mastery.confidence,
+        reason: "no grounded frontier found",
+      });
+      return;
+    }
+
+    const entryPayload = entries.map((e) => ({
+      kind: e.kind,
+      summary: e.summary,
+      external_refs: e.external_refs.map((r) => ({ uri: r.uri, title: r.title })),
+    }));
+
+    // D3: emit the surfaced event before contributing the block (grounded flag + cited entries).
+    await this.emit("surface.research.frontier.surfaced", {
+      surface_id: surfaceId,
+      concept_id: input.focusConceptId,
+      grounded: true,
+      entries: entryPayload,
+      confidence: input.mastery.confidence,
+      gate_passed: true,
+    });
+
+    const block = await this.contributions.contribute({
+      surface_id: surfaceId,
+      agent_id: "frontier",
+      agent_cid: "agent.frontier",
+      block_type: "research",
+      title: `Frontier — ${focusTitle}`,
+      content: { grounded: true, entries: entryPayload },
+      concept_ids: [input.focusConceptId],
+      reason: "grounded frontier surfaced after verified mastery (ADR-0045)",
+      world_state_nodes: [conceptNodeId],
+    });
+    if (block.ok) blocks.push(block.value);
+  }
+
   private async runResearchFrontier(
     surfaceId: string,
     input: SurfaceAskInput,
@@ -2324,5 +3440,56 @@ export class SurfaceSession {
     );
     this.hlc = created.hlc;
     await this.bus.publish(created.event);
+  }
+
+  /**
+   * Surface real work-timing for a frame-path dispatch (composer/planner/imageplanner) so the Agent
+   * Observatory shows honest latency for these units — not just the fiber-loop agents (ADR-0029).
+   * Latency is real-clock (deterministic per event log), so under the frozen demo clock it is 0.
+   */
+  /**
+   * Fallback health law (review §22, root-cause #1): when a unit's response carries a `fallback_reason`
+   * it degraded to its deterministic path — a fact the learner-facing surface must not hide. Emit a
+   * typed `surface.cognition.degraded` marker (folded into a health slice, surfaced in the HUD) so a
+   * silently-degraded session is distinguishable from a healthy one. Extends ADR-0029.
+   */
+  private async emitDegradedIfFallback(
+    surfaceId: string,
+    unitId: string,
+    content: Record<string, unknown>,
+  ): Promise<void> {
+    const reason =
+      typeof content["fallback_reason"] === "string" ? content["fallback_reason"] : null;
+    if (!reason) return;
+    await this.emit("surface.cognition.degraded", {
+      surface_id: surfaceId,
+      unit_id: unitId,
+      reason,
+      response_kind:
+        typeof content["response_kind"] === "string" ? (content["response_kind"] as string) : null,
+    });
+  }
+
+  private async emitFrameWorkTiming(args: {
+    surfaceId: string;
+    agentId: string;
+    agentCid: string;
+    workId: string | null;
+    packetId: string | null;
+    workType: string;
+    startedMs: number;
+  }): Promise<void> {
+    if (!args.workId) return;
+    await this.emit("surface.agent.work.timing", {
+      surface_id: args.surfaceId,
+      agent_cid: args.agentCid,
+      agent_id: args.agentId,
+      work_id: args.workId,
+      packet_id: args.packetId,
+      work_type: args.workType,
+      status: "completed",
+      queue_wait_ms: 0,
+      execution_ms: Math.max(0, this.clock.nowMs() - args.startedMs),
+    });
   }
 }

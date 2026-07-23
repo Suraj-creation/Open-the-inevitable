@@ -10,6 +10,7 @@ Capability categories:
 - Workflow capabilities.
 - Governance capabilities.
 - Observability capabilities.
+- Source capabilities (parse/OCR/transcribe/crawl tool grants, source-layer context leases, media playback intents, human-source consent scopes — see [source-environment/](../source-environment/README.md)).
 
 Capability specs must define ownership, required protocols, security classification, resource cost, observability requirements, and failure behavior.
 

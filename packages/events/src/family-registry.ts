@@ -20,6 +20,8 @@ export const DEFAULT_EVENT_FAMILIES: readonly EventFamilyRegistration[] = [
   fam("kernel", "kernel", "1y-archive", "recorded-observation", "audit"),
   fam("system", "kernel", "90d", "non-replayable", "internal"),
   fam("surface", "surface", "permanent", "replayable", "internal"),
+  fam("source", "source-environment", "permanent", "replayable", "internal"),
+  fam("intelligence", "intelligence", "permanent", "replayable", "internal"),
   fam("model", "runtime", "permanent", "replayable", "internal"),
   fam("gateway", "gateway", "1d", "recorded-observation", "internal"),
 ];

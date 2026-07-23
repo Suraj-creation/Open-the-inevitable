@@ -50,4 +50,19 @@ export {
   type VisualGenerationInput,
 } from "./visual";
 
+export {
+  PostgresEventTransport,
+  PgVectorStore,
+  PostgresIntelligenceStore,
+  SupabaseStorageObjectStore,
+  TRANSPORT_SQL,
+  VECTOR_SQL,
+  INTELLIGENCE_SQL,
+  type IntelligenceArtifactRow,
+  type PgPoolLike,
+  type StoredObject,
+} from "./supabase";
+
+export { PdfjsModalityAdapter } from "./pdf";
+
 export { runEventTransportConformance, runVectorStoreConformance } from "./conformance";

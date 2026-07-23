@@ -3,7 +3,40 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>The Inevitable — Cognitive Surface</title>
+    <title>The Inevitable — Universal Cognitive Infrastructure</title>
+    <meta
+      name="description"
+      content="An operating system for human understanding. The Inevitable takes anyone, from any starting point, to genuine mastery — and onward to original contribution. Cognition made visible, governed, and compounding for a lifetime."
+    />
+    <meta name="theme-color" content="#09080b" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta property="og:title" content="The Inevitable — Universal Cognitive Infrastructure" />
+    <meta
+      property="og:description"
+      content="We have democratized information. We have not democratized understanding. The Inevitable is the operating system for human understanding — cognition made visible, governed, and compounding for a lifetime."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/cinema/surface-still.webp" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <!-- Fonts are self-hosted (@font-face in tokens.css; CDL §13). Preload the two primary faces —
+         Fraunces (the knowledge voice) and Space Grotesk (the instrument) — so they arrive before
+         first paint; Space Mono (provenance/data) loads on demand. `crossorigin` is required even
+         same-origin: fonts are always fetched in CORS mode. `font-display: swap` renders a system
+         fallback instantly. -->
+    <link
+      rel="preload"
+      href="/fonts/fraunces-latin.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/fonts/space-grotesk-latin.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
   </head>
   <body>
     <div id="root"></div>

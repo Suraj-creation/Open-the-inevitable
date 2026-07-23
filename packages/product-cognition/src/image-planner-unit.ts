@@ -200,7 +200,7 @@ export class ImagePlannerUnit implements CognitiveUnit {
   constructor(deps: ImagePlannerUnitDeps) {
     this.manifest = deps.manifest;
     this.model = deps.model;
-    this.timeoutMs = deps.timeoutMs ?? 20_000;
+    this.timeoutMs = deps.timeoutMs ?? 60_000;
     this.idGenerator = deps.idGenerator ?? new CryptoIdGenerator();
     this.maxLabels = Math.max(1, deps.maxLabels ?? DEFAULT_MAX_LABELS);
   }
@@ -236,6 +236,13 @@ export class ImagePlannerUnit implements CognitiveUnit {
       throw plannerError("E_MODEL_REFUSAL", `model refused generation (${result.finishReason})`, {
         invocation_key: request.invocation_key,
       });
+    }
+    if (result.finishReason === "max_tokens") {
+      throw plannerError(
+        "E_MODEL_OUTPUT_TRUNCATED",
+        "image plan cut off at token budget; JSON is incomplete",
+        { invocation_key: request.invocation_key, text_length: result.text.length },
+      );
     }
     const plan = parseImagePlan(result.text, this.maxLabels);
     const response = this.buildResponsePacket(packet, plan, {
@@ -278,7 +285,10 @@ export class ImagePlannerUnit implements CognitiveUnit {
     return {
       prompt: promptLines.join("\n"),
       system,
-      maxTokens: 1024,
+      // At 1024 with uncapped thinking on gemini-2.5-flash the decision JSON was starved to empty
+      // text → the planner declined every image. A bounded thinking phase leaves room for the plan.
+      maxTokens: 2048,
+      thinkingBudget: 512,
       responseSchema: OUTPUT_CONTRACT_SCHEMA,
       invocation_key: `${this.manifest.id}:${packet.packet_id}:${refine ? "refine" : "decide"}`,
     };
