@@ -52,6 +52,7 @@ import {
   planSourceProjection,
   type SourceEvidenceAnchorView,
   type SourceEvidenceProvider,
+  type FusedSynthesisView,
   type SurfaceFrontierProvider,
 } from "./source-projection";
 import { decideDirective, inferAffect, type DirectorSignals } from "./theater";
@@ -1520,6 +1521,9 @@ export class SurfaceSession {
     // R2a (ADR-0057 D1): feed the concept's anchored passages INTO composition so the board + voice
     // are grounded in the document (the composer quotes it, never invents beyond it). Empty ⇒ goal-mode.
     const sourceExcerpts = await this.sourceExcerptsFor(conceptId, conceptTitle);
+    // R5 (ADR-0060): when ≥2 sources cover the concept, feed the FUSED cross-source synthesis INTO
+    // composition so the frame teaches the reconciled understanding (FUSION MODE). Null ⇒ unchanged.
+    const fusedSynthesis = await this.fusedSynthesisFor(conceptId, conceptTitle);
     const dispatched = await dispatcher.dispatch({
       session: this.deps.session,
       targetAgentId: "composer",
@@ -1530,6 +1534,7 @@ export class SurfaceSession {
         concept_title: conceptTitle,
         goal: args.goal,
         ...(sourceExcerpts.length > 0 ? { source_excerpts: sourceExcerpts } : {}),
+        ...(fusedSynthesis ? { fused_synthesis: fusedSynthesis } : {}),
         ...(args.subFocus ? { sub_focus: args.subFocus } : {}),
         ...(args.frameFocus ? { frame_focus: args.frameFocus } : {}),
         ...(args.explanationPrompt ? { prompt: args.explanationPrompt } : {}),
@@ -2243,6 +2248,27 @@ export class SurfaceSession {
       quote: a.region.quote.slice(0, 600),
       path: a.region.path,
     }));
+  }
+
+  /**
+   * R5 (ADR-0060): the concept's fused cross-source synthesis, over the optional provider seam.
+   * Null when the seam is absent, the concept isn't multi-source, or no non-degraded synthesis
+   * exists — teaching then falls back to single-source/goal mode (honest absence, never a failure).
+   * A provider error yields null (best-effort, never a failed frame).
+   */
+  private async fusedSynthesisFor(
+    conceptId: string,
+    conceptTitle: string,
+  ): Promise<FusedSynthesisView | null> {
+    const provider = this.deps.sourceEvidence;
+    if (!provider?.fusedSynthesisForConcept) return null;
+    try {
+      const view = await provider.fusedSynthesisForConcept(conceptId, conceptTitle);
+      // Fusion requires ≥2 covering sources — a single source is R2a's SOURCE MODE, not fusion.
+      return view && view.source_count >= 2 ? view : null;
+    } catch {
+      return null;
+    }
   }
 
   /**

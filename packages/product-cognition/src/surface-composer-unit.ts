@@ -310,6 +310,36 @@ function sourceBlock(excerpts: readonly SourceExcerpt[]): string {
   return excerpts.map((e, i) => `[${i + 1}] ${e.path || "passage"}: "${e.quote}"`).join("\n");
 }
 
+/** The fused cross-source synthesis threaded in for FUSION MODE (R5, ADR-0060). */
+interface FusedSynthesisInput {
+  readonly prose: string;
+  readonly acknowledges_disagreement: boolean;
+  readonly treatments: readonly { readonly title: string; readonly emphasis: string }[];
+}
+
+/** Read the fused synthesis threaded into the packet (null ⇒ not multi-source; nothing changes). */
+function fusedSynthesisOf(packet: CognitionPacket): FusedSynthesisInput | null {
+  const raw = ((packet.content ?? {}) as Record<string, unknown>)["fused_synthesis"];
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const prose = typeof r["prose"] === "string" ? r["prose"].trim() : "";
+  if (!prose) return null;
+  const treatmentsRaw = Array.isArray(r["treatments"]) ? (r["treatments"] as unknown[]) : [];
+  return {
+    prose,
+    acknowledges_disagreement: r["acknowledges_disagreement"] === true,
+    treatments: treatmentsRaw
+      .map((t) => {
+        const to = (t ?? {}) as Record<string, unknown>;
+        return {
+          title: typeof to["title"] === "string" ? to["title"] : "",
+          emphasis: typeof to["emphasis"] === "string" ? to["emphasis"] : "",
+        };
+      })
+      .filter((t) => t.title.length > 0),
+  };
+}
+
 function buildElement(
   slot: ComposerSlot,
   content: Record<string, unknown>,
@@ -660,6 +690,7 @@ export class SurfaceComposerUnit implements CognitiveUnit {
     const title = conceptTitleOf(packet);
     const goal = goalOf(packet);
     const excerpts = sourceExcerptsOf(packet);
+    const fusion = fusedSynthesisOf(packet);
     const bias = this.getDepthBias();
     const depthGuidance =
       bias > 0.15
@@ -710,14 +741,33 @@ export class SurfaceComposerUnit implements CognitiveUnit {
             "formula/example, do not invent one. The passage itself is added to the board automatically.",
           ]
         : []),
+      // R5 (ADR-0060): teaching a concept reconciled across SEVERAL sources — weave, don't flatten.
+      ...(fusion
+        ? [
+            "FUSION MODE: this concept is covered by SEVERAL sources, reconciled into the synthesis",
+            "below. Teach that woven understanding — cite each source by name where it contributes,",
+            "compose their complementary emphases into ONE coherent frame, and where sources DISAGREE",
+            "surface it honestly (as a misconception or a relationship anchor), never flatten it. The",
+            "fused synthesis is your ground truth; add nothing outside it.",
+          ]
+        : []),
       depthGuidance,
     ].join("\n");
     const sourceSuffix =
       excerpts.length > 0
         ? `\n\nSOURCE PASSAGES (teach from these):\n${sourceBlock(excerpts)}`
         : "";
+    const fusionSuffix = fusion
+      ? `\n\nFUSED SYNTHESIS (teach this reconciled understanding):\n${fusion.prose}\n\nContributing sources: ${fusion.treatments
+          .map((t) => `${t.title} (${t.emphasis})`)
+          .join("; ")}${
+          fusion.acknowledges_disagreement
+            ? "\n(These sources DISAGREE somewhere — surface it, do not smooth it.)"
+            : ""
+        }`
+      : "";
     return {
-      prompt: `Concept to teach: ${title}\nLearner goal: ${goal}${sourceSuffix}`,
+      prompt: `Concept to teach: ${title}\nLearner goal: ${goal}${sourceSuffix}${fusionSuffix}`,
       system,
       // The combined MCCR + narration + image_plan payload is large; give it ample room and bound
       // the reasoning-model thinking phase so JSON is never truncated (the composer-flakiness root cause).

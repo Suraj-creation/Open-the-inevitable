@@ -46,11 +46,40 @@ export interface SourceEvidenceAnchorView {
  * on demand — teaching attention drives canonicalization depth, CSE-003). Returning `[]` means
  * the frame simply has no source projection — honest absence, never a guess.
  */
+/**
+ * A concept's fused, cross-source understanding as surfaced to the session (CSE M9 / CSE-015; R5,
+ * ADR-0060). A browser-safe view of the CSE `FusedSynthesis` + its per-source treatments — the host
+ * adapts the source-environment type so `@inevitable/surface` needs no source-environment dependency.
+ * Present only when ≥2 sources cover the concept and a real (non-degraded) synthesis exists.
+ */
+export interface FusedSynthesisView {
+  readonly concept_ref: string;
+  /** The woven explanation — grounded in the sources, each named inline (never outside knowledge). */
+  readonly prose: string;
+  /** Human-readable titles of the sources the synthesis cites. */
+  readonly cited_sources: readonly string[];
+  /** True when the synthesis surfaces a live cross-source disagreement (must not be smoothed away). */
+  readonly acknowledges_disagreement: boolean;
+  /** How many sources cover the concept (the fusion gate — ≥2). */
+  readonly source_count: number;
+  /** Each covering source's distinct emphasis — the complements fusion composes. */
+  readonly treatments: readonly { readonly title: string; readonly emphasis: string }[];
+}
+
 export interface SourceEvidenceProvider {
   anchorsForConcept(
     conceptId: string,
     conceptTitle: string,
   ): Promise<readonly SourceEvidenceAnchorView[]>;
+  /**
+   * The concept's fused cross-source synthesis (R5, ADR-0060), or null when fewer than two sources
+   * cover it / no non-degraded synthesis exists. Optional: a provider without it disables FUSION
+   * MODE (teaching falls back to single-source/goal, unchanged).
+   */
+  fusedSynthesisForConcept?(
+    conceptId: string,
+    conceptTitle: string,
+  ): Promise<FusedSynthesisView | null>;
 }
 
 /**

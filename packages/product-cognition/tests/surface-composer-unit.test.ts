@@ -400,6 +400,65 @@ describe("SurfaceComposerUnit", () => {
     expect(emissions.trace?.determinism_level).toBe("D3");
   });
 
+  test("FUSION MODE (R5, ADR-0060): a fused synthesis threads into the composer prompt", async () => {
+    let captured: Record<string, unknown> | null = null;
+    const model: ModelRuntime = {
+      async generate(req) {
+        captured = req as unknown as Record<string, unknown>;
+        return { text: GOOD_COMPOSITION, model: "stub-model", finishReason: "stop" as const };
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const unit = new SurfaceComposerUnit({
+      manifest: composerManifest,
+      model,
+      idGenerator: new SeededIdGenerator("comp-fusion"),
+    });
+    await unit.execute(
+      packet({
+        concept_title: "Entropy",
+        goal: "Thermodynamics",
+        fused_synthesis: {
+          prose: "Callen frames entropy as a state function; Feynman stresses microstate counting.",
+          acknowledges_disagreement: true,
+          treatments: [
+            { title: "Callen", emphasis: "definition" },
+            { title: "Feynman", emphasis: "intuition" },
+          ],
+        },
+      }),
+    );
+    expect(captured).not.toBeNull();
+    expect(String(captured!["system"])).toContain("FUSION MODE");
+    expect(String(captured!["prompt"])).toContain("FUSED SYNTHESIS");
+    expect(String(captured!["prompt"])).toContain("Callen frames entropy");
+    expect(String(captured!["prompt"])).toContain("Callen (definition)");
+    // acknowledges_disagreement surfaces the "don't smooth it" instruction.
+    expect(String(captured!["prompt"])).toContain("DISAGREE");
+  });
+
+  test("no fused_synthesis ⇒ no FUSION MODE (composer prompt unchanged)", async () => {
+    let captured: Record<string, unknown> | null = null;
+    const model: ModelRuntime = {
+      async generate(req) {
+        captured = req as unknown as Record<string, unknown>;
+        return { text: GOOD_COMPOSITION, model: "stub-model", finishReason: "stop" as const };
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const unit = new SurfaceComposerUnit({
+      manifest: composerManifest,
+      model,
+      idGenerator: new SeededIdGenerator("comp-nofusion"),
+    });
+    await unit.execute(packet({ concept_title: "Entropy", goal: "Thermodynamics" }));
+    expect(String(captured!["system"])).not.toContain("FUSION MODE");
+  });
+
   test("non-composition output falls back to deterministic composition, visibly degraded", async () => {
     const unit = new SurfaceComposerUnit({
       manifest: composerManifest,

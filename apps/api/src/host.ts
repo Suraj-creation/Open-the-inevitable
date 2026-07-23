@@ -54,6 +54,7 @@ import {
 } from "@inevitable/shared";
 import {
   foldSurfaceEvents,
+  type FusedSynthesisView,
   type SurfaceAskInput,
   type SurfaceAskResult,
   type SurfaceState,
@@ -313,6 +314,42 @@ export class SurfaceHost {
     return join(this.persistDir!, "surfaces", surfaceId);
   }
 
+  /**
+   * R5 (ADR-0060): the concept's fused cross-source synthesis as a browser-safe view for FUSION MODE
+   * composition. Null unless ≥2 bound sources cover the concept with a real (non-degraded) weave —
+   * so a single-source or unfused concept teaches unchanged. Best-effort: a fuse error yields null
+   * (teaching falls back to single-source/goal, never a failed frame). Cheap guard skips `fuse()`
+   * entirely below two sources; `fuse()` itself is memoized over the version+concept set.
+   */
+  private async fusedSynthesisView(
+    bindings: readonly string[],
+    conceptId: string,
+    _conceptTitle: string,
+  ): Promise<FusedSynthesisView | null> {
+    if (bindings.length < 2) return null;
+    try {
+      const result = await this.sources.fuse(bindings, [conceptId]);
+      const concept = result.concepts.find((c) => c.concept_ref === conceptId);
+      if (!concept) return null;
+      const synth = concept.synthesis;
+      const covering = concept.source_treatments.filter((t) => t.coverage !== "absent");
+      if (!synth || synth.degraded || covering.length < 2) return null;
+      const titleById = new Map(
+        concept.source_treatments.map((t) => [t.source_version_id, t.title] as const),
+      );
+      return {
+        concept_ref: conceptId,
+        prose: synth.prose,
+        cited_sources: synth.cited_source_ids.map((id) => titleById.get(id) ?? id),
+        acknowledges_disagreement: synth.acknowledges_disagreement,
+        source_count: covering.length,
+        treatments: covering.map((t) => ({ title: t.title, emphasis: t.emphasis })),
+      };
+    } catch {
+      return null;
+    }
+  }
+
   /** Create + enter a new cognitive environment, returning the surface id + owning learner id. */
   async create(
     goal: string,
@@ -378,6 +415,9 @@ export class SurfaceHost {
       sourceEvidence: {
         anchorsForConcept: (conceptId: string, conceptTitle: string) =>
           this.sources.evidenceFor(sourceBindings, conceptId, conceptTitle),
+        // R5 (ADR-0060): the concept's fused cross-source synthesis for FUSION MODE composition.
+        fusedSynthesisForConcept: (conceptId: string, conceptTitle: string) =>
+          this.fusedSynthesisView(sourceBindings, conceptId, conceptTitle),
       },
       // CSE M7 T1: the Cognitive Theater — the Director conducts + Scenes wrap frames. Gateway-only
       // (CLI/tests exercise the pre-Theater frame path so backward compatibility stays covered).
@@ -898,6 +938,9 @@ export class SurfaceHost {
       sourceEvidence: {
         anchorsForConcept: (conceptId: string, conceptTitle: string) =>
           this.sources.evidenceFor(sourceBindings, conceptId, conceptTitle),
+        // R5 (ADR-0060): fused cross-source synthesis for FUSION MODE — matches create().
+        fusedSynthesisForConcept: (conceptId: string, conceptTitle: string) =>
+          this.fusedSynthesisView(sourceBindings, conceptId, conceptTitle),
       },
       // CSE M7 T1: the Cognitive Theater — matches create().
       theater: true,

@@ -112,6 +112,7 @@ export {
   type FrontierOverlayView,
   type SourceEvidenceAnchorView,
   type SourceEvidenceProvider,
+  type FusedSynthesisView,
   type SurfaceFrontierProvider,
   type SourceHighlightAmplitude,
   type SourceHighlightLifetime,
