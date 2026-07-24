@@ -54,11 +54,23 @@ export function SourceReference({ state, activeFrameId, currentSegmentId }: Sour
     () => (state?.viewport_plans ?? []).find((p) => p.frame_id === activeFrameId) ?? null,
     [state, activeFrameId],
   );
-  const source = useMemo(() => {
-    const sources = state?.sources ?? [];
+  const sources = useMemo(() => state?.sources ?? [], [state]);
+  // The source the current teaching is anchored to (the plan's, else the most recent).
+  const taughtSource = useMemo(() => {
     if (plan) return sources.find((s) => s.source_version_id === plan.source_version_id) ?? null;
     return sources[sources.length - 1] ?? null;
-  }, [state, plan]);
+  }, [sources, plan]);
+  // Multi-source Living Reference (Phase 3, E): the learner can browse ANY attached document; the
+  // pane defaults to the taught source and a manual selection is honored until the next frame
+  // (learner-priority, CSE-008 §6.3). Only the taught source carries the live viewport/highlights.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  useEffect(() => setSelectedId(null), [activeFrameId]);
+  const source = useMemo(() => {
+    if (selectedId) return sources.find((s) => s.source_version_id === selectedId) ?? taughtSource;
+    return taughtSource;
+  }, [selectedId, sources, taughtSource]);
+  const isTaught =
+    !!source && !!taughtSource && source.source_version_id === taughtSource.source_version_id;
   const sync = useMemo(
     () => (state?.sync_bindings ?? []).find((b) => b.frame_id === activeFrameId) ?? null,
     [state, activeFrameId],
@@ -169,24 +181,65 @@ export function SourceReference({ state, activeFrameId, currentSegmentId }: Sour
             Resume guide
           </button>
         ) : null}
+        {/* Multi-source (Phase 3, E): switch between every attached document; the taught one is
+            marked with a dot, and browsing another shows a return affordance. */}
+        {sources.length > 1 ? (
+          <div className="source-switcher" role="group" aria-label="Attached documents">
+            {sources.map((s) => {
+              const taught = s.source_version_id === taughtSource?.source_version_id;
+              const shownNow = s.source_version_id === source?.source_version_id;
+              return (
+                <button
+                  key={s.source_version_id}
+                  type="button"
+                  className="source-switch-chip"
+                  data-shown={shownNow ? "true" : "false"}
+                  data-taught={taught ? "true" : "false"}
+                  onClick={() => setSelectedId(taught ? null : s.source_version_id)}
+                  aria-pressed={shownNow}
+                  title={taught ? `${s.title} — being taught now` : s.title}
+                >
+                  {s.title.length > 22 ? `${s.title.slice(0, 21)}…` : s.title}
+                  {taught ? (
+                    <span className="source-switch-dot" aria-hidden>
+                      ●
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+        {!isTaught && taughtSource ? (
+          <button
+            type="button"
+            className="source-resume-guide"
+            onClick={() => setSelectedId(null)}
+            title="Return to the document being taught"
+          >
+            ↩ Back to the taught source
+          </button>
+        ) : null}
       </header>
 
+      {/* Only the taught source carries the live viewport/highlights; browsing another attached
+          document is free reading until "Resume guide" returns to the taught source. */}
       {source.modality === "pdf" ? (
         <PdfViewport
           bytes={fetched?.bytes ?? null}
-          viewport={currentViewport}
-          highlights={highlights}
-          focalRefs={focalRefs}
-          follow={!override}
+          viewport={isTaught ? currentViewport : null}
+          highlights={isTaught ? highlights : []}
+          focalRefs={isTaught ? focalRefs : new Set<string>()}
+          follow={isTaught && !override}
           onLearnerScroll={onLearnerScroll}
         />
       ) : (
         <TextViewport
           bytes={fetched?.bytes ?? null}
-          viewport={currentViewport}
-          highlights={highlights}
-          focalRefs={focalRefs}
-          follow={!override}
+          viewport={isTaught ? currentViewport : null}
+          highlights={isTaught ? highlights : []}
+          focalRefs={isTaught ? focalRefs : new Set<string>()}
+          follow={isTaught && !override}
           onLearnerScroll={onLearnerScroll}
         />
       )}

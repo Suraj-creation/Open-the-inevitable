@@ -4325,6 +4325,36 @@
   padding: 0.15rem 0.5rem;
   cursor: pointer;
 }
+/* Multi-source Living Reference (Phase 3, E): switch between every attached document. */
+.source-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  width: 100%;
+  margin-top: 0.35rem;
+}
+.source-switch-chip {
+  font: inherit;
+  font-size: 0.64rem;
+  color: var(--ink-faint);
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-pill);
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+.source-switch-chip[data-shown="true"] {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--hairline));
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+}
+.source-switch-dot {
+  color: var(--accent);
+  font-size: 0.5rem;
+}
 .source-text-pane,
 .source-pdf-pane {
   flex: 1;
