@@ -71,7 +71,7 @@ not this map (unless a path moves).
 
 - `spec/vision-application/` — the core vision corpus: `Vision.md`,
   `The_Inevitable_Master_Vision.md`, `The_Inevitable_Vision_Comprehensive.md`,
-  `Universal-Learning-Intelligence-Agent.md`, `PLAN.md`, `referenceRepos.md`.
+  `Universal-Learning-Intelligence-Agent.md`, `PLAN.md`.
 
 **Architecture law** — read before architecture, runtime, protocol, memory, orchestration,
 agent, or infrastructure work:
@@ -127,10 +127,6 @@ timeline, multimodal, or rendering work:
 
 **Retrieval** — `spec/indexes/` is the entry point for finding specs, events, protocols,
 capabilities, dependencies, and features as the spec system grows.
-
-**Reference repositories** — mine before inventing: `MiroFish/`, `hermes-agent/`, `OpenMAIC/`,
-`paperclip/`, `pi/`, plus this repo's own `spec/vision-application/` corpus. Per-repo guidance
-lives in `spec/vision-application/referenceRepos.md` and `spec/reference-repos/`.
 
 ## 4. Working Doctrine
 
