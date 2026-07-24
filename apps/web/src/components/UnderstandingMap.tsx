@@ -10,6 +10,7 @@
  */
 import { useEffect, useState } from "react";
 import type { SurfaceState } from "@inevitable/surface/client";
+import { API_BASE } from "../api";
 
 export interface EpisodeView {
   readonly artifact_id: string;
@@ -66,7 +67,7 @@ export function UnderstandingMap({
     }
     setStatus("loading");
     let cancelled = false;
-    void fetch(`/api/learner/${cred.learnerId}/understanding`, {
+    void fetch(`${API_BASE}/api/learner/${cred.learnerId}/understanding`, {
       headers: { Authorization: `Bearer ${cred.apiKey}` },
     })
       .then(async (res) => {

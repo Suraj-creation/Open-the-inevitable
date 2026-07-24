@@ -2,7 +2,14 @@
  * Typed command channel to the Surface Gateway — the ONLY mutation path (SRF-005 §4.3).
  * The client proposes intents; the governed runtime decides. The client never writes canonical state.
  */
-const BASE = "/api";
+/**
+ * Origin of the Surface Gateway. Empty in local dev + same-origin deploys → relative `/api` (the
+ * Vite proxy / same host serves it). For a split deploy (web on Vercel, gateway on Render), set
+ * `VITE_API_BASE` to the gateway's absolute origin at build time; the gateway sends `Access-Control-
+ * Allow-Origin: *`, so cross-origin fetch AND the SSE EventSource work without a proxy (ADR-0062).
+ */
+export const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+const BASE = `${API_BASE}/api`;
 const LEARNER_STORE_KEY = "inevitable.learner";
 
 interface LearnerCredential {

@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: inevitable-gateway
+    runtime: node
+    plan: free
+    # --prod=false so pnpm installs devDependencies (tsx runs the TS gateway directly).
+    buildCommand: pnpm install --prod=false --frozen-lockfile
+    startCommand: pnpm --filter @inevitable/api start
+    # A lightweight always-200 GET — the gateway stays untouched.
+    healthCheckPath: /api/sources/commons
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Free tier has an EPHEMERAL disk — /tmp persists only within an instance's life (learner
+      # memory resets on redeploy/idle-spindown). Wire the Supabase adapter for true durability.
+      - key: COS_PERSIST_DIR
+        value: /tmp/cos-data
+      # Set in the Render dashboard (Google AI Studio free tier). Absent → deterministic null model.
+      - key: GEMINI_API_KEY
+        sync: false

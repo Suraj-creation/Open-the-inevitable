@@ -16,6 +16,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SurfaceState } from "@inevitable/surface/client";
+import { API_BASE } from "./api";
 import { foldStream, type StreamEvent } from "./surface-stream";
 
 export type ConnectionStatus = "idle" | "connecting" | "live" | "reconnecting";
@@ -55,7 +56,7 @@ export function useSurfaceStream(surfaceId: string | null): SurfaceStream {
         : (setTimeout(flush, 16) as unknown as number);
     };
 
-    const source = new EventSource(`/api/surface/${surfaceId}/stream`);
+    const source = new EventSource(`${API_BASE}/api/surface/${surfaceId}/stream`);
     source.addEventListener("surface", (event) => {
       try {
         const parsed = JSON.parse((event as MessageEvent<string>).data) as StreamEvent;

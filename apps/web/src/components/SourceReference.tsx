@@ -20,6 +20,7 @@ import type {
   SourceViewport,
   SurfaceState,
 } from "@inevitable/surface/client";
+import { API_BASE } from "../api";
 
 type Fidelity = "verifying" | "verified" | "mismatch";
 
@@ -119,7 +120,7 @@ export function SourceReference({ state, activeFrameId, currentSegmentId }: Sour
     setFidelity("verifying");
     void (async () => {
       try {
-        const res = await fetch(`/api/sources/${versionId}/content`);
+        const res = await fetch(`${API_BASE}/api/sources/${versionId}/content`);
         if (!res.ok) return;
         const serverHash = res.headers.get("x-content-hash");
         const bytes = new Uint8Array(await res.arrayBuffer());
