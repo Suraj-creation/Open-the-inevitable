@@ -142,6 +142,7 @@ export {
   type ExpertiseLevel,
   type RepresentationAdaptivity,
 } from "./representation";
+export { deriveEpisodes, currentEpisode, type Episode } from "./episodes";
 export {
   NullMultimodalProvider,
   ProviderRegistry,

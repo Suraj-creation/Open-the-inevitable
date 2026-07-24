@@ -5,11 +5,11 @@
  * path) always takes precedence and enters the live cognitive environment. The surface flow
  * itself is unchanged: enter → governed commands out, the folded event stream back.
  */
-import { Suspense, lazy, useEffect, useRef, useState, type FormEvent } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { BrowserRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { enterSurface, sendCommand } from "./api";
+import { sendCommand } from "./api";
+import { EnterCard } from "./components/EnterCard";
 import { Landing } from "./landing/Landing";
-import { SiteNav } from "./site/SiteNav";
 import { SurfaceView } from "./SurfaceView";
 import { useSurfaceStream } from "./useSurfaceStream";
 
@@ -92,9 +92,6 @@ function Home() {
 function SurfaceApp() {
   // Resume the surface named in the URL on load (review §18/§24) — the gateway rehydrates it.
   const [surfaceId, setSurfaceId] = useState<string | null>(surfaceIdFromUrl);
-  const [goal, setGoal] = useState("Teach me Neural Networks");
-  const [mode, setMode] = useState<"student" | "educator">("student");
-  const [entering, setEntering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // "Working" acknowledgement (review N7/issue 10): after a command the learner sees the surface is
   // thinking, cleared when new cognition streams in (or after a safety timeout) — never dead silence.
@@ -114,26 +111,13 @@ function SurfaceApp() {
     return () => clearTimeout(t);
   }, [working]);
 
-  const enter = async (): Promise<void> => {
-    const trimmed = goal.trim();
-    if (!trimmed) return;
-    setEntering(true);
-    setError(null);
-    try {
-      const id = await enterSurface(trimmed, mode);
-      setSurfaceId(id);
-      // Reflect the surface in the URL so it can be linked / resumed / shared.
-      if (typeof window !== "undefined") {
-        window.history.pushState(null, "", `?s=${encodeURIComponent(id)}`);
-      }
-      // Enter the environment, then begin thinking — effects arrive live over the stream.
-      await sendCommand(id, { type: "ask", goal: trimmed });
-    } catch (cause) {
-      // Never fail silently (N8): surface a real, recoverable error state.
-      setError(cause instanceof Error ? cause.message : "Could not reach the cognitive surface.");
-      setSurfaceId(null);
-    } finally {
-      setEntering(false);
+  // The EnterCard owns the source-first entry flow (register → analyze → create → attach →
+  // teach/ask) and hands back the created surface id; we reflect it in the URL so it can be
+  // linked / resumed / shared, then the stream connects and cognition arrives live.
+  const handleEntered = (id: string): void => {
+    setSurfaceId(id);
+    if (typeof window !== "undefined") {
+      window.history.pushState(null, "", `?s=${encodeURIComponent(id)}`);
     }
   };
 
@@ -157,61 +141,7 @@ function SurfaceApp() {
     });
   };
 
-  if (!surfaceId) {
-    const submit = (event: FormEvent): void => {
-      event.preventDefault();
-      void enter();
-    };
-    return (
-      <div className="enter">
-        <SiteNav onJourney />
-        <div className="enter-aura" aria-hidden />
-        <div className="enter-card">
-          <span className="enter-eyebrow">Cognitive Operating System</span>
-          <h1 className="enter-title">
-            Watch understanding <em>unfold</em>.
-          </h1>
-          <p className="enter-sub">
-            A living surface where cognition becomes visible — agents think, concepts take the
-            stage, and a path forms as you learn.
-          </p>
-          <form className="enter-form" onSubmit={submit}>
-            {error ? (
-              <p className="enter-error" role="alert">
-                {error}
-              </p>
-            ) : null}
-            <input
-              className="enter-input"
-              value={goal}
-              onChange={(event) => setGoal(event.target.value)}
-              placeholder="What do you want to understand?"
-              aria-label="What do you want to understand?"
-            />
-            <div className="enter-mode-row" role="group" aria-label="Surface mode">
-              {(["student", "educator"] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  className={`enter-mode-chip${mode === m ? " enter-mode-chip--active" : ""}`}
-                  onClick={() => setMode(m)}
-                  aria-pressed={mode === m}
-                >
-                  {m === "student" ? "Student" : "Educator"}
-                </button>
-              ))}
-            </div>
-            <button type="submit" className="enter-go" disabled={entering}>
-              {entering ? "Entering…" : "Enter"}
-              <span className="enter-go-icon" aria-hidden>
-                →
-              </span>
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
+  if (!surfaceId) return <EnterCard onEntered={handleEntered} />;
 
   return (
     <>

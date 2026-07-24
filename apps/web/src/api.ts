@@ -520,6 +520,26 @@ export async function attachSource(surfaceId: string, sourceVersionId: string): 
   return json.ok === true;
 }
 
+/**
+ * Teach FROM a bound source (R2c, ADR-0057 D3): the document's own concepts/sections become the
+ * curriculum — the document IS the timeline. Optional `sourceVersionId` targets one bound source;
+ * omitted, the gateway teaches the surface's primary source. Returns true when a timeline was built
+ * (frames stream in over the surface); throws the gateway's message on refusal (no usable structure).
+ */
+export async function teachSource(surfaceId: string, sourceVersionId?: string): Promise<boolean> {
+  const res = await fetch(`${BASE}/surface/${surfaceId}/teach-source`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(sourceVersionId ? { source_version_id: sourceVersionId } : {}),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(detail || `gateway could not teach from this source (${res.status})`);
+  }
+  const json = (await res.json()) as { ok: boolean };
+  return json.ok === true;
+}
+
 // ── Source acquisition — the Source Dock's ingest path (CSE-017, ADR-0056) ───────────────────────
 // A learner brings a source in-product: raw bytes for a file, a URL for a governed crawl. The
 // registration summary IS the honest loading narrative (which layers built, which degraded, usable).

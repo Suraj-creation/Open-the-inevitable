@@ -49,6 +49,8 @@ export type {
   ExpertiseLevel,
   RepresentationAdaptivity,
 } from "./representation";
+export { deriveEpisodes, currentEpisode } from "./episodes";
+export type { Episode } from "./episodes";
 export type {
   CognitionBlock,
   CognitionBlockType,

@@ -2,11 +2,18 @@
  * SourceDock — the front door (CSE-017, ADR-0056): a learner brings a source in-product. Drag or
  * pick a file, paste a URL for a governed crawl, or paste text — the dock infers the modality,
  * refuses what the system can't yet understand (honestly, before upload), registers it, narrates
- * the canonicalization from the pipeline's OWN output, then auto-attaches it so the Living Reference
- * appears. A thin interactive container over pure, tested helpers (`inferModality`, `describeLayers`).
+ * the canonicalization from the pipeline's OWN output, then asks the learner to CONSENT before use
+ * (R5, ADR-0062): "Use this document" weaves it in, "Teach this source" rebuilds the lesson from it —
+ * a mid-session upload never silently hijacks teaching. Thin container over pure, tested helpers.
  */
 import { useCallback, useRef, useState } from "react";
-import { attachSource, crawlSource, registerSource, type RegisteredSourceView } from "../api";
+import {
+  attachSource,
+  crawlSource,
+  registerSource,
+  teachSource,
+  type RegisteredSourceView,
+} from "../api";
 
 /** Extension → modality, with an honest refusal for what has no adapter yet (CSE-017 §3/§5). */
 export interface ModalityInference {
@@ -139,15 +146,11 @@ export function SourceDock({
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const finish = useCallback(
-    async (source: RegisteredSourceView) => {
-      // Auto-attach so the Living Reference appears without a second gesture (CSE-017 §3.4).
-      await attachSource(surfaceId, source.source_version_id).catch(() => {});
-      setPhase({ kind: "done", source });
-      onAttached?.(source);
-    },
-    [surfaceId, onAttached],
-  );
+  // R5 (ADR-0062): registration does NOT attach. A mid-session source is only used once the learner
+  // consents in the narrative ("Use this document" / "Teach this source") — never a silent hijack.
+  const finish = useCallback(async (source: RegisteredSourceView) => {
+    setPhase({ kind: "done", source });
+  }, []);
 
   const ingestFile = useCallback(
     async (file: File) => {
@@ -220,7 +223,12 @@ export function SourceDock({
         </header>
 
         {phase.kind === "done" ? (
-          <SourceDockNarrative source={phase.source} onClose={onClose} />
+          <SourceDockNarrative
+            surfaceId={surfaceId}
+            source={phase.source}
+            onClose={onClose}
+            {...(onAttached ? { onAttached } : {})}
+          />
         ) : (
           <div className="source-dock-body">
             {/* File — drag or pick */}
@@ -323,15 +331,42 @@ export function SourceDock({
   );
 }
 
-/** The honest canonicalization narrative shown once a source is registered + attached (CSE-017 §4). */
+/**
+ * The honest canonicalization narrative shown once a source is registered (CSE-017 §4), followed by
+ * the CONSENT gate (R5, ADR-0062). The source is registered but not yet used: "Use this document"
+ * attaches it so teaching weaves it in from the next frame; "Teach this source" attaches AND rebuilds
+ * the lesson from the document now (teachSource). Nothing is used without the learner's tap.
+ */
 export function SourceDockNarrative({
+  surfaceId,
   source,
   onClose,
+  onAttached,
 }: {
+  readonly surfaceId: string;
   readonly source: RegisteredSourceView;
   readonly onClose: () => void;
+  readonly onAttached?: (source: RegisteredSourceView) => void;
 }) {
   const { built, degraded, verdict } = describeLayers(source);
+  const [pending, setPending] = useState<null | "use" | "teach">(null);
+
+  const use = useCallback(async () => {
+    setPending("use");
+    await attachSource(surfaceId, source.source_version_id).catch(() => {});
+    onAttached?.(source);
+    onClose();
+  }, [surfaceId, source, onAttached, onClose]);
+
+  const teach = useCallback(async () => {
+    setPending("teach");
+    await attachSource(surfaceId, source.source_version_id).catch(() => {});
+    onAttached?.(source);
+    // Rebuild the lesson from the document — the document becomes the timeline (R2c).
+    await teachSource(surfaceId, source.source_version_id).catch(() => {});
+    onClose();
+  }, [surfaceId, source, onAttached, onClose]);
+
   return (
     <div className="source-dock-narrative">
       <h3 className="commons-entry-title">{source.title}</h3>
@@ -348,9 +383,36 @@ export function SourceDockNarrative({
         ))}
       </ul>
       <p className="source-dock-verdict">{verdict}</p>
-      <button type="button" className="commons-attach-btn" onClick={onClose}>
-        Start learning from it
-      </button>
+      {source.usable ? (
+        <>
+          <div className="source-dock-consent" role="group" aria-label="Use this source">
+            <button
+              type="button"
+              className="commons-attach-btn"
+              onClick={() => void use()}
+              disabled={pending !== null}
+            >
+              {pending === "use" ? "Adding…" : "Use this document"}
+            </button>
+            <button
+              type="button"
+              className="commons-attach-btn source-dock-teach-btn"
+              onClick={() => void teach()}
+              disabled={pending !== null}
+            >
+              {pending === "teach" ? "Rebuilding…" : "Teach this source"}
+            </button>
+          </div>
+          <p className="source-dock-consent-hint">
+            “Use” weaves it into the lesson as it goes. “Teach” rebuilds the lesson from the
+            document.
+          </p>
+        </>
+      ) : (
+        <button type="button" className="commons-attach-btn" onClick={onClose}>
+          Close
+        </button>
+      )}
     </div>
   );
 }

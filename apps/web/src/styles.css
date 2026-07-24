@@ -57,26 +57,140 @@
   margin: 0;
   font-size: var(--t-md);
 }
+/* R5 (ADR-0062): the enter card is now a source-first column (topic optional + staged sources),
+   not a single input pill. */
 .enter-form {
   display: flex;
-  gap: var(--s-2);
-  width: min(34rem, 92vw);
+  flex-direction: column;
+  gap: var(--s-3);
+  width: min(38rem, 94vw);
   margin-top: var(--s-3);
-  padding: var(--s-2);
+  padding: var(--s-4);
   background: var(--surface-1);
   border: 1px solid var(--hairline);
-  border-radius: var(--r-pill);
+  border-radius: var(--r-lg, 20px);
   box-shadow: var(--inset-hi);
+  text-align: left;
 }
 .enter-input {
-  flex: 1;
-  min-width: 0;
-  background: transparent;
-  border: none;
+  width: 100%;
+  background: var(--surface-2, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md, 12px);
   outline: none;
   color: var(--ink);
   font-size: var(--t-md);
-  padding: var(--s-2) var(--s-4);
+  padding: var(--s-3) var(--s-4);
+}
+.enter-form .enter-go {
+  align-self: stretch;
+  justify-content: center;
+}
+/* Source staging — bring one or more sources to learn from. */
+.enter-sources {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.enter-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  align-items: center;
+}
+.enter-source-btn {
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-pill);
+  background: var(--surface-2, transparent);
+  color: var(--ink-soft);
+  font-size: var(--t-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.enter-source-btn:hover {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--hairline));
+}
+.enter-source-url {
+  flex: 1;
+  min-width: 10rem;
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-pill);
+  outline: none;
+  color: var(--ink);
+  font-size: var(--t-sm);
+  padding: var(--s-2) var(--s-3);
+}
+.enter-source-paste > summary {
+  cursor: pointer;
+  font-size: var(--t-sm);
+  color: var(--ink-faint);
+}
+.enter-staged {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1, 0.25rem);
+}
+.enter-staged-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  font-size: var(--t-sm);
+  padding: 0.3rem var(--s-2);
+  border-radius: var(--r-sm, 8px);
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
+}
+.enter-staged-item.is-refused {
+  background: color-mix(in oklab, var(--state-confusion) 8%, transparent);
+}
+.enter-staged-name {
+  color: var(--ink);
+  font-weight: 560;
+}
+.enter-staged-note {
+  flex: 1;
+  color: var(--ink-faint);
+}
+.enter-staged-remove {
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+/* The "understanding your sources" phase — the analyze-first narrative before teaching. */
+.enter-analyzing {
+  margin-top: var(--s-3);
+  text-align: left;
+}
+.enter-analyzing-title {
+  margin: 0 0 var(--s-2);
+  color: var(--ink);
+  font-weight: 560;
+}
+.enter-analyzing-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.enter-analyzing-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: var(--t-sm);
+}
+.enter-analyzing-name {
+  color: var(--ink);
+}
+.enter-analyzing-state {
+  color: var(--ink-faint);
 }
 .enter-input::placeholder {
   color: var(--ink-ghost);
@@ -3737,6 +3851,52 @@
   padding-left: 1.1rem;
 }
 
+/* ── Observatory: the session's learning arc (episodes, R5 ADR-0061) ── */
+.episodes-panel {
+  margin-top: var(--s-4);
+}
+.episodes-empty {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--ink-faint);
+}
+.episodes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.episode {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.1rem 0.6rem;
+  font-size: var(--t-xs);
+  padding-left: 0.5rem;
+  border-left: 2px solid transparent;
+}
+/* The episode being voiced is the resume anchor — a quiet accent bar. */
+.episode[data-current="true"] {
+  border-left-color: color-mix(in oklab, var(--accent) 55%, transparent);
+}
+.episode-title {
+  color: var(--ink);
+  font-weight: 560;
+}
+.episode-arc {
+  grid-column: 1 / -1;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+}
+.episode-status {
+  color: var(--ink-faint);
+  justify-self: end;
+}
+.episode-status[data-status="mastered"] {
+  color: color-mix(in oklab, var(--state-mastery, #d9b25f) 75%, var(--ink-soft));
+}
+
 /* ── Observatory: cognition health, playback diagnostics, and the raw event log ── */
 .health-panel,
 .playback-panel,
@@ -5457,6 +5617,27 @@
   margin: var(--s-2) 0;
   font-size: 0.86rem;
   color: var(--ink);
+}
+/* R5 (ADR-0062): the consent gate — use it in the ongoing lesson, or rebuild the lesson from it. */
+.source-dock-consent {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+}
+.source-dock-teach-btn {
+  background: transparent;
+  border: 1px solid var(--hairline);
+  color: var(--ink-soft);
+}
+.source-dock-teach-btn:hover {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--hairline));
+}
+.source-dock-consent-hint {
+  margin: var(--s-2) 0 0;
+  font-size: 0.76rem;
+  color: var(--ink-faint);
 }
 
 /* ── M12 T1 — Source Cognition deep-transparency (ADR-0050). The runtime made visible: activity

@@ -14,6 +14,7 @@ import { HealthPanel } from "./HealthPanel";
 import { ProvenancePeek } from "./ProvenancePeek";
 import { ReasoningPanel } from "./ReasoningPanel";
 import { RepresentationPanel } from "./RepresentationPanel";
+import { EpisodesPanel } from "./EpisodesPanel";
 
 export interface PlaybackDiagnostics {
   readonly mode: string;
@@ -69,6 +70,7 @@ export function Observatory({
           representations={state?.representations ?? []}
           activeFrameId={activeFrameId}
         />
+        <EpisodesPanel state={state} activeFrameId={activeFrameId} />
         <EnsemblePanel
           proposals={state?.proposals ?? []}
           disagreements={state?.disagreements ?? []}
