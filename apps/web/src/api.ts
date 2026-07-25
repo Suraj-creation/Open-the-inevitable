@@ -40,21 +40,59 @@ function writeCredential(cred: LearnerCredential): void {
 }
 
 /**
+ * The gateway may be COLD on a free host (e.g. Render spins the instance down after ~15 min idle):
+ * the first request then fails at the network layer (a rejected `fetch` → "Failed to fetch") or
+ * hangs while the instance boots. We retry ONLY network-level failures — a returned HTTP response,
+ * success or error, is handed back untouched — a few times with backoff, so a waking gateway
+ * resolves to success instead of a dead-end error. `onWaking` fires once, the moment we first detect
+ * a likely cold start, so the caller can tell the learner the server is waking rather than broken.
+ */
+async function wakingFetch(
+  url: string,
+  init: RequestInit,
+  opts?: { readonly onWaking?: () => void },
+): Promise<Response> {
+  const retries = 6;
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fetch(url, init);
+    } catch (cause) {
+      lastError = cause; // network-level (TypeError) — the gateway is likely cold and booting
+      if (attempt === 0) opts?.onWaking?.();
+      if (attempt < retries) {
+        const backoffMs = Math.min(2500 * (attempt + 1), 8000);
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("gateway unreachable");
+}
+
+/**
  * Enter a new cognitive environment; returns the surface id to stream from. If we hold a learner
  * credential from a prior visit, we authenticate as that learner so the gateway seeds the new surface
  * with their prior mastery (F05 continuity — a returning learner never starts from zero). A freshly
  * minted learner's api_key is captured and persisted for next time.
  */
-export async function enterSurface(goal: string, mode?: string): Promise<string> {
+export async function enterSurface(
+  goal: string,
+  mode?: string,
+  onWaking?: () => void,
+): Promise<string> {
   const cred = readCredential();
-  const res = await fetch(`${BASE}/surface`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(cred ? { Authorization: `Bearer ${cred.apiKey}` } : {}),
+  const res = await wakingFetch(
+    `${BASE}/surface`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(cred ? { Authorization: `Bearer ${cred.apiKey}` } : {}),
+      },
+      body: JSON.stringify({ goal, ...(mode ? { mode } : {}) }),
     },
-    body: JSON.stringify({ goal, ...(mode ? { mode } : {}) }),
-  });
+    { onWaking },
+  );
   const json = (await res.json()) as {
     ok: boolean;
     surface_id?: string;
@@ -573,6 +611,7 @@ export async function registerSource(input: {
   content: string | ArrayBuffer | Uint8Array;
   modality: string;
   title: string;
+  onWaking?: () => void;
 }): Promise<RegisteredSourceView> {
   const query = `modality=${encodeURIComponent(input.modality)}&title=${encodeURIComponent(input.title)}`;
   // Binary content ships as a Blob (a clean BodyInit for raw bytes); text ships as a string.
@@ -584,13 +623,17 @@ export async function registerSource(input: {
       input.content instanceof Uint8Array ? input.content : new Uint8Array(input.content);
     body = new Blob([bytes as BlobPart]);
   }
-  const res = await fetch(`${BASE}/sources?${query}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": input.modality === "pdf" ? "application/pdf" : "text/plain; charset=utf-8",
+  const res = await wakingFetch(
+    `${BASE}/sources?${query}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": input.modality === "pdf" ? "application/pdf" : "text/plain; charset=utf-8",
+      },
+      body,
     },
-    body,
-  });
+    { onWaking: input.onWaking },
+  );
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(detail || `gateway rejected source (${res.status})`);
@@ -604,12 +647,19 @@ export async function registerSource(input: {
  * Register a web page by URL via the governed server-side crawler (ADR-0052). SSRF-safe,
  * deny-by-default; a blocked URL throws the gateway's policy explanation for the dock to show.
  */
-export async function crawlSource(url: string): Promise<RegisteredSourceView> {
-  const res = await fetch(`${BASE}/sources/crawl`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
-  });
+export async function crawlSource(
+  url: string,
+  onWaking?: () => void,
+): Promise<RegisteredSourceView> {
+  const res = await wakingFetch(
+    `${BASE}/sources/crawl`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    },
+    { onWaking },
+  );
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(detail || `gateway rejected crawl (${res.status})`);

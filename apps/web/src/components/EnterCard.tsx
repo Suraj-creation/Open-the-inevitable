@@ -28,13 +28,15 @@ interface StagedSource {
   readonly label: string;
   readonly note: string;
   readonly refused: boolean;
-  readonly register: () => Promise<RegisteredSourceView>;
+  readonly register: (onWaking?: () => void) => Promise<RegisteredSourceView>;
 }
 
 type Phase =
   | { readonly kind: "idle" }
   | { readonly kind: "analyzing"; readonly done: readonly RegisteredSourceView[] }
   | { readonly kind: "entering" }
+  // The free-tier gateway was asleep; the first request is waking it (cold start, ~30–60s).
+  | { readonly kind: "waking" }
   | { readonly kind: "error"; readonly message: string };
 
 const PASTE_MODALITIES: readonly { readonly value: string; readonly label: string }[] = [
@@ -56,7 +58,7 @@ export function EnterCard({ onEntered }: { readonly onEntered: (surfaceId: strin
   const [pasteModality, setPasteModality] = useState("markdown");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const busy = phase.kind === "analyzing" || phase.kind === "entering";
+  const busy = phase.kind === "analyzing" || phase.kind === "entering" || phase.kind === "waking";
   const usable = staged.filter((s) => !s.refused);
   const canEnter = !busy && (topic.trim().length > 0 || usable.length > 0);
 
@@ -84,9 +86,9 @@ export function EnterCard({ onEntered }: { readonly onEntered: (surfaceId: strin
         label: file.name,
         note: inf.note,
         refused: false,
-        register: async () => {
+        register: async (onWaking) => {
           const content = inf.binary ? await file.arrayBuffer() : await file.text();
-          return registerSource({ content, modality, title: file.name });
+          return registerSource({ content, modality, title: file.name, onWaking });
         },
       });
     },
@@ -101,7 +103,7 @@ export function EnterCard({ onEntered }: { readonly onEntered: (surfaceId: strin
       label: trimmed,
       note: "Web page",
       refused: false,
-      register: () => crawlSource(trimmed),
+      register: (onWaking) => crawlSource(trimmed, onWaking),
     });
     setUrl("");
   }, [url, addStaged]);
@@ -116,7 +118,8 @@ export function EnterCard({ onEntered }: { readonly onEntered: (surfaceId: strin
       label: `Pasted ${modality}`,
       note: PASTE_MODALITIES.find((m) => m.value === modality)?.label ?? modality,
       refused: false,
-      register: () => registerSource({ content, modality, title: `Pasted ${modality}` }),
+      register: (onWaking) =>
+        registerSource({ content, modality, title: `Pasted ${modality}`, onWaking }),
     });
     setPaste("");
   }, [paste, pasteModality, addStaged]);
@@ -130,13 +133,16 @@ export function EnterCard({ onEntered }: { readonly onEntered: (surfaceId: strin
     const sources = staged.filter((s) => !s.refused);
     if (!topicText && sources.length === 0) return;
 
+    // A cold free-tier gateway wakes on the first request — reflect that instead of looking frozen.
+    const wake = () => setPhase({ kind: "waking" });
+
     try {
       // 1. Analyze the sources first — canonicalize each, surfacing the honest narrative as we go.
       const registered: RegisteredSourceView[] = [];
       if (sources.length > 0) {
         setPhase({ kind: "analyzing", done: [] });
         for (const s of sources) {
-          const view = await s.register();
+          const view = await s.register(wake);
           registered.push(view);
           setPhase({ kind: "analyzing", done: [...registered] });
         }
@@ -147,19 +153,22 @@ export function EnterCard({ onEntered }: { readonly onEntered: (surfaceId: strin
       setPhase({ kind: "entering" });
       const derivedGoal =
         topicText || (registered[0] ? `Learn from “${registered[0].title}”` : "Learn");
-      const surfaceId = await enterSurface(derivedGoal, mode);
+      const surfaceId = await enterSurface(derivedGoal, mode, wake);
 
-      // 3. Attach every analyzed source (entry uploads are implicitly consented).
+      // 3. Attach every analyzed source (entry uploads are implicitly consented). Quick, no model.
       for (const view of registered) {
         await attachSource(surfaceId, view.source_version_id).catch(() => {});
       }
 
-      // 4. Drive teaching topic-adaptively.
+      // 4. Drive teaching topic-adaptively — but do NOT await it. The lesson pipeline can take a
+      //    while (many model calls; minutes on a free instance), and its effects arrive over the
+      //    surface's live stream, not this call's response. So we enter the surface NOW and let the
+      //    teaching unfold there in real time, rather than blocking the learner on a slow request.
       if (topicText) {
-        await sendCommand(surfaceId, { type: "ask", goal: topicText });
+        void sendCommand(surfaceId, { type: "ask", goal: topicText }).catch(() => {});
       } else {
         // Source(s) only → teach the document itself (the document is the timeline, R2c).
-        await teachSource(surfaceId).catch(() => {});
+        void teachSource(surfaceId).catch(() => {});
       }
 
       onEntered(surfaceId);
@@ -190,12 +199,14 @@ export function EnterCard({ onEntered }: { readonly onEntered: (surfaceId: strin
           — the surface teaches from what you give it.
         </p>
 
-        {phase.kind === "analyzing" || phase.kind === "entering" ? (
+        {phase.kind === "analyzing" || phase.kind === "entering" || phase.kind === "waking" ? (
           <div className="enter-analyzing" role="status" aria-live="polite">
             <p className="enter-analyzing-title">
-              {phase.kind === "entering"
-                ? "Building your environment…"
-                : "Understanding your sources…"}
+              {phase.kind === "waking"
+                ? "Waking the server… (free tier — this can take up to a minute)"
+                : phase.kind === "entering"
+                  ? "Building your environment…"
+                  : "Understanding your sources…"}
             </p>
             <ul className="enter-analyzing-list">
               {staged

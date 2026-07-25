@@ -36,3 +36,6 @@ Thumbs.db
 
 # Durable gateway data (dev default; cross-session continuity)
 .cos-data/
+
+.vercel
+.env*
