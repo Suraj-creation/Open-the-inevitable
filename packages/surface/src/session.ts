@@ -798,6 +798,7 @@ export class SurfaceSession {
       "interpreting",
       input.concepts.find((c) => c.id === input.focusConceptId)?.title ?? input.focusConceptId,
     );
+    const composerWired = !!this.deps.composerDispatcher;
     const loopResult = await this.deps.loop.run({
       session: learner,
       pathId: input.pathId,
@@ -810,12 +811,20 @@ export class SurfaceSession {
       surfaceId,
       // Cooperative interrupt (S1.3, ADR-0024): the fiber early-exits at the next phase boundary.
       isInterrupted: () => this.interrupted,
+      // Progressive first-frame delivery (ADR-0063): when a composer is wired the frame board is
+      // distilled by the Composer, and the loop's explanation output is discarded — so we skip that
+      // model round-trip (and its concurrent challenger) to shorten time-to-first-frame. The legacy
+      // explanation-block path (no composer) still generates it.
+      skipExplanation: composerWired,
+      // On the composer path run ONLY supervisor routing here so Frame 1 can compose immediately;
+      // practice + mastery run in a follow-up pass below, after the first frame has surfaced.
+      ...(composerWired ? { only: "routing" as const } : {}),
       ...(input.assembledContextItems
         ? { assembledContextItems: input.assembledContextItems }
         : {}),
     });
     if (!loopResult.ok) return loopResult;
-    const cycle = loopResult.value;
+    let cycle = loopResult.value;
     const focusTitle =
       input.concepts.find((c) => c.id === input.focusConceptId)?.title ?? input.focusConceptId;
     const conceptNodeId = `concept:${input.focusConceptId}`;
@@ -978,6 +987,38 @@ export class SurfaceSession {
         }
       }
     }
+    // Progressive first-frame delivery (ADR-0063): Frame 1 has now surfaced. Run the deferred
+    // practice + mastery model work as a follow-up pass, re-using the routing already decided (so the
+    // supervisor is neither re-run nor re-emitted). This pass was split off the routing pass above so
+    // the practice model call never blocked the first frame. Skipped when routing was terminal (the
+    // routing-only pass early-exited, exactly as the full cycle would have) or when no composer split
+    // the cycle (the legacy path already produced a full cycle in one pass).
+    if (
+      composerWired &&
+      cycle.routing.targetAgent !== "complete" &&
+      cycle.routing.targetAgent !== "revision"
+    ) {
+      const followUp = await this.deps.loop.run({
+        session: learner,
+        pathId: input.pathId,
+        concepts: input.concepts,
+        focusConceptId: input.focusConceptId,
+        explanationPrompt: input.explanationPrompt,
+        practicePrompt: input.practicePrompt,
+        mastery: input.mastery,
+        surfaceId,
+        isInterrupted: () => this.interrupted,
+        skipExplanation: true,
+        only: "practice-mastery",
+        precomputedRouting: cycle.routing,
+        ...(input.assembledContextItems
+          ? { assembledContextItems: input.assembledContextItems }
+          : {}),
+      });
+      if (!followUp.ok) return followUp;
+      cycle = { ...cycle, practice: followUp.value.practice, mastery: followUp.value.mastery };
+    }
+
     if (cycle.practice) {
       const block = await this.contributions.contribute(
         contributionFromDispatch({
@@ -1182,7 +1223,9 @@ export class SurfaceSession {
     // 10. S4.2 — Cognitive evaluation: score the cycle's reasoning quality (ADR-0027).
     // Builds a minimal ReasoningTrace from the explanation result, evaluates it, and emits
     // `surface.evaluation.recorded` for the fold. Engine absent ⇒ no evaluation record.
-    if (this.deps.evaluationEngine) {
+    // Skipped when the explanation was not generated (composer frame path, ADR-0063): the evaluation
+    // scores the explanation's reasoning trace, so there is nothing to evaluate.
+    if (this.deps.evaluationEngine && cycle.explanation) {
       await this.resolveEvaluation(surfaceId, input, cycle);
     }
 
@@ -1520,10 +1563,14 @@ export class SurfaceSession {
     const startedMs = this.clock.nowMs();
     // R2a (ADR-0057 D1): feed the concept's anchored passages INTO composition so the board + voice
     // are grounded in the document (the composer quotes it, never invents beyond it). Empty ⇒ goal-mode.
-    const sourceExcerpts = await this.sourceExcerptsFor(conceptId, conceptTitle);
     // R5 (ADR-0060): when ≥2 sources cover the concept, feed the FUSED cross-source synthesis INTO
     // composition so the frame teaches the reconciled understanding (FUSION MODE). Null ⇒ unchanged.
-    const fusedSynthesis = await this.fusedSynthesisFor(conceptId, conceptTitle);
+    // Phase C (ADR-0063): the excerpt and fusion reads are independent and emit no surface events, so
+    // resolve them concurrently — one round-trip's latency instead of two before the composer runs.
+    const [sourceExcerpts, fusedSynthesis] = await Promise.all([
+      this.sourceExcerptsFor(conceptId, conceptTitle),
+      this.fusedSynthesisFor(conceptId, conceptTitle),
+    ]);
     const dispatched = await dispatcher.dispatch({
       session: this.deps.session,
       targetAgentId: "composer",

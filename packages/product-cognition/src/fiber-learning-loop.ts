@@ -106,6 +106,27 @@ export interface FiberedLearningLoopInput {
    * recorded surface events and never re-runs the loop, so determinism is preserved.
    */
   readonly isInterrupted?: () => boolean;
+  /**
+   * Progressive first-frame delivery (ADR-0063): on the Surface's composer/frame path the loop's
+   * explanation output is discarded — the Composer re-distills the concept into the on-board frame —
+   * so generating it only stalls time-to-first-frame. When true, the explanation (and its concurrent
+   * challenger) dispatch is skipped; `explanation` in the result is null. Routing, practice, and
+   * mastery are unchanged. Off by default (the CLI/legacy explanation-block path still needs it).
+   */
+  readonly skipExplanation?: boolean;
+  /**
+   * Progressive first-frame delivery (ADR-0063): split the cycle so Frame 1 need not wait on the
+   * practice model call. `"routing"` runs supervisor routing then returns (practice/mastery null) —
+   * the Surface composes Frame 1 immediately; `"practice-mastery"` skips supervisor (re-using the
+   * routing already decided, passed as `precomputedRouting`) and runs only practice + mastery, as a
+   * follow-up pass after Frame 1 has surfaced. Undefined ⇒ the full cycle in one pass (legacy/CLI).
+   */
+  readonly only?: "routing" | "practice-mastery";
+  /**
+   * The routing decision from the prior `only:"routing"` pass, threaded into the `"practice-mastery"`
+   * follow-up so the result carries routing without re-running (and re-emitting) the supervisor.
+   */
+  readonly precomputedRouting?: SupervisorRoutingDecision;
 }
 
 export interface FiberedLearningLoopResult {
@@ -198,43 +219,59 @@ function makeLearningCycleRoutine(
     const userId = input.session.intentLease.owner_user_id;
 
     // --- Phase 1: supervisor routing ---
-    yield* ctx.reason("phase:supervisor-routing", input.focusConceptId);
-    const supervisorToken = `supervisor:${ctx.fiberId}`;
-    yield* ctx.emit(
-      makeEvent("learning.fiber.supervisor.routing.requested", {
-        token: supervisorToken,
-        conceptId: input.focusConceptId,
-        learnerUserId: userId,
-      }),
-    );
-    const routing = yield* ctx.awaitValue<SupervisorRoutingDecision>(supervisorToken);
-    yield* ctx.reason(`phase:routing-decided:${routing.targetAgent}`, routing.reason);
+    // Progressive first-frame delivery (ADR-0063): the `practice-mastery` follow-up pass skips this
+    // phase — routing was already decided (and emitted) by the preceding `routing` pass.
+    if (input.only !== "practice-mastery") {
+      yield* ctx.reason("phase:supervisor-routing", input.focusConceptId);
+      const supervisorToken = `supervisor:${ctx.fiberId}`;
+      yield* ctx.emit(
+        makeEvent("learning.fiber.supervisor.routing.requested", {
+          token: supervisorToken,
+          conceptId: input.focusConceptId,
+          learnerUserId: userId,
+        }),
+      );
+      const routing = yield* ctx.awaitValue<SupervisorRoutingDecision>(supervisorToken);
+      yield* ctx.reason(`phase:routing-decided:${routing.targetAgent}`, routing.reason);
 
-    // Early exit for terminal states
-    if (routing.targetAgent === "complete" || routing.targetAgent === "revision") {
-      yield* ctx.reason("phase:early-exit", routing.targetAgent);
-      return;
-    }
+      // Early exit for terminal states
+      if (routing.targetAgent === "complete" || routing.targetAgent === "revision") {
+        yield* ctx.reason("phase:early-exit", routing.targetAgent);
+        return;
+      }
 
-    // Cooperative interrupt (S1.3, ADR-0024): the learner cancelled before explanation.
-    if (input.isInterrupted?.()) {
-      yield* ctx.reason("phase:interrupted", "explanation");
-      return;
+      // Cooperative interrupt (S1.3, ADR-0024): the learner cancelled before explanation.
+      if (input.isInterrupted?.()) {
+        yield* ctx.reason("phase:interrupted", "explanation");
+        return;
+      }
+
+      // Routing-only pass (ADR-0063): stop here so the Surface composes Frame 1 immediately; the
+      // practice + mastery model work runs in a follow-up `practice-mastery` pass after it surfaces.
+      if (input.only === "routing") {
+        yield* ctx.reason("phase:routing-only-complete");
+        return;
+      }
     }
 
     // --- Phase 2: explanation dispatch ---
-    yield* ctx.reason("phase:explanation-dispatch", input.focusConceptId);
-    const explanationToken = `explanation:${ctx.fiberId}`;
-    yield* ctx.emit(
-      makeEvent("learning.fiber.dispatch.requested", {
-        token: explanationToken,
-        agentId: "explanation",
-        intent: input.explanationPrompt,
-        conceptIds: [input.focusConceptId],
-      }),
-    );
-    yield* ctx.awaitValue<ProductDispatchResult | null>(explanationToken);
-    yield* ctx.reason("phase:explanation-done");
+    // Progressive first-frame delivery (ADR-0063): on the Surface composer path the explanation is
+    // discarded (the Composer produces the on-board frame), so we skip this whole model round-trip —
+    // and its concurrently-dispatched challenger — to shorten time-to-first-frame.
+    if (!input.skipExplanation) {
+      yield* ctx.reason("phase:explanation-dispatch", input.focusConceptId);
+      const explanationToken = `explanation:${ctx.fiberId}`;
+      yield* ctx.emit(
+        makeEvent("learning.fiber.dispatch.requested", {
+          token: explanationToken,
+          agentId: "explanation",
+          intent: input.explanationPrompt,
+          conceptIds: [input.focusConceptId],
+        }),
+      );
+      yield* ctx.awaitValue<ProductDispatchResult | null>(explanationToken);
+      yield* ctx.reason("phase:explanation-done");
+    }
 
     // Cooperative interrupt (S1.3): the learner cancelled before practice.
     if (input.isInterrupted?.()) {
@@ -345,7 +382,12 @@ export class FiberedLearningLoop {
     }
 
     // Assemble the result from the accumulated bridge results.
-    const routing = results.get(`supervisor:${fiberId}`) as SupervisorRoutingDecision | undefined;
+    // Progressive first-frame delivery (ADR-0063): a `practice-mastery` pass skips the supervisor and
+    // carries the routing decided by the preceding `routing` pass, threaded via `precomputedRouting`.
+    const routedFromFiber = results.get(`supervisor:${fiberId}`) as
+      | SupervisorRoutingDecision
+      | undefined;
+    const routing = routedFromFiber ?? input.precomputedRouting;
     const explanation =
       (results.get(`explanation:${fiberId}`) as ProductDispatchResult | null | undefined) ?? null;
     const practice =
@@ -365,8 +407,11 @@ export class FiberedLearningLoop {
       );
     }
 
-    // Emit the supervisor.route event for observability (spec §7).
-    await this.emitSupervisorRoute(routing, input.session, makeEvent);
+    // Emit supervisor.route for observability (spec §7) — only when THIS pass ran the supervisor. The
+    // practice-mastery follow-up (ADR-0063) re-uses the prior pass's routing and must not re-emit it.
+    if (routedFromFiber) {
+      await this.emitSupervisorRoute(routing, input.session, makeEvent);
+    }
 
     return ok({
       path: pathResult.value,
