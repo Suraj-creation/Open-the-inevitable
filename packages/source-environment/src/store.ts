@@ -210,6 +210,16 @@ export class SourceEnvironmentStore {
         }),
       );
     }
+    // Idempotent canonicalization (Phase E, ADR-0063): content is immutable per version, so a version
+    // whose structural layer is already built needs no re-parse. Re-registering identical content
+    // dedupes to the SAME version (CSE-002 idempotency), so without this short-circuit canonicalize
+    // would redo the full (potentially heavy, e.g. PDF) parse to produce a byte-identical result — and
+    // re-emit a duplicate layer.constructed. The first canonicalization (no structural layer) is
+    // unchanged; deeper layers (L2 semantic, …) are added by recordLayerArtifact, not here.
+    const alreadyBuilt = this.layers.get(versionId);
+    if (alreadyBuilt?.has("structural")) {
+      return ok(this.environmentOf(version));
+    }
     const adapter = this.adapters.get(version.modality);
     if (!adapter) {
       return err(
