@@ -188,6 +188,7 @@ interface PreparedFrame {
     reasoning: string;
     trace: ReasoningTrace | null;
     workId: string | null;
+    deferredImage: { subFocus?: string; composerPlan: Record<string, unknown> } | null;
   };
 }
 
@@ -1481,6 +1482,9 @@ export class SurfaceSession {
       ...(plan?.entry.sub_focus ? { subFocus: plan.entry.sub_focus } : {}),
       ...(plan ? { frameFocus: frameTitle } : {}),
       ...(input.explanationPrompt ? { explanationPrompt: input.explanationPrompt } : {}),
+      // A.2 (ADR-0063): real frame path — defer the image off time-to-first-frame; it is resolved and
+      // attached after surface.frame.composed by emitFrameArtifacts.
+      deferImage: true,
     });
     // Degrade observably: a blocked dispatch (untrusted learner / scheduler rejection) yields no
     // composed frame, exactly as the legacy path yields no explanation block (SRF-001 §10).
@@ -1508,6 +1512,7 @@ export class SurfaceSession {
       mccr: artifacts.mccr,
       scriptSegments: artifacts.scriptSegments,
       imagePlan: artifacts.imagePlan,
+      deferredImage: artifacts.deferredImage,
       composerCid: artifacts.composerCid,
       composerPacketId: artifacts.composerPacketId,
       confidence: artifacts.confidence,
@@ -1545,6 +1550,8 @@ export class SurfaceSession {
     subFocus?: string;
     frameFocus?: string;
     explanationPrompt?: string;
+    /** A.2 (ADR-0063): defer the image (planner LLM + generation) until AFTER the board lands. */
+    deferImage?: boolean;
   }): Promise<{
     mccr: Record<string, unknown>;
     scriptSegments: Record<string, unknown>[];
@@ -1555,6 +1562,8 @@ export class SurfaceSession {
     reasoning: string;
     trace: ReasoningTrace | null;
     workId: string | null;
+    /** A.2 (ADR-0063): when deferImage, the context the surfacing step needs to resolve+attach it. */
+    deferredImage: { subFocus?: string; composerPlan: Record<string, unknown> } | null;
   } | null> {
     const dispatcher = this.deps.composerDispatcher;
     if (!dispatcher) return null;
@@ -1603,19 +1612,86 @@ export class SurfaceSession {
     // wired (decide/prompt + explanatory caption + callout labels), replacing the composer's inline
     // image_plan; otherwise the composer's inline decision drives generation (Phase 1–3 behaviour).
     const composerPlan = (content["image_plan"] as Record<string, unknown> | undefined) ?? {};
+    // A.2 (ADR-0063): the image (planner LLM + Imagen ~5-15s) is the heaviest frame step. On the real
+    // frame path DEFER it off time-to-first-frame — return the base board now; the surfacing step
+    // resolves + attaches it after surface.frame.composed. On the speculative pre-warm path (deferImage
+    // falsy) resolve inline so a promoted frame is a true skip-recompute.
+    let mccrForEvent: Record<string, unknown> = mccr;
+    let imagePlan: { helps: boolean; modality: string; prompt: string | null; rationale: string };
+    let deferredImage: { subFocus?: string; composerPlan: Record<string, unknown> } | null = null;
+    if (args.deferImage) {
+      deferredImage = { ...(args.subFocus ? { subFocus: args.subFocus } : {}), composerPlan };
+      imagePlan = {
+        helps: false,
+        modality: "none",
+        prompt: null,
+        rationale: "image deferred until the board lands",
+      };
+    } else {
+      const resolved = await this.resolveFrameImage({
+        surfaceId,
+        conceptId,
+        conceptTitle,
+        ...(args.subFocus ? { subFocus: args.subFocus } : {}),
+        anchors: Object.keys(mccr),
+        composerPlan,
+      });
+      if (resolved.imageElement) mccrForEvent = { ...mccr, image: resolved.imageElement };
+      imagePlan = resolved.imagePlan;
+    }
+    await this.emitFrameWorkTiming({
+      surfaceId,
+      agentId: "composer",
+      agentCid: composerCid,
+      workId: dispatched.value.workItem.work_id,
+      packetId: response?.packet_id ?? null,
+      workType: dispatched.value.workItem.work_type,
+      startedMs,
+    });
+    return {
+      mccr: mccrForEvent,
+      scriptSegments,
+      imagePlan,
+      deferredImage,
+      composerCid,
+      composerPacketId: response?.packet_id ?? null,
+      confidence: response?.confidence ?? 0.5,
+      reasoning:
+        typeof content["response_kind"] === "string" ? (content["response_kind"] as string) : "",
+      trace: dispatched.value.emissions.trace ?? null,
+      workId: dispatched.value.workItem.work_id,
+    };
+  }
+
+  /**
+   * Resolve a frame's image (A.2, ADR-0063): the Image Agent's decision (or the composer's inline
+   * fallback) + generation of the artifact + the built `el-image` MCCR element. Shared by the
+   * speculative pre-warm path (inline, before the frame records) and the real frame path (deferred to
+   * AFTER surface.frame.composed, off time-to-first-frame). Returns the element to fold onto the board
+   * (or null when no image earns its place / generation fails) plus the record-honest image decision.
+   */
+  private async resolveFrameImage(args: {
+    surfaceId: string;
+    conceptId: string;
+    conceptTitle: string;
+    subFocus?: string;
+    anchors: string[];
+    composerPlan: Record<string, unknown>;
+  }): Promise<{
+    imageElement: Record<string, unknown> | null;
+    imagePlan: { helps: boolean; modality: string; prompt: string | null; rationale: string };
+  }> {
+    const { surfaceId, conceptId, conceptTitle } = args;
     const plan =
       (await this.dispatchImagePlanner({
         surfaceId,
         conceptId,
         conceptTitle,
         ...(args.subFocus ? { subFocus: args.subFocus } : {}),
-        anchors: Object.keys(mccr),
-      })) ?? this.composerImagePlan(composerPlan);
+        anchors: args.anchors,
+      })) ?? this.composerImagePlan(args.composerPlan);
 
-    // When an image earns its place and a generator is wired, generate it and fold it into the MCCR
-    // as the `image` element (in the concept's region), with its caption + labels. Pre-warming a
-    // speculative frame's image here means promotion is a true skip-recompute.
-    let mccrForEvent: Record<string, unknown> = mccr;
+    let imageElement: Record<string, unknown> | null = null;
     let imageRendered = false;
     if (plan.helps && plan.prompt && this.deps.media) {
       const ref = await this.deps.media.generate({
@@ -1635,54 +1711,39 @@ export class SurfaceSession {
           modality: ref.modality,
           provider_id: ref.provider_id,
         });
-        mccrForEvent = {
-          ...mccr,
-          image: {
-            element_id: "el-image",
-            type: "image",
-            slot: "image",
-            reveal_order: 9,
-            concept_id: conceptId,
-            content: {
-              kind: "image",
-              artifact: {
-                artifact_id: ref.artifact_id,
-                content_ref: ref.content_ref,
-                mime_type: ref.mime_type,
-                provider_id: ref.provider_id,
-              },
-              alt: `Illustration of ${conceptTitle}`,
-              prompt: plan.prompt,
-              caption: plan.caption,
-              labels: plan.labels,
-              // R4e (ADR-0058; CSE-018 Law 9): the image carries its own recorded rationale onto
-              // the board — an image on the surface is never mute decoration; the learner can see
-              // WHY it earns its place (F16 causal transparency).
-              rationale: plan.rationale || null,
+        imageElement = {
+          element_id: "el-image",
+          type: "image",
+          slot: "image",
+          reveal_order: 9,
+          concept_id: conceptId,
+          content: {
+            kind: "image",
+            artifact: {
+              artifact_id: ref.artifact_id,
+              content_ref: ref.content_ref,
+              mime_type: ref.mime_type,
+              provider_id: ref.provider_id,
             },
+            alt: `Illustration of ${conceptTitle}`,
+            prompt: plan.prompt,
+            caption: plan.caption,
+            labels: plan.labels,
+            // R4e (ADR-0058; CSE-018 Law 9): the image carries its own recorded rationale onto the
+            // board — an image on the surface is never mute decoration; the learner can see WHY it
+            // earns its place (F16 causal transparency).
+            rationale: plan.rationale || null,
           },
         };
       }
     }
 
-    // Record-honest image decision (N10): `surface.image.decided` (folded from this) must reflect what
-    // actually reached the board, not merely the agent's intent. If an image was planned but never
-    // rendered (no generator wired, or generation failed), record helps:false with a reason — the
-    // canonical record never claims an image the learner cannot see.
+    // Record-honest image decision (N10): `surface.image.decided` must reflect what actually reached
+    // the board, not merely intent — planned-but-not-rendered records helps:false with a reason.
     const decisionDegraded = plan.helps && !imageRendered;
     const effectiveHelps = plan.helps && imageRendered;
-    await this.emitFrameWorkTiming({
-      surfaceId,
-      agentId: "composer",
-      agentCid: composerCid,
-      workId: dispatched.value.workItem.work_id,
-      packetId: response?.packet_id ?? null,
-      workType: dispatched.value.workItem.work_type,
-      startedMs,
-    });
     return {
-      mccr: mccrForEvent,
-      scriptSegments,
+      imageElement,
       imagePlan: {
         helps: effectiveHelps,
         modality: effectiveHelps ? plan.modality : "none",
@@ -1691,13 +1752,6 @@ export class SurfaceSession {
           ? `${plan.rationale} (image planned but not rendered — no generator or generation failed)`
           : plan.rationale,
       },
-      composerCid,
-      composerPacketId: response?.packet_id ?? null,
-      confidence: response?.confidence ?? 0.5,
-      reasoning:
-        typeof content["response_kind"] === "string" ? (content["response_kind"] as string) : "",
-      trace: dispatched.value.emissions.trace ?? null,
-      workId: dispatched.value.workItem.work_id,
     };
   }
 
@@ -1892,6 +1946,8 @@ export class SurfaceSession {
     reason: string;
     /** Pedagogical role of this frame (ADR-0055 D6); defaults to `teach`. */
     kind?: FrameKind;
+    /** A.2 (ADR-0063): when set, resolve + attach the image AFTER the board lands (real frame path). */
+    deferredImage?: { subFocus?: string; composerPlan: Record<string, unknown> } | null;
   }): Promise<void> {
     const { surfaceId, frameId } = args;
 
@@ -1900,10 +1956,11 @@ export class SurfaceSession {
     // Best-effort: a provider failure degrades to a frame without source projection, never a
     // failed composition. Injected BEFORE the composed emit so the fold carries it canonically.
     const evidence = await this.sourceEvidenceFor(args.conceptId, args.frameTitle);
-    const mccr =
+    let mccr =
       evidence.length > 0
         ? withSourceViewportElement(args.mccr, args.conceptId, evidence[0]!)
         : args.mccr;
+    let imagePlan = args.imagePlan;
 
     // The frame's MCCR lands (the only thing on the board), with multi-producer provenance.
     await this.emit("surface.frame.composed", {
@@ -1921,6 +1978,40 @@ export class SurfaceSession {
       reason: args.reason,
       world_state_nodes: [args.conceptNodeId],
     });
+
+    // A.2 (ADR-0063): resolve + attach the DEFERRED image now that the board has landed. Re-emit
+    // surface.frame.composed with the image folded in — the fold upserts by frame_id (ADR-0030), so a
+    // second composed is a byte-safe enrichment of the already-usable board, not a new frame. Update
+    // imagePlan so image.decided records the honest outcome; representation below then sees the image.
+    if (args.deferredImage) {
+      const resolved = await this.resolveFrameImage({
+        surfaceId,
+        conceptId: args.conceptId,
+        conceptTitle: args.frameTitle,
+        ...(args.deferredImage.subFocus ? { subFocus: args.deferredImage.subFocus } : {}),
+        anchors: Object.keys(mccr),
+        composerPlan: args.deferredImage.composerPlan,
+      });
+      imagePlan = resolved.imagePlan;
+      if (resolved.imageElement) {
+        mccr = { ...mccr, image: resolved.imageElement };
+        await this.emit("surface.frame.composed", {
+          surface_id: surfaceId,
+          frame_id: frameId,
+          ordinal: args.ordinal,
+          concept_id: args.conceptId,
+          title: args.frameTitle,
+          kind: args.kind ?? "teach",
+          mccr,
+          confidence: args.confidence,
+          reasoning: args.reasoning,
+          composer_packet_id: args.composerPacketId,
+          producer_cid: args.composerCid,
+          reason: `${args.reason} (image attached)`,
+          world_state_nodes: [args.conceptNodeId],
+        });
+      }
+    }
 
     // R4a (ADR-0058): the RIA's RepresentationPlan — each element's hierarchy + epistemic role, over
     // the closed MCCR vocabulary. Deterministic parity floor (metadata over the same elements), so it
@@ -1955,7 +2046,7 @@ export class SurfaceSession {
       frameId,
       mccr,
       scriptSegments: args.scriptSegments,
-      imagePlan: args.imagePlan,
+      imagePlan,
     });
 
     // Source projection as a composer role (CSE M5; SRF-002 law 12): the viewport plan, semantic

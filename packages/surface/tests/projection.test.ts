@@ -860,6 +860,60 @@ describe("foldSurfaceEvents", () => {
     expect(frame.provenance.source_event_id).toBeTruthy();
   });
 
+  test("A.2 (ADR-0063): a deferred image re-emits frame.composed and upserts the image onto the board", async () => {
+    const f = makeFixture("frame-deferred-image");
+    await seedSurface(f, "srf-di");
+    // The board lands first WITHOUT the image — the image (planner LLM + Imagen) is deferred off
+    // time-to-first-frame. Every prefix is a valid, usable frame.
+    await emitComposed(f, "srf-di", "cfr-di");
+    const before = foldSurfaceEvents(f.bus.replay({ subject: "surface.>" }), "srf-di")!;
+    expect(before.frames).toHaveLength(1);
+    expect(before.frames[0]!.mccr?.image).toBeFalsy(); // no image on the board yet (null slot)
+
+    // Once resolved, the surfacing step re-emits surface.frame.composed (SAME frame_id) with the image
+    // folded in — the fold upserts by frame_id (ADR-0030), a byte-safe enrichment, not a new frame.
+    await f.emit("surface.frame.composed", {
+      surface_id: "srf-di",
+      frame_id: "cfr-di",
+      ordinal: 1000,
+      concept_id: "fourier",
+      title: "What the Fourier transform is",
+      mccr: {
+        ...sampleMccr("cfr-di"),
+        image: {
+          element_id: "el-image",
+          type: "image",
+          slot: "image",
+          reveal_order: 9,
+          concept_id: "fourier",
+          content: {
+            kind: "image",
+            artifact: {
+              artifact_id: "art-1",
+              content_ref: "ref-1",
+              mime_type: "image/png",
+              provider_id: "gemini-imagen",
+            },
+            alt: "Illustration of the Fourier transform",
+            prompt: "draw the transform",
+            caption: null,
+            labels: [],
+            rationale: null,
+          },
+        },
+      },
+      confidence: 0.83,
+      reasoning: "led with intuition, anchored the formula",
+      composer_packet_id: "cp-compose-1",
+      producer_cid: "cog-composer",
+      reason: "composed focus frame (image attached)",
+      world_state_nodes: ["concept:fourier"],
+    });
+    const after = foldSurfaceEvents(f.bus.replay({ subject: "surface.>" }), "srf-di")!;
+    expect(after.frames).toHaveLength(1); // upsert by frame_id — still ONE frame
+    expect(after.frames[0]!.mccr?.image?.content).toMatchObject({ kind: "image" });
+  });
+
   test("R4e: a structured misconception folds as the dissolve grammar; a legacy one stays text", async () => {
     const f = makeFixture("frame-misconception");
     await seedSurface(f, "srf-misc");
