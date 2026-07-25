@@ -24,7 +24,11 @@ research-readiness, look-ahead) to detached background work quiesced by `settle(
 the Composer into `surface.frame.element.delta` so the board materializes live; (C) parallelize
 independent pre-frame calls; (D) widen the depth-1 look-ahead into a small governed rolling buffer;
 (E) fast-start source mode (background deep parse + durable upload, memoize canonicalization by
-`content_hash`); (F) thread an `AbortSignal` so a learner redirect cancels in-flight background work.
+`content_hash`); (F) thread an `AbortSignal` so a learner *interrupt* cancels in-flight background
+speculation at its next checkpoint — the composer dispatch already in flight is not recalled, but its
+image and all emits are skipped, so a cancelled speculation leaves no trace in the event log. F fires
+only on the explicit `interrupt` interaction; a normal follow-up ask still `settle()`s speculation so
+the look-ahead can be promoted (ADR-0030 Phase 3) — cancelling every redirect would defeat that.
 Rollout is incremental and per-increment test-verified.
 
 ## Invariants preserved

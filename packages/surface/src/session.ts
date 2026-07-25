@@ -572,6 +572,13 @@ export class SurfaceSession {
   private askInFlight = false;
   /** Detached background cognition (speculative pre-composition) — settled at next ask / close. */
   private backgroundWork: Promise<void> | null = null;
+  /**
+   * Cancels the in-flight background speculation (ADR-0063 Phase F). A learner `interrupt` aborts it
+   * so the gateway stops paying for a now-stale look-ahead frame's image + emits. The composer
+   * dispatch already in flight can't be recalled, but everything after it is skipped, and the
+   * speculation leaves no trace in the event log (replay-clean).
+   */
+  private bgAbort: AbortController | null = null;
 
   constructor(private readonly deps: SurfaceSessionDeps) {
     this.world = deps.world;
@@ -762,6 +769,8 @@ export class SurfaceSession {
   async settle(): Promise<void> {
     const work = this.backgroundWork;
     this.backgroundWork = null;
+    // settle means "let it finish" (quiescence), so drop the cancel handle rather than fire it.
+    this.bgAbort = null;
     if (work) await work;
   }
 
@@ -1237,7 +1246,11 @@ export class SurfaceSession {
     // the response returns now, the speculative events stream in behind it, and `settle()` (next
     // ask / close / tests) awaits completion.
     if (onPlannerFramePath && !descentInfo && cycle.mastery) {
-      this.backgroundWork = this.prepareLookahead({ surfaceId, input })
+      // Cancellable (ADR-0063 Phase F): a learner interrupt aborts this stale speculation at its next
+      // checkpoint, so the gateway stops before the look-ahead frame's image + emits.
+      const abort = new AbortController();
+      this.bgAbort = abort;
+      this.backgroundWork = this.prepareLookahead({ surfaceId, input, signal: abort.signal })
         .catch(() => undefined)
         .then(() => undefined);
     }
@@ -1552,6 +1565,8 @@ export class SurfaceSession {
     explanationPrompt?: string;
     /** A.2 (ADR-0063): defer the image (planner LLM + generation) until AFTER the board lands. */
     deferImage?: boolean;
+    /** F (ADR-0063): abort a background (speculative) compose on learner interrupt — skips image + emits. */
+    signal?: AbortSignal;
   }): Promise<{
     mccr: Record<string, unknown>;
     scriptSegments: Record<string, unknown>[];
@@ -1597,6 +1612,10 @@ export class SurfaceSession {
       },
     });
     if (!dispatched.ok) return null;
+    // Phase F (ADR-0063): the learner interrupted while this background compose was in flight. The
+    // model call already ran, but skip the image (the heavy step) and ALL emits so the cancelled
+    // speculation leaves no trace in the event log (the caller discards a null result).
+    if (args.signal?.aborted) return null;
     const response = dispatched.value.responsePackets[0];
     const content = (response?.content ?? {}) as Record<string, unknown>;
     await this.emitDegradedIfFallback(surfaceId, "composer", content);
@@ -2539,11 +2558,13 @@ export class SurfaceSession {
   private async prepareLookahead(args: {
     surfaceId: string;
     input: SurfaceAskInput;
+    signal?: AbortSignal;
   }): Promise<void> {
     const budget = this.deps.getLookaheadBudget?.() ?? this.deps.lookaheadBudget ?? 0;
     if (budget <= 0) return;
     const nextConcept = this.nextConceptAfter(args.input);
     if (!nextConcept) return; // end of the path — nothing to look ahead to
+    if (args.signal?.aborted) return; // interrupted before composing began (ADR-0063 Phase F)
 
     const bet = this.pendingLookahead?.entries[0];
     const plannerPacketId = this.pendingLookahead?.plannerPacketId ?? null;
@@ -2559,8 +2580,10 @@ export class SurfaceSession {
       goal: args.input.goal,
       ...(bet?.sub_focus ? { subFocus: bet.sub_focus } : {}),
       frameFocus: bet?.title ?? `Next — ${nextConcept.title}`,
+      ...(args.signal ? { signal: args.signal } : {}),
     });
     if (!artifacts) return; // blocked/empty ⇒ nothing prepared (observable degradation)
+    if (args.signal?.aborted) return; // interrupted while composing — emit no speculative frame (Phase F)
 
     const frameId = `cfr-${this.idGenerator.hex(12)}`;
     const ordinal = this.nextFrameOrdinal();
@@ -2772,6 +2795,9 @@ export class SurfaceSession {
     switch (input.kind) {
       case "interrupt":
         this.interrupted = true;
+        // ADR-0063 Phase F: also cancel any detached background speculation — a stopped learner
+        // should not have the gateway keep composing a look-ahead frame they'll never see.
+        this.bgAbort?.abort();
         effect = "cancelled";
         reason = "learner interrupted the active cognition";
         break;

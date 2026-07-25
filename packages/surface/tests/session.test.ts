@@ -200,6 +200,31 @@ function fakeComposerModel(): ModelRuntime {
 }
 
 /**
+ * A composer whose look-ahead (next-concept) composition BLOCKS on a manual gate, so a test can prove
+ * a learner interrupt cancels the in-flight background speculation (ADR-0063 Phase F). The on-screen
+ * frames (focus concept) resolve immediately; only the speculative compose for `blockTitle` waits.
+ */
+function gatedComposerModel(blockTitle: string): { model: ModelRuntime; release: () => void } {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const base = fakeComposerModel();
+  const model: ModelRuntime = {
+    async generate(request) {
+      if (typeof request.prompt === "string" && request.prompt.includes(blockTitle)) {
+        await gate; // hold the speculation open until the test releases it
+      }
+      return base.generate(request);
+    },
+    async embed() {
+      return [0, 0, 0, 0, 0, 0, 0, 0];
+    },
+  };
+  return { model, release };
+}
+
+/**
  * A fake frame planner: decomposes the concept into a 2-frame progressive sequence (intuition →
  * formal), each with a distinct sub_focus — UCS, ADR-0030 Phase 2. Deterministic per call.
  */
@@ -1026,6 +1051,43 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
     expect(a.state).toEqual(b.state);
     const refolded = foldSurfaceEvents(a.events, a.state?.surface_id);
     expect(refolded).toEqual(a.state);
+  });
+
+  test("ADR-0063 Phase F: a learner interrupt cancels in-flight background speculation (no frame emitted, settle returns)", async () => {
+    // The look-ahead composition for the NEXT concept (Gradient Descent) is held open on a gate, so it
+    // is provably still in flight — detached from ask 1's critical path — when the learner interrupts.
+    const gated = gatedComposerModel("Gradient Descent");
+    const { surface, bus } = makeFixture("surface-lookahead-cancel", {
+      composerModel: gated.model,
+      framePlannerModel: fakeFramePlannerModel(),
+      lookaheadBudget: 1,
+    });
+    await surface.start("Teach me Neural Networks");
+
+    const first = await surface.ask(teachMeNeuralNetworks());
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw first.error;
+    // Speculation is blocked on the gate (not yet emitted) — nothing speculative on the board.
+    expect(surface.state()!.speculative_frames).toEqual([]);
+
+    // The learner stops. The interrupt must abort the stale look-ahead — the gateway should not keep
+    // composing a frame the learner will never see.
+    const interrupted = await surface.interact({ kind: "interrupt" });
+    expect(interrupted.ok).toBe(true);
+
+    // Release the (now-cancelled) composer dispatch. settle() must return, and the speculation must
+    // leave NO trace: its model call ran, but no image, no speculation.prepared, no records.
+    gated.release();
+    await surface.settle();
+
+    const state = surface.state()!;
+    expect(state.speculative_frames).toEqual([]);
+    const types = bus.replay({ subject: "surface.>" }).map((e) => e.event_type);
+    expect(types.some((t) => t.startsWith("surface.frame.speculation"))).toBe(false);
+    expect(types).toContain("surface.interaction.applied"); // the interrupt itself is recorded
+    // Replay equivalence still holds over the cancelled prefix (fold ≡ live state).
+    const refolded = foldSurfaceEvents(bus.replay({ subject: "surface.>" }), state.surface_id);
+    expect(refolded).toEqual(state);
   });
 
   test("event ordering laws hold (created first, joined before contributed, closed terminal)", async () => {
