@@ -1,0 +1,23 @@
+# What the Vercel CLI must NOT upload. Without this, `vercel deploy` sweeps in large untracked
+# artifacts (generated smoke outputs, media, local tooling) — a 250 MB+ upload that aborts on flaky
+# networks. The web build only needs the workspace source (packages/*, apps/web, root manifests).
+# Note: git-integration deploys clone the repo server-side and ignore this file; it governs CLI uploads.
+
+# Generated / local artifacts (never in git, huge)
+outputs/
+.superpowers/
+.claude/
+.mcp.json
+*.pptx
+*.jpg
+*.png
+*.mp4
+*.wav
+
+# Docs & specs — not needed to build the web app (no package.json; safe to drop from the upload)
+docs/
+spec/
+
+# Test suites are not part of the production build (the full workspace is kept so the frozen
+# install still resolves — do NOT exclude packages/* or apps/*, only their tests).
+**/tests/
