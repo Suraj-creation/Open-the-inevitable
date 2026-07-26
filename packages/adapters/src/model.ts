@@ -26,6 +26,7 @@ import type {
   ModelGenerationRequest,
   ModelGenerationResult,
   ModelRuntime,
+  ModelStreamChunk,
 } from "@inevitable/contracts";
 import { createEvent, type EventBus } from "@inevitable/events";
 import type { CognitiveEvent } from "@inevitable/protocols";
@@ -107,6 +108,11 @@ interface GenAiModelsLike {
     contents: string;
     config?: Record<string, unknown>;
   }): Promise<GenAiResponseLike>;
+  generateContentStream?(args: {
+    model: string;
+    contents: string;
+    config?: Record<string, unknown>;
+  }): Promise<AsyncIterable<GenAiResponseLike>>;
   embedContent(args: { model: string; contents: string }): Promise<GenAiEmbedResponseLike>;
 }
 /** Minimal local narrowing of the Gemini client — no vendor type crosses this boundary. */
@@ -185,7 +191,8 @@ export class GeminiModelRuntime implements ModelRuntime {
     return new GeminiModelRuntime(client, defaultModel);
   }
 
-  async generate(input: ModelGenerationRequest): Promise<ModelGenerationResult> {
+  /** Translate the vendor-neutral request into the Gemini `config` object (shared by generate + stream). */
+  private buildConfig(input: ModelGenerationRequest): Record<string, unknown> {
     const config: Record<string, unknown> = {};
     if (input.system !== undefined) config["systemInstruction"] = input.system;
     if (input.maxTokens !== undefined) config["maxOutputTokens"] = input.maxTokens;
@@ -206,6 +213,66 @@ export class GeminiModelRuntime implements ModelRuntime {
     if (input.thinkingBudget !== undefined) {
       config["thinkingConfig"] = { thinkingBudget: input.thinkingBudget };
     }
+    return config;
+  }
+
+  /**
+   * Live token streaming (ADR-0063 Phase B): yields incremental text deltas and, on the terminal
+   * chunk, the whole assembled `ModelGenerationResult` — whose `text` equals what `generate()` would
+   * return for the same request (so record/replay + settled state stay deterministic). No retry: a
+   * failure before/within the stream throws, and the caller falls back to `generate()` (which retries).
+   */
+  generateStream(input: ModelGenerationRequest): AsyncIterable<ModelStreamChunk> {
+    const config = this.buildConfig(input);
+    const model = input.model ?? this.defaultModel;
+    const client = this.client;
+    async function* run(): AsyncGenerator<ModelStreamChunk> {
+      if (typeof client.models.generateContentStream !== "function") {
+        throw modelError(
+          "E_MODEL_STREAM_UNSUPPORTED",
+          "provider client does not support generateContentStream",
+        );
+      }
+      const stream = await client.models.generateContentStream({
+        model,
+        contents: input.prompt,
+        config,
+      });
+      let fullText = "";
+      let finishReasonRaw: string | undefined;
+      let usage: GenAiResponseLike["usageMetadata"];
+      let citations: { readonly uri: string; readonly title: string }[] = [];
+      for await (const chunk of stream) {
+        const delta = chunk.text ?? "";
+        if (delta) fullText += delta;
+        const finish = chunk.candidates?.[0]?.finishReason;
+        if (finish) finishReasonRaw = finish;
+        if (chunk.usageMetadata) usage = chunk.usageMetadata;
+        const chunkCitations = extractCitations(chunk);
+        if (chunkCitations.length > 0) citations = chunkCitations;
+        if (delta) yield { textDelta: delta };
+      }
+      const result: ModelGenerationResult = {
+        text: fullText,
+        model,
+        finishReason: mapFinishReason(finishReasonRaw),
+        ...(usage === undefined
+          ? {}
+          : {
+              usage: {
+                inputTokens: usage.promptTokenCount,
+                outputTokens: usage.candidatesTokenCount,
+              },
+            }),
+        ...(citations.length > 0 ? { citations } : {}),
+      };
+      yield { textDelta: "", result };
+    }
+    return run();
+  }
+
+  async generate(input: ModelGenerationRequest): Promise<ModelGenerationResult> {
+    const config = this.buildConfig(input);
     const model = input.model ?? this.defaultModel;
     const RETRY_DELAYS_MS = [1000, 2000, 4000];
     let lastError: unknown;
@@ -336,17 +403,74 @@ export class RecordingModelRuntime implements ModelRuntime {
     try {
       response = await inner.generate(input);
     } catch (error) {
-      await this.emit(MODEL_INVOCATION_FAILED, {
-        invocation_key: key,
-        ordinal,
-        provider: this.provider,
-        error_code: error instanceof CosError ? error.code : "E_MODEL_UNAVAILABLE",
-        message: error instanceof Error ? error.message : String(error),
-      });
+      await this.recordFailure(key, ordinal, error);
       throw error;
     }
+    await this.recordOutput(key, ordinal, input, response);
+    return response;
+  }
 
-    // Record-before-use law: the recording event is published before the caller may use the value.
+  /**
+   * Streaming variant of the recording seam (ADR-0063 Phase B). Record mode: tee the inner
+   * provider's deltas straight through, and record the WHOLE terminal result before it is yielded
+   * (record-before-use of the canonical value — the transient deltas carry no canonical state). If
+   * the inner provider has no streaming, degrade to a single whole result (no deltas). Replay mode:
+   * resolve the recorded whole text as one terminal chunk (deterministic; no intermediate deltas).
+   */
+  generateStream(input: ModelGenerationRequest): AsyncIterable<ModelStreamChunk> {
+    return this.streamWithRecording(input);
+  }
+
+  private async *streamWithRecording(
+    input: ModelGenerationRequest,
+  ): AsyncGenerator<ModelStreamChunk> {
+    const key = input.invocation_key ?? "anonymous";
+    const ordinal = this.ordinals.get(key) ?? 0;
+    this.ordinals.set(key, ordinal + 1);
+
+    if (this.mode === "replay") {
+      yield { textDelta: "", result: this.resolveFromRecord(key, ordinal) };
+      return;
+    }
+
+    const inner = this.inner!;
+    let result: ModelGenerationResult | undefined;
+    try {
+      if (typeof inner.generateStream === "function") {
+        for await (const chunk of inner.generateStream(input)) {
+          if (chunk.result) {
+            result = chunk.result;
+            break;
+          }
+          if (chunk.textDelta) yield { textDelta: chunk.textDelta };
+        }
+      } else {
+        result = await inner.generate(input); // non-streaming inner ⇒ whole result, no deltas
+      }
+    } catch (error) {
+      await this.recordFailure(key, ordinal, error);
+      throw error;
+    }
+    if (!result) {
+      const incomplete = modelError(
+        "E_MODEL_STREAM_INCOMPLETE",
+        "model stream ended without a terminal result",
+        { invocation_key: key, ordinal },
+      );
+      await this.recordFailure(key, ordinal, incomplete);
+      throw incomplete;
+    }
+    await this.recordOutput(key, ordinal, input, result);
+    yield { textDelta: "", result };
+  }
+
+  /** Record-before-use law: publish `model.output.recorded` before the caller may use the value. */
+  private async recordOutput(
+    key: string,
+    ordinal: number,
+    input: ModelGenerationRequest,
+    response: ModelGenerationResult,
+  ): Promise<void> {
     const published = await this.emit(MODEL_OUTPUT_RECORDED, {
       invocation_key: key,
       ordinal,
@@ -374,7 +498,16 @@ export class RecordingModelRuntime implements ModelRuntime {
         { invocation_key: key, ordinal, reason: published.reason },
       );
     }
-    return response;
+  }
+
+  private async recordFailure(key: string, ordinal: number, error: unknown): Promise<void> {
+    await this.emit(MODEL_INVOCATION_FAILED, {
+      invocation_key: key,
+      ordinal,
+      provider: this.provider,
+      error_code: error instanceof CosError ? error.code : "E_MODEL_UNAVAILABLE",
+      message: error instanceof Error ? error.message : String(error),
+    });
   }
 
   async embed(text: string): Promise<number[]> {

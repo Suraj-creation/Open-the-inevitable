@@ -13,6 +13,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CognitiveFrame, SurfaceState } from "@inevitable/surface/client";
 import { activeFrame, nextFrame } from "../frames";
 import { FrameStage, directorStateToTint } from "./FrameStage";
+import { StreamingBoard } from "./StreamingBoard";
 import type { ElementAction } from "./MccrElement";
 
 /** Duration (ms) the outgoing frame lingers while cross-dissolving — must match the CSS exit anim. */
@@ -146,9 +147,16 @@ export function FrameDeck({
   }, [outgoing, transition]);
 
   if (!active) {
+    // ADR-0063 Phase B: no frame has surfaced yet, but the composer may be STREAMING one — show its
+    // anchors forming (from the transient buffer) instead of a bare "Composing…" pulse.
+    const forming = state?.streaming_frame_elements ?? [];
     return (
       <div className="frame-deck">
-        <FrameStage frame={null} highlightElementId={null} thinking={thinking} />
+        {forming.length > 0 ? (
+          <StreamingBoard elements={forming} />
+        ) : (
+          <FrameStage frame={null} highlightElementId={null} thinking={thinking} />
+        )}
       </div>
     );
   }

@@ -84,5 +84,7 @@ describe("PdfjsModalityAdapter (gated on edge-provisioned pdfjs-dist)", () => {
     // Determinism: same bytes ⇒ identical extraction.
     const again = await connected.value.parseBinary(bytes);
     expect(again).toEqual(parsed);
-  });
+    // pdfjs-dist's dynamic import + PDF build + parse is genuinely slow to cold-start; under a
+    // fully parallel `pnpm verify` it can exceed the 5s default. A generous timeout de-flakes it.
+  }, 30_000);
 });

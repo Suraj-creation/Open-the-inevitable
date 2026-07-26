@@ -380,6 +380,95 @@ describe("deterministicComposition", () => {
   });
 });
 
+/** A stub model that streams `text` in `chunks` pieces; its terminal chunk carries the whole result. */
+function streamingStubModel(text: string, chunks = 8): ModelRuntime {
+  const pieces: string[] = [];
+  const size = Math.ceil(text.length / chunks);
+  for (let i = 0; i < text.length; i += size) pieces.push(text.slice(i, i + size));
+  return {
+    async generate() {
+      return { text, model: "stub-model", finishReason: "stop" as const };
+    },
+    async embed() {
+      return [];
+    },
+    generateStream() {
+      return {
+        async *[Symbol.asyncIterator]() {
+          for (const p of pieces) yield { textDelta: p };
+          yield {
+            textDelta: "",
+            result: { text, model: "stub-model", finishReason: "stop" as const },
+          };
+        },
+      };
+    },
+  };
+}
+
+describe("SurfaceComposerUnit — live streaming (ADR-0063 Phase B)", () => {
+  test("reports each MCCR string anchor once, in document order, as the stream completes it", async () => {
+    const unit = new SurfaceComposerUnit({
+      manifest: composerManifest,
+      model: streamingStubModel(GOOD_COMPOSITION),
+      idGenerator: new SeededIdGenerator("comp-stream"),
+    });
+    const reported: Array<{ name: string; text: string }> = [];
+    unit.setStreamSink({
+      onElementComplete(name, text) {
+        reported.push({ name, text });
+      },
+    });
+    const emissions = await unit.execute(
+      packet({ concept_title: "Fourier transform", goal: "Signal processing" }),
+    );
+    // String anchors only (core_concept/definition/mental_model), in order; structured ones skipped.
+    expect(reported.map((r) => r.name)).toEqual(["core_concept", "definition", "mental_model"]);
+    expect(reported[0]!.text).toBe("Fourier transform");
+    expect(reported.some((r) => r.name === "key_formula" || r.name === "diagram")).toBe(false);
+    // The final composition is IDENTICAL to the non-streamed path — streaming is a live reveal only.
+    const content = emissions.packets?.[0]?.content as Record<string, unknown>;
+    expect(content["response_kind"]).toBe("model-composition");
+    const mccr = content["mccr"] as Record<string, ComposerElement>;
+    expect(mccr["core_concept"]?.content).toEqual({ kind: "text", text: "Fourier transform" });
+  });
+
+  test("without a sink, a streaming-capable model still uses the whole-response path (no reports)", async () => {
+    const unit = new SurfaceComposerUnit({
+      manifest: composerManifest,
+      model: streamingStubModel(GOOD_COMPOSITION),
+      idGenerator: new SeededIdGenerator("comp-nosink"),
+    });
+    // no setStreamSink → deterministic whole-response path
+    const emissions = await unit.execute(
+      packet({ concept_title: "Fourier transform", goal: "Signal processing" }),
+    );
+    const content = emissions.packets?.[0]?.content as Record<string, unknown>;
+    expect(content["response_kind"]).toBe("model-composition");
+  });
+
+  test("a sink but a NON-streaming model falls back to the whole-response path (no reports)", async () => {
+    const reported: string[] = [];
+    const unit = new SurfaceComposerUnit({
+      manifest: composerManifest,
+      model: stubModel(GOOD_COMPOSITION), // no generateStream
+      idGenerator: new SeededIdGenerator("comp-fallback"),
+    });
+    unit.setStreamSink({
+      onElementComplete(name) {
+        reported.push(name);
+      },
+    });
+    const emissions = await unit.execute(
+      packet({ concept_title: "Fourier transform", goal: "Signal processing" }),
+    );
+    expect(reported).toEqual([]); // model can't stream ⇒ no deltas
+    expect((emissions.packets?.[0]?.content as Record<string, unknown>)["response_kind"]).toBe(
+      "model-composition",
+    );
+  });
+});
+
 describe("SurfaceComposerUnit", () => {
   test("valid model output becomes a model-composition response packet", async () => {
     const unit = new SurfaceComposerUnit({

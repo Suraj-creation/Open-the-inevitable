@@ -2404,6 +2404,62 @@
   color: var(--ink-faint);
   font-size: 0.95rem;
 }
+/* ADR-0063 Phase B: the board FORMING — MCCR anchors streaming in before the frame composes. Each
+   ghost anchor rises in with a live caret; the whole board is faintly under-lit until it settles. */
+.frame-stage--forming .frame-grid {
+  opacity: 0.92;
+}
+.mccr-el--forming {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-md, 12px);
+  background: color-mix(in oklab, var(--surface-raised, #fff) 70%, transparent);
+  border: 1px solid color-mix(in oklab, var(--accent) 18%, transparent);
+  animation: forming-rise 0.34s var(--ease-soft, ease) both;
+}
+.mccr-forming-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.mccr-forming-text {
+  margin: 0;
+  color: var(--ink, inherit);
+  font-size: 1.02rem;
+  line-height: 1.5;
+}
+.mccr-forming-caret {
+  display: inline-block;
+  margin-left: 1px;
+  color: var(--accent);
+  animation: forming-blink 1s steps(1) infinite;
+}
+@keyframes forming-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes forming-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mccr-el--forming {
+    animation: none;
+  }
+  .mccr-forming-caret {
+    animation: none;
+  }
+}
 /* The deck layers the active frame, the outgoing frame (mid cross-dissolve), and an off-stage
    N+1 buffer. Layers stack via the already-absolute .frame-stage; transitions are client projections. */
 .frame-deck {

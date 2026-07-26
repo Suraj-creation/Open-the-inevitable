@@ -96,10 +96,29 @@ export interface ModelGenerationResult {
   citations?: readonly { readonly uri: string; readonly title: string }[];
 }
 
+/**
+ * One chunk of a streamed model generation (ADR-0063 Phase B). `textDelta` is the incremental text
+ * since the previous chunk; concatenating every chunk's `textDelta` reproduces the full text. The
+ * TERMINAL chunk (and only it) carries `result` — the whole assembled `ModelGenerationResult`.
+ */
+export interface ModelStreamChunk {
+  readonly textDelta: string;
+  readonly result?: ModelGenerationResult;
+}
+
 /** Model runtime adapter (hosted LLMs, local vLLM, future models). Capability-, not vendor-bound. */
 export interface ModelRuntime {
   generate(input: ModelGenerationRequest): Promise<ModelGenerationResult>;
   embed(text: string): Promise<number[]>;
+  /**
+   * Optional live token streaming (ADR-0063 Phase B). Yields ordered text deltas as the model
+   * generates; the terminal chunk carries the whole `result`. Adapters that do not implement it ⇒
+   * callers MUST fall back to `generate()` (no streaming). The terminal `result.text` is
+   * authoritative and equals what `generate()` would return for the same request, so record/replay
+   * and settled state remain deterministic — streaming is a live progressive reveal only, never a
+   * source of canonical state. Consumers MUST drain the iterable (the result arrives on the last chunk).
+   */
+  generateStream?(input: ModelGenerationRequest): AsyncIterable<ModelStreamChunk>;
 }
 
 /** Tool runtime adapter (MCP, gRPC, REST, local sandbox). */

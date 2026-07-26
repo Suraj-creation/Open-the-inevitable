@@ -38,6 +38,7 @@ import type {
   Emissions,
 } from "@inevitable/runtime";
 import { CosError, CryptoIdGenerator, newPacketId, type IdGenerator } from "@inevitable/shared";
+import { extractCompletedMccrElements, type FrameElementSink } from "./mccr-stream";
 
 const SPEC_REF = "protocols/model-invocation-protocol";
 
@@ -623,6 +624,14 @@ export class SurfaceComposerUnit implements CognitiveUnit {
   private readonly idGenerator: IdGenerator;
   private readonly getDepthBias: () => number;
   private preparedLeaseId: string | null = null;
+  /**
+   * Transient live-streaming sink (ADR-0063 Phase B), set per-dispatch by the runtime dispatcher's
+   * `dispatchStreaming` around `host.handle` and cleared after. When present AND the model supports
+   * `generateStream`, `execute` streams the composition and reports each MCCR string anchor as it
+   * completes. Absent (the default, and always in deterministic/replay mode) ⇒ the whole-response
+   * path runs, unchanged — so streaming never affects settled state or existing tests.
+   */
+  private streamSink: FrameElementSink | null = null;
 
   constructor(deps: SurfaceComposerUnitDeps) {
     this.manifest = deps.manifest;
@@ -638,6 +647,11 @@ export class SurfaceComposerUnit implements CognitiveUnit {
 
   prepare(lease: ContextLease): void {
     this.preparedLeaseId = lease.lease_id;
+  }
+
+  /** Attach (or clear) the live board-streaming sink for the NEXT execute (ADR-0063 Phase B). */
+  setStreamSink(sink: FrameElementSink | null): void {
+    this.streamSink = sink;
   }
 
   async execute(packet: CognitionPacket): Promise<Emissions> {
@@ -658,7 +672,15 @@ export class SurfaceComposerUnit implements CognitiveUnit {
 
   private async executeWithModel(packet: CognitionPacket): Promise<Emissions> {
     const request = this.buildRequest(packet);
-    const result = await this.withTimeout(this.model.generate(request));
+    // ADR-0063 Phase B: when a live sink is attached AND the model can stream, distill the board from
+    // the token stream and report each MCCR string anchor the moment it completes. Otherwise the
+    // whole-response path runs (the default + deterministic/replay). Either way the assembled `result`
+    // is authoritative — parsed identically below — so settled state is stream-independent.
+    const sink = this.streamSink;
+    const result =
+      sink && typeof this.model.generateStream === "function"
+        ? await this.withTimeout(this.streamAndAssemble(request, sink))
+        : await this.withTimeout(this.model.generate(request));
     if (result.finishReason === "refusal" || result.finishReason === "safety") {
       throw composerError("E_MODEL_REFUSAL", `model refused generation (${result.finishReason})`, {
         invocation_key: request.invocation_key,
@@ -684,6 +706,42 @@ export class SurfaceComposerUnit implements CognitiveUnit {
       confidence: 0.83,
     });
     return { packets: [response], trace: this.buildTrace(packet, composition, result.model) };
+  }
+
+  /**
+   * Stream the composition (ADR-0063 Phase B): accumulate the token deltas, and each time a new MCCR
+   * string anchor's value fully arrives, report it through the sink (→ `surface.frame.element.delta`).
+   * Returns the whole assembled result (terminal chunk) — authoritative, parsed identically to the
+   * non-streamed path. A mid-stream failure degrades to a single whole `generate()` (no more deltas);
+   * the already-reported anchors are transient previews that `surface.frame.composed` then clears.
+   */
+  private async streamAndAssemble(
+    request: ModelGenerationRequest,
+    sink: FrameElementSink,
+  ): Promise<ModelGenerationResult> {
+    const stream = this.model.generateStream;
+    if (!stream) return this.model.generate(request);
+    let accumulated = "";
+    const reported = new Set<string>();
+    let final: ModelGenerationResult | undefined;
+    try {
+      for await (const chunk of stream.call(this.model, request)) {
+        if (chunk.textDelta) {
+          accumulated += chunk.textDelta;
+          for (const element of extractCompletedMccrElements(accumulated)) {
+            if (!reported.has(element.name)) {
+              reported.add(element.name);
+              await sink.onElementComplete(element.name, element.text);
+            }
+          }
+        }
+        if (chunk.result) final = chunk.result;
+      }
+    } catch {
+      // Stream broke mid-flight — fall back to a whole generation (deterministic path also retries).
+      return this.model.generate(request);
+    }
+    return final ?? this.model.generate(request);
   }
 
   private buildRequest(packet: CognitionPacket): ModelGenerationRequest {

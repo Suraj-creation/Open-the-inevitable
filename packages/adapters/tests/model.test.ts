@@ -4,7 +4,12 @@
  * a tested contract).
  */
 import { describe, expect, test } from "vitest";
-import type { ModelGenerationRequest, ModelRuntime } from "@inevitable/contracts";
+import type {
+  ModelGenerationRequest,
+  ModelGenerationResult,
+  ModelRuntime,
+  ModelStreamChunk,
+} from "@inevitable/contracts";
 import { InMemoryEventBus } from "@inevitable/events";
 import { CosError, ManualClock, SeededIdGenerator } from "@inevitable/shared";
 import {
@@ -269,5 +274,162 @@ describe("GeminiModelRuntime", () => {
     const replayer = new RecordingModelRuntime({ mode: "replay", bus });
     const replayed = await replayer.generate(request("frontier:k"));
     expect(replayed.citations).toEqual([{ uri: "https://example.org/x", title: "X" }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Live token streaming (ADR-0063 Phase B)
+// ---------------------------------------------------------------------------
+
+async function drain(
+  stream: AsyncIterable<ModelStreamChunk>,
+): Promise<{ deltas: string[]; text: string; final: ModelGenerationResult | undefined }> {
+  const deltas: string[] = [];
+  let final: ModelGenerationResult | undefined;
+  for await (const chunk of stream) {
+    if (chunk.textDelta) deltas.push(chunk.textDelta);
+    if (chunk.result) final = chunk.result;
+  }
+  return { deltas, text: deltas.join(""), final };
+}
+
+/** An async iterable of Gemini-shaped response chunks; the last carries finishReason + usage. */
+function geminiChunks(pieces: string[]): AsyncIterable<{
+  text?: string;
+  candidates?: Array<{ finishReason?: string }>;
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+}> {
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (let i = 0; i < pieces.length; i++) {
+        const last = i === pieces.length - 1;
+        yield {
+          text: pieces[i]!,
+          ...(last
+            ? {
+                candidates: [{ finishReason: "STOP" }],
+                usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 9 },
+              }
+            : {}),
+        };
+      }
+    },
+  };
+}
+
+describe("GeminiModelRuntime.generateStream", () => {
+  test("yields ordered text deltas then a terminal result whose text is the concatenation", async () => {
+    const pieces = ['{"mccr":{"core', '_concept":"Ent', 'ropy"}}'];
+    const fake: GenAiClientLike = {
+      models: {
+        async generateContent() {
+          return { text: pieces.join(""), candidates: [{ finishReason: "STOP" }] };
+        },
+        generateContentStream() {
+          return Promise.resolve(geminiChunks(pieces));
+        },
+        async embedContent() {
+          return { embeddings: [{ values: [0.1] }] };
+        },
+      },
+    };
+    const runtime = GeminiModelRuntime.fromClient(fake, "gemini-test");
+    const { deltas, text, final } = await drain(runtime.generateStream({ prompt: "p" }));
+    expect(deltas).toEqual(pieces); // ordered, incremental
+    expect(text).toBe('{"mccr":{"core_concept":"Entropy"}}');
+    expect(final?.text).toBe(text); // terminal result equals what generate() would return
+    expect(final?.model).toBe("gemini-test");
+    expect(final?.finishReason).toBe("stop");
+    expect(final?.usage).toEqual({ inputTokens: 5, outputTokens: 9 });
+  });
+
+  test("throws E_MODEL_STREAM_UNSUPPORTED when the client cannot stream (caller falls back)", async () => {
+    const fake: GenAiClientLike = {
+      models: {
+        async generateContent() {
+          return { text: "whole" };
+        },
+        async embedContent() {
+          return { embeddings: [{ values: [0.1] }] };
+        },
+      },
+    };
+    const runtime = GeminiModelRuntime.fromClient(fake, "gemini-test");
+    await expect(drain(runtime.generateStream({ prompt: "p" }))).rejects.toMatchObject({
+      code: "E_MODEL_STREAM_UNSUPPORTED",
+    });
+  });
+});
+
+describe("RecordingModelRuntime.generateStream", () => {
+  test("record mode tees inner deltas, records the whole result, and replay (via generate) resolves it", async () => {
+    const pieces = ['{"a":', "1}"];
+    const inner: ModelRuntime = {
+      async generate() {
+        return { text: pieces.join(""), model: "stub", finishReason: "stop" };
+      },
+      async embed() {
+        return [];
+      },
+      generateStream(_input) {
+        return {
+          async *[Symbol.asyncIterator]() {
+            for (const p of pieces) yield { textDelta: p };
+            yield {
+              textDelta: "",
+              result: { text: pieces.join(""), model: "stub", finishReason: "stop" },
+            };
+          },
+        };
+      },
+    };
+    const { bus, runtime: recorder } = harness("record", inner);
+    const { deltas, text, final } = await drain(recorder.generateStream(request("stream:k")));
+    expect(deltas).toEqual(pieces);
+    expect(final?.text).toBe(text);
+    // The whole output was recorded (record-before-use), so a flag-off replay via generate() finds it.
+    const recorded = bus
+      .replay({ subject: "model.>" })
+      .filter((e) => e.event_type === "model.output.recorded");
+    expect(recorded).toHaveLength(1);
+    const replayer = new RecordingModelRuntime({ mode: "replay", bus });
+    const replayed = await replayer.generate(request("stream:k"));
+    expect(replayed.text).toBe(text);
+  });
+
+  test("replay mode yields a single terminal chunk from the record (no intermediate deltas)", async () => {
+    const inner: ModelRuntime = {
+      async generate() {
+        return { text: '{"x":1}', model: "stub", finishReason: "stop" };
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const { bus, runtime: recorder } = harness("record", inner);
+    await recorder.generate(request("replaystream:k")); // records ordinal 0
+    const replayer = new RecordingModelRuntime({ mode: "replay", bus });
+    const { deltas, final } = await drain(replayer.generateStream(request("replaystream:k")));
+    expect(deltas).toEqual([]); // deterministic: no live deltas on replay
+    expect(final?.text).toBe('{"x":1}');
+  });
+
+  test("non-streaming inner degrades to a single whole result (no deltas) and still records", async () => {
+    const inner: ModelRuntime = {
+      async generate() {
+        return { text: "whole-output", model: "stub", finishReason: "stop" };
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const { bus, runtime: recorder } = harness("record", inner);
+    const { deltas, final } = await drain(recorder.generateStream(request("nostream:k")));
+    expect(deltas).toEqual([]);
+    expect(final?.text).toBe("whole-output");
+    const recorded = bus
+      .replay({ subject: "model.>" })
+      .filter((e) => e.event_type === "model.output.recorded");
+    expect(recorded).toHaveLength(1);
   });
 });

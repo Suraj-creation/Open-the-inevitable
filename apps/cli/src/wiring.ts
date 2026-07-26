@@ -388,6 +388,12 @@ export interface DemoOptions {
    */
   readonly streamRevealMs?: number;
   /**
+   * Live board streaming (ADR-0063 Phase B). When true (with the composer path), each frame's MCCR
+   * anchors surface as `surface.frame.element.delta` as they finish generating — the learner watches
+   * the board form. Gateway-only; the CLI/tests leave it off so deterministic runs stay byte-identical.
+   */
+  readonly frameStreamEnabled?: boolean;
+  /**
    * Source-evidence seam (CSE M5, CSE-008): resolved anchors for a concept across the surface's
    * attached Canonical Source Environments. The gateway wires this over its SourceHub (late-bound —
    * sources attach after creation); absent ⇒ frames compose with no source projection.
@@ -738,6 +744,8 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
     ...(options.voice ? { voice: options.voice } : {}),
     ...(options.media ? { media: options.media } : {}),
     ...(options.streamRevealMs ? { streamRevealMs: options.streamRevealMs } : {}),
+    // B (ADR-0063): stream the board on the composer/frame path (gateway-only; off by default).
+    ...(options.composer && options.frameStreamEnabled ? { frameStreamEnabled: true } : {}),
     ...(options.sourceEvidence ? { sourceEvidence: options.sourceEvidence } : {}),
     ...(options.frontierProvider ? { frontierProvider: options.frontierProvider } : {}),
     ...(options.composer && options.theater ? { theater: true } : {}),

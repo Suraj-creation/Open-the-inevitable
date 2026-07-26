@@ -19,6 +19,7 @@ import {
   type Emissions,
 } from "@inevitable/runtime";
 import { DepthScheduler, type DepthSchedulerOptions } from "@inevitable/scheduler";
+import type { FrameElementSink } from "./mccr-stream";
 import {
   CosError,
   CryptoIdGenerator,
@@ -281,6 +282,26 @@ export class ProductRuntimeDispatcher {
   }
 
   async dispatch(input: ProductDispatchInput): Promise<Result<ProductDispatchResult, CosError>> {
+    return this.runDispatch(input, null);
+  }
+
+  /**
+   * Live-streaming dispatch (ADR-0063 Phase B): identical to `dispatch`, but attaches a
+   * `FrameElementSink` to the unit for the duration of execution so a streaming-capable unit (the
+   * Surface Composer) can report content as it forms. Governance, scheduling, provenance, and the
+   * canonical result are unchanged — the sink is transient and out-of-band (never in the packet).
+   */
+  async dispatchStreaming(
+    input: ProductDispatchInput,
+    sink: FrameElementSink,
+  ): Promise<Result<ProductDispatchResult, CosError>> {
+    return this.runDispatch(input, sink);
+  }
+
+  private async runDispatch(
+    input: ProductDispatchInput,
+    sink: FrameElementSink | null,
+  ): Promise<Result<ProductDispatchResult, CosError>> {
     // Governance gate (kernel primitive). Must be the first check — before any state changes.
     // Spec: spec/product/product-cognition-runtime.md §10, spec/kernel/governance-kernel.md.
     if (this.governance) {
@@ -337,18 +358,31 @@ export class ProductRuntimeDispatcher {
         await this.host.activate(input.session.contextLease);
         this.activated = true;
       }
+      // ADR-0063 Phase B: attach the live-streaming sink to the unit for the duration of this
+      // execution (out-of-band — never in the packet). Only a streaming-capable unit reads it; it is
+      // always cleared afterward (finally), and dispatches are serialized, so a single sink is safe.
+      const streamable = this.agent.unit as {
+        setStreamSink?: (s: FrameElementSink | null) => void;
+      };
+      const canStream = sink !== null && typeof streamable.setStreamSink === "function";
+      if (canStream) streamable.setStreamSink!(sink);
       // Wrap host.handle() in an OTel span for end-to-end trace capture.
       // Spec: spec/product/product-cognition-runtime.md §8, spec/telemetry/otel-edge.md.
       // Without a registered SDK the span is a no-op — safe in offline tests.
-      const emissions = await withSpan("cos.agent.dispatch", () => this.host.handle(packet), {
-        "cos.packet_id": packet.packet_id,
-        "cos.agent_id": this.agent.identity.cid,
-        "cos.agent_unit_type": this.agent.identity.unit_type,
-        "cos.intent": input.intent ?? "",
-        "cos.concept_ids": (input.conceptIds ?? []).join(","),
-        "cos.trace_id": packet.trace_id,
-        "cos.span_id": packet.span_id,
-      });
+      let emissions: Emissions;
+      try {
+        emissions = await withSpan("cos.agent.dispatch", () => this.host.handle(packet), {
+          "cos.packet_id": packet.packet_id,
+          "cos.agent_id": this.agent.identity.cid,
+          "cos.agent_unit_type": this.agent.identity.unit_type,
+          "cos.intent": input.intent ?? "",
+          "cos.concept_ids": (input.conceptIds ?? []).join(","),
+          "cos.trace_id": packet.trace_id,
+          "cos.span_id": packet.span_id,
+        });
+      } finally {
+        if (canStream) streamable.setStreamSink!(null);
+      }
       this.scheduler.complete(workItem.work_id);
       // C1 — Chronicle law (ADR-0035/CIP-001 §4.3): the FULL reasoning trace a unit returns is
       // cognition and must reach the chronicle, not evaporate at dispatch. Family `reasoning`

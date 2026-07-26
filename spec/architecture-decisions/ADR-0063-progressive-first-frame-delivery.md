@@ -31,6 +31,30 @@ only on the explicit `interrupt` interaction; a normal follow-up ask still `sett
 the look-ahead can be promoted (ADR-0030 Phase 3) — cancelling every redirect would defeat that.
 Rollout is incremental and per-increment test-verified.
 
+## Phase B — live board streaming (shipped)
+
+B streams the composer's tokens so each MCCR anchor surfaces the moment it finishes generating —
+board content appears seconds before the whole frame composes. Decisions taken in implementation:
+
+- **Additive contract seam.** `ModelRuntime` gains an OPTIONAL `generateStream(request):
+  AsyncIterable<ModelStreamChunk>` (terminal chunk carries the whole `ModelGenerationResult`).
+  Adapters without it ⇒ callers fall back to `generate()`. Gemini implements it via
+  `generateContentStream`; `RecordingModelRuntime` tees deltas and records the *whole* final text
+  (record-before-use), so D3 replay returns the whole text with no deltas — deterministic.
+- **Element-completion granularity, not token-level.** A pure, truncation-tolerant scanner emits an
+  anchor only when its JSON value is fully received (string anchors only — structured anchors land
+  with `frame.composed`). This avoids the fragile mid-value tokenizer ADR-0028 deferred.
+- **Transient side-channel, atomic dispatch preserved.** The composer streams only when a
+  `FrameElementSink` is attached; `ProductRuntimeDispatcher.dispatchStreaming` sets it on the unit
+  around `host.handle` (out-of-band — never in the packet; no change to the base `CognitiveUnit` or
+  `packages/runtime`). Composer dispatches are serialized, so a single transient sink is safe.
+- **Gated off by default** (`frameStreamEnabled`, gateway-only) — deterministic/replay and every
+  test emit the whole frame with no deltas, so settled state and event logs are byte-identical.
+  Deltas fold into the transient `streaming_frame_elements` buffer that `frame.composed` clears
+  (mirrors ADR-0028), so `fold([delta…, composed]) ≡ fold([composed])` by construction.
+- **Scope:** foreground frames only (speculation stays whole); a mid-stream failure degrades to a
+  whole `generate()`; the web renders the forming buffer (StreamingBoard) until the frame composes.
+
 ## Invariants preserved
 
 Replay equivalence (client fold ≡ server state for every prefix), no wall-clock in canonical state,

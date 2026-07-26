@@ -16,6 +16,7 @@ import type {
   ConceptSeed,
   FiberedLearningLoop,
   FiberedLearningLoopResult,
+  FrameElementSink,
   LearningLoopMasteryInput,
   OnboardingSession,
   ProductDispatchInput,
@@ -75,6 +76,15 @@ import { traceBlock, type BlockTrace } from "./trace";
 /** Structural view of a governed dispatcher (ProductRuntimeDispatcher satisfies it). */
 export interface GovernedDispatcher {
   dispatch(input: ProductDispatchInput): Promise<Result<ProductDispatchResult, CosError>>;
+  /**
+   * Optional live-streaming dispatch (ADR-0063 Phase B): attaches a `FrameElementSink` so a
+   * streaming-capable unit reports content as it forms. Absent ⇒ the caller uses `dispatch` (no
+   * streaming). The canonical result is identical either way.
+   */
+  dispatchStreaming?(
+    input: ProductDispatchInput,
+    sink: FrameElementSink,
+  ): Promise<Result<ProductDispatchResult, CosError>>;
 }
 
 /**
@@ -452,6 +462,14 @@ export interface SurfaceSessionDeps {
    * (the default; keeps deterministic/replay runs and tests byte-identical).
    */
   readonly streamRevealMs?: number;
+  /**
+   * Live board streaming (ADR-0063 Phase B): when true AND the composer dispatcher + model support
+   * streaming, each frame's MCCR string anchors surface as `surface.frame.element.delta` the moment
+   * they finish generating — the learner watches the board form before it composes. Absent/false ⇒ the
+   * whole frame lands at once (the default; keeps deterministic/replay runs and every test byte-identical,
+   * since the transient deltas are cleared by `surface.frame.composed` and never touch settled state).
+   */
+  readonly frameStreamEnabled?: boolean;
   readonly clock?: Clock;
   readonly idGenerator?: IdGenerator;
   readonly nodeId?: string;
@@ -1487,6 +1505,8 @@ export class SurfaceSession {
     }
     await this.emitAskProgress(surfaceId, "composing", frameTitle);
 
+    // B (ADR-0063): the foreground frame streams its board as it forms (null in deterministic mode).
+    const streamSink = this.frameStreamSink(surfaceId, frameId);
     const artifacts = await this.dispatchComposerForConcept({
       surfaceId,
       conceptId: input.focusConceptId,
@@ -1498,6 +1518,7 @@ export class SurfaceSession {
       // A.2 (ADR-0063): real frame path — defer the image off time-to-first-frame; it is resolved and
       // attached after surface.frame.composed by emitFrameArtifacts.
       deferImage: true,
+      ...(streamSink ? { streamSink } : {}),
     });
     // Degrade observably: a blocked dispatch (untrusted learner / scheduler rejection) yields no
     // composed frame, exactly as the legacy path yields no explanation block (SRF-001 §10).
@@ -1548,6 +1569,30 @@ export class SurfaceSession {
   }
 
   /**
+   * Build a live board-streaming sink for a foreground frame (ADR-0063 Phase B), or null when
+   * streaming is disabled or the dispatcher can't stream. Each completed MCCR string anchor becomes a
+   * transient `surface.frame.element.delta` (element id `el-<name>`, monotone seq) that the fold
+   * accumulates into `streaming_frame_elements` and `surface.frame.composed` later clears — the
+   * settled board is always the composed frame, so streaming never affects canonical state.
+   */
+  private frameStreamSink(surfaceId: string, frameId: string): FrameElementSink | null {
+    if (!this.deps.frameStreamEnabled) return null;
+    if (!this.deps.composerDispatcher?.dispatchStreaming) return null;
+    let seq = 0;
+    return {
+      onElementComplete: async (name, text) => {
+        await this.emit("surface.frame.element.delta", {
+          surface_id: surfaceId,
+          frame_id: frameId,
+          element_id: `el-${name}`,
+          seq: seq++,
+          text_delta: text,
+        });
+      },
+    };
+  }
+
+  /**
    * Dispatch the governed Surface Composer for one concept and return its distilled artifacts (UCS,
    * ADR-0030): the MCCR (with an inline image folded in when the composer judged one helps and a
    * generator is wired), the separate narration script segments, the image decision, and the
@@ -1567,6 +1612,8 @@ export class SurfaceSession {
     deferImage?: boolean;
     /** F (ADR-0063): abort a background (speculative) compose on learner interrupt — skips image + emits. */
     signal?: AbortSignal;
+    /** B (ADR-0063): live board streaming — report each MCCR anchor as it forms (foreground frames only). */
+    streamSink?: FrameElementSink;
   }): Promise<{
     mccr: Record<string, unknown>;
     scriptSegments: Record<string, unknown>[];
@@ -1595,9 +1642,9 @@ export class SurfaceSession {
       this.sourceExcerptsFor(conceptId, conceptTitle),
       this.fusedSynthesisFor(conceptId, conceptTitle),
     ]);
-    const dispatched = await dispatcher.dispatch({
+    const dispatchInput = {
       session: this.deps.session,
-      targetAgentId: "composer",
+      targetAgentId: "composer" as const,
       intent: `compose frame: ${args.frameFocus ?? conceptTitle}`,
       conceptIds: [conceptId],
       content: {
@@ -1610,7 +1657,14 @@ export class SurfaceSession {
         ...(args.frameFocus ? { frame_focus: args.frameFocus } : {}),
         ...(args.explanationPrompt ? { prompt: args.explanationPrompt } : {}),
       },
-    });
+    };
+    // B (ADR-0063): stream the board when a sink is provided (foreground frames, live mode) AND the
+    // dispatcher supports it — the composer reports each MCCR anchor as it forms. Otherwise the whole
+    // frame lands at once (speculation, deterministic/replay, and any dispatcher without streaming).
+    const dispatched =
+      args.streamSink && dispatcher.dispatchStreaming
+        ? await dispatcher.dispatchStreaming(dispatchInput, args.streamSink)
+        : await dispatcher.dispatch(dispatchInput);
     if (!dispatched.ok) return null;
     // Phase F (ADR-0063): the learner interrupted while this background compose was in flight. The
     // model call already ran, but skip the image (the heavy step) and ALL emits so the cancelled

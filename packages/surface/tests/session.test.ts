@@ -225,6 +225,33 @@ function gatedComposerModel(blockTitle: string): { model: ModelRuntime; release:
 }
 
 /**
+ * A composer that STREAMS its output (ADR-0063 Phase B): the same fake composition, chunked into
+ * `chunks` text deltas with a terminal whole result — so a test can watch the board form via
+ * `surface.frame.element.delta` and prove settled state is delta-independent.
+ */
+function streamingComposerModel(chunks = 12): ModelRuntime {
+  const base = fakeComposerModel();
+  return {
+    generate: (req) => base.generate(req),
+    embed: (t) => base.embed(t),
+    generateStream() {
+      return {
+        async *[Symbol.asyncIterator]() {
+          const whole = await base.generate({ prompt: "" });
+          const text = whole.text;
+          const size = Math.max(1, Math.ceil(text.length / chunks));
+          for (let i = 0; i < text.length; i += size) yield { textDelta: text.slice(i, i + size) };
+          yield {
+            textDelta: "",
+            result: { text, model: whole.model, finishReason: "stop" as const },
+          };
+        },
+      };
+    },
+  };
+}
+
+/**
  * A fake frame planner: decomposes the concept into a 2-frame progressive sequence (intuition →
  * formal), each with a distinct sub_focus — UCS, ADR-0030 Phase 2. Deterministic per call.
  */
@@ -311,6 +338,8 @@ function makeFixture(
     frontierProvider?: SurfaceFrontierProvider;
     /** Look-ahead budget (UCS, ADR-0030; Phase 3). Absent/0 ⇒ no speculation (the default). */
     lookaheadBudget?: number;
+    /** Live board streaming (ADR-0063 Phase B). Absent/false ⇒ whole-frame (the deterministic default). */
+    frameStreamEnabled?: boolean;
   } = {},
 ): Fixture {
   const clock = new ManualClock(Date.UTC(2026, 5, 11));
@@ -467,6 +496,7 @@ function makeFixture(
     ...(framePlannerDispatcher ? { framePlannerDispatcher } : {}),
     ...(imagePlannerDispatcher ? { imagePlannerDispatcher } : {}),
     ...(options.lookaheadBudget !== undefined ? { lookaheadBudget: options.lookaheadBudget } : {}),
+    ...(options.frameStreamEnabled ? { frameStreamEnabled: true } : {}),
   });
 
   return { surface, world, bus };
@@ -1088,6 +1118,68 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
     // Replay equivalence still holds over the cancelled prefix (fold ≡ live state).
     const refolded = foldSurfaceEvents(bus.replay({ subject: "surface.>" }), state.surface_id);
     expect(refolded).toEqual(state);
+  });
+
+  test("ADR-0063 Phase B: the board streams as surface.frame.element.delta, and settled state is delta-independent", async () => {
+    const { surface, bus } = makeFixture("surface-frame-stream", {
+      composerModel: streamingComposerModel(),
+      framePlannerModel: fakeFramePlannerModel(),
+      frameStreamEnabled: true,
+    });
+    await surface.start("Teach me Neural Networks");
+    const asked = await surface.ask(teachMeNeuralNetworks());
+    expect(asked.ok).toBe(true);
+    if (!asked.ok) throw asked.error;
+    await surface.settle();
+
+    const events = bus.replay({ subject: "surface.>" });
+    const deltas = events.filter((e) => e.event_type === "surface.frame.element.delta");
+    // The board streamed: MCCR string anchors surfaced as deltas (el-<anchor> ids).
+    expect(deltas.length).toBeGreaterThan(0);
+    const ids = new Set(deltas.map((e) => (e.payload as Record<string, unknown>)["element_id"]));
+    expect(ids.has("el-core_concept")).toBe(true);
+    // Each frame's deltas precede its own surface.frame.composed (buffer-clear invariant).
+    for (const delta of deltas) {
+      const frameId = (delta.payload as Record<string, unknown>)["frame_id"];
+      const deltaIdx = events.indexOf(delta);
+      const composedIdx = events.findIndex(
+        (e) =>
+          e.event_type === "surface.frame.composed" &&
+          (e.payload as Record<string, unknown>)["frame_id"] === frameId,
+      );
+      expect(composedIdx).toBeGreaterThan(deltaIdx);
+    }
+
+    const state = surface.state()!;
+    // Settled state is delta-independent: the transient buffer is cleared by surface.frame.composed.
+    expect(state.streaming_frame_elements).toEqual([]);
+    // Replay equivalence holds over the streamed log (client fold ≡ server state).
+    const refolded = foldSurfaceEvents(events, state.surface_id);
+    expect(refolded).toEqual(state);
+  });
+
+  test("ADR-0063 Phase B: streamed and whole-frame runs settle to identical board content", async () => {
+    const boardOf = async (frameStreamEnabled: boolean) => {
+      const { surface } = makeFixture("surface-frame-stream-eq", {
+        composerModel: streamingComposerModel(),
+        framePlannerModel: fakeFramePlannerModel(),
+        frameStreamEnabled,
+      });
+      await surface.start("Teach me Neural Networks");
+      await surface.ask(teachMeNeuralNetworks());
+      await surface.settle();
+      // Compare the canonical board CONTENT: concept, title, and the distilled MCCR anchors. The
+      // mccr's `frame_id` is id-derived and legitimately differs (streaming consumes extra event ids
+      // for the deltas); every anchor's content/element_id/order must be byte-identical.
+      return surface.state()!.frames.map((f) => {
+        const { frame_id: _drop, ...mccrContent } = (f.mccr ?? {}) as unknown as Record<
+          string,
+          unknown
+        >;
+        return { concept_id: f.concept_id, title: f.title, mccr: mccrContent };
+      });
+    };
+    expect(await boardOf(true)).toEqual(await boardOf(false));
   });
 
   test("event ordering laws hold (created first, joined before contributed, closed terminal)", async () => {

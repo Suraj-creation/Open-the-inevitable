@@ -70,6 +70,11 @@ export {
   deterministicComposition,
   parseComposerOutput,
 } from "./surface-composer-unit";
+export {
+  extractCompletedMccrElements,
+  type CompletedMccrElement,
+  type FrameElementSink,
+} from "./mccr-stream";
 export type {
   FrameArchetype,
   FramePlan,

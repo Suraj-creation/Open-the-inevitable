@@ -395,6 +395,8 @@ export class SurfaceHost {
       // Live progressive reveal: stream the explanation as it unfolds (S-UCS, ADR-0028). Gateway-only;
       // the CLI/tests leave this off so deterministic runs emit the whole block at once.
       streamRevealMs: 45,
+      // B (ADR-0063): stream the board — MCCR anchors surface as they finish generating (gateway-only).
+      frameStreamEnabled: true,
       // UCS (ADR-0030): the product surface renders Cognitive Frames — distilled MCCR on the board
       // with a SEPARATE narration script — not a prose explanation block. Gateway-only (CLI/tests
       // exercise the legacy explanation-block path so `expand` and the substrate stay covered).
@@ -921,6 +923,8 @@ export class SurfaceHost {
       ...(voice ? { voice } : {}),
       media: mediaGen,
       streamRevealMs: 45,
+      // B (ADR-0063): stream the board — MCCR anchors surface as they finish generating (gateway-only).
+      frameStreamEnabled: true,
       // UCS (ADR-0030): the product surface renders Cognitive Frames — distilled MCCR on the board
       // with a SEPARATE narration script — not a prose explanation block. Gateway-only (CLI/tests
       // exercise the legacy explanation-block path so `expand` and the substrate stay covered).
