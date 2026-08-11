@@ -424,8 +424,12 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
 
   // POST /api/surface — enter a new environment.
   // If a valid bearer token is supplied, the surface is owned by the authenticated learner.
-  // If no bearer is supplied, a fresh learner is minted and their api_key is returned once.
-  // An unrecognised bearer token is rejected with 401.
+  // Otherwise (no bearer, OR an unknown one) a fresh learner is minted and their api_key is returned
+  // once. An unknown bearer is deliberately NOT a 401 here: surfaces are anonymously creatable, and a
+  // free-tier gateway resets its learner registry on spin-down, so a returning visitor's key routinely
+  // goes stale. Hard-rejecting entry would brick them (the client re-sends the same key forever). We
+  // heal instead — mint fresh and hand back a new api_key. (Private learner-scoped READ routes keep
+  // their strict 401; those protect real data, whereas creating a surface never did.)
   if (parts.length === 2 && method === "POST") {
     const body = await readJson(req);
     const goal =
@@ -434,22 +438,19 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
         : "Teach me Neural Networks";
     const VALID_MODES = new Set(["student", "educator", "institution", "researcher", "open"]);
 
-    // Auth: bearer token → authenticated returning learner; absent → mint fresh.
+    // Auth: a valid bearer authenticates a returning learner; no bearer OR an unknown one → anonymous.
     const token = extractBearer(req);
-    let authenticatedLearnerId: string | undefined;
-    if (token !== undefined) {
-      const caller = host.getLearnerByApiKey(token);
-      if (!caller) return sendError(res, 401, gatewayError("unknown api key"));
-      authenticatedLearnerId = caller.learnerId;
-    }
+    const caller = token !== undefined ? host.getLearnerByApiKey(token) : undefined;
+    const authenticated = caller !== undefined;
 
     const created = await host.create(goal, {
       trustLevel:
         typeof body["trustLevel"] === "number" ? (body["trustLevel"] as number) : undefined,
       seed: typeof body["seed"] === "string" ? (body["seed"] as string) : undefined,
-      // Bearer token wins over any learnerId in the body (prevents impersonation).
+      // A recognised bearer wins over any learnerId in the body (prevents impersonation); an unknown
+      // bearer falls through to the body's learnerId, else a fresh mint (resolveOrCreate never spoofs).
       learnerId:
-        authenticatedLearnerId ??
+        caller?.learnerId ??
         (typeof body["learnerId"] === "string" ? (body["learnerId"] as string) : undefined),
       mode:
         typeof body["mode"] === "string" && VALID_MODES.has(body["mode"] as string)
@@ -458,9 +459,10 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
     });
     if (!created.ok) return sendError(res, 400, created.error);
 
-    // Return the api_key only when we just minted a fresh learner (no bearer was provided).
-    // Returning learners already hold their key; echoing it on every request would be noisy.
-    const freshLearner = token === undefined ? host.getLearner(created.value.learnerId) : undefined;
+    // Echo the api_key whenever the caller was NOT an already-authenticated returning learner — i.e.
+    // a fresh mint (no bearer) OR a stale/unknown bearer we just healed — so the client can (re)store
+    // it. An authenticated learner already holds their key; echoing it every request would be noisy.
+    const freshLearner = authenticated ? undefined : host.getLearner(created.value.learnerId);
     return sendJson(res, 201, {
       ok: true,
       surface_id: created.value.surfaceId,

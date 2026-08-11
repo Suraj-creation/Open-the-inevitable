@@ -39,6 +39,36 @@ function writeCredential(cred: LearnerCredential): void {
   }
 }
 
+/** Forget a rejected credential so we never re-send a key the gateway no longer recognises. */
+function clearCredential(): void {
+  try {
+    globalThis.localStorage?.removeItem(LEARNER_STORE_KEY);
+  } catch {
+    /* storage unavailable — nothing to clear */
+  }
+}
+
+/** One POST to enter a surface, optionally authenticating as a returning learner. */
+function postSurface(
+  goal: string,
+  mode: string | undefined,
+  cred: LearnerCredential | null,
+  onWaking?: () => void,
+): Promise<Response> {
+  return wakingFetch(
+    `${BASE}/surface`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(cred ? { Authorization: `Bearer ${cred.apiKey}` } : {}),
+      },
+      body: JSON.stringify({ goal, ...(mode ? { mode } : {}) }),
+    },
+    { onWaking },
+  );
+}
+
 /**
  * The gateway may be COLD on a free host (e.g. Render spins the instance down after ~15 min idle):
  * the first request then fails at the network layer (a rejected `fetch` → "Failed to fetch") or
@@ -81,18 +111,16 @@ export async function enterSurface(
   onWaking?: () => void,
 ): Promise<string> {
   const cred = readCredential();
-  const res = await wakingFetch(
-    `${BASE}/surface`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(cred ? { Authorization: `Bearer ${cred.apiKey}` } : {}),
-      },
-      body: JSON.stringify({ goal, ...(mode ? { mode } : {}) }),
-    },
-    { onWaking },
-  );
+  let res = await postSurface(goal, mode, cred, onWaking);
+  // Self-heal a stale credential: a free-tier gateway resets its learner registry on spin-down, so a
+  // returning visitor's stored key becomes unknown and the authenticated attempt 401s. That key is
+  // poison — re-sending it would 401 forever (a hard lockout with "failed to enter surface"). Drop it
+  // and retry ONCE as a fresh anonymous learner, so entry always succeeds; the fresh api_key returned
+  // below then replaces the discarded one and continuity resumes from here.
+  if (cred && res.status === 401) {
+    clearCredential();
+    res = await postSurface(goal, mode, null, onWaking);
+  }
   const json = (await res.json()) as {
     ok: boolean;
     surface_id?: string;

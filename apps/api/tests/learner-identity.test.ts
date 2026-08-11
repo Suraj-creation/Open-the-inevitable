@@ -147,4 +147,31 @@ describe("Durable learner identity & resume-by-learner (P2.2)", () => {
     const minted = await getLearner(base, created.learner_id, created.api_key!);
     expect(minted.ok).toBe(true);
   });
+
+  test("a stale/unknown bearer on entry heals instead of locking the learner out (registry reset)", async () => {
+    // Reproduces the production lockout: a returning learner holds an api_key from a prior visit, but
+    // the gateway's learner registry reset (free-tier /tmp spin-down), so the key is now unknown.
+    // Surface entry must NOT hard-401 (that bricks the learner — every retry re-sends the same key).
+    // It mints a fresh learner and hands back a NEW api_key so the client can heal its credential.
+    const base = await boot();
+    const res = await fetch(`${base}/api/surface`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      },
+      body: JSON.stringify({ goal: "Teach me Neural Networks", seed: "li-stale" }),
+    });
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as Created & { ok: boolean };
+    expect(json.ok).toBe(true);
+    expect(json.surface_id).toBeTruthy();
+    expect(json.learner_id).toBeTruthy();
+    // A fresh, REAL api_key is returned (not an echo of the stale one) and authenticates the new learner.
+    expect(json.api_key).toBeTruthy();
+    expect(json.api_key).not.toBe("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
+    const view = await getLearner(base, json.learner_id, json.api_key!);
+    expect(view.ok).toBe(true);
+    expect(view.surfaces.map((s) => s.surfaceId)).toContain(json.surface_id);
+  });
 });
