@@ -340,6 +340,8 @@ function makeFixture(
     lookaheadBudget?: number;
     /** Live board streaming (ADR-0063 Phase B). Absent/false ⇒ whole-frame (the deterministic default). */
     frameStreamEnabled?: boolean;
+    /** Surface practice + checkpoint as frames (default OFF = teaching-only surface). */
+    surfacePracticeFrames?: boolean;
   } = {},
 ): Fixture {
   const clock = new ManualClock(Date.UTC(2026, 5, 11));
@@ -497,6 +499,7 @@ function makeFixture(
     ...(imagePlannerDispatcher ? { imagePlannerDispatcher } : {}),
     ...(options.lookaheadBudget !== undefined ? { lookaheadBudget: options.lookaheadBudget } : {}),
     ...(options.frameStreamEnabled ? { frameStreamEnabled: true } : {}),
+    ...(options.surfacePracticeFrames ? { surfacePracticeFrames: true } : {}),
   });
 
   return { surface, world, bus };
@@ -894,6 +897,7 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
     const { surface, bus } = makeFixture("surface-multiframe", {
       composerModel: fakeComposerModel(),
       framePlannerModel: fakeFramePlannerModel(),
+      surfacePracticeFrames: true, // this test exercises the practice + checkpoint frame path
     });
     await surface.start("Teach me Neural Networks");
     const asked = await surface.ask(teachMeNeuralNetworks());

@@ -350,6 +350,11 @@ export class CurriculumUnit implements CognitiveUnit {
       // A 5–8 concept DAG plus a reasoning model's "thinking" tokens overruns a small budget and
       // truncates the JSON (finishReason: max_tokens) — give the structured output room to complete.
       maxTokens: 4096,
+      // Bound the thinking phase (gemini-2.5-*). Without this the reasoning model spends the whole
+      // output budget "thinking" and returns EMPTY text → parse fails → EVERY lesson silently falls
+      // back to the deterministic "Foundations of <goal>" scaffold. Every other structured unit
+      // (planner, composer, image, assessment) already caps this; the curriculum was the one gap.
+      thinkingBudget: 1024,
       responseSchema: OUTPUT_CONTRACT_SCHEMA,
       invocation_key: `${this.manifest.id}:${packet.packet_id}:curriculum`,
     };

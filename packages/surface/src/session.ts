@@ -470,6 +470,15 @@ export interface SurfaceSessionDeps {
    * since the transient deltas are cleared by `surface.frame.composed` and never touch settled state).
    */
   readonly frameStreamEnabled?: boolean;
+  /**
+   * Whether practice + mastery-checkpoint are surfaced as on-screen Cognitive Frames. Default OFF:
+   * the Cognitive Surface is a TEACHING surface — a topic is planned into concepts and each concept
+   * taught as a sequence of explanatory frames (with images), and the lesson simply ends there. The
+   * practice/checkpoint learning-loop still runs as the cognitive SUBSTRATE (blocks, depth gate,
+   * mastery memory), but its "Practice — …" and "Ready to practice/Checkpoint — …" frames no longer
+   * interrupt the teaching flow. Set true to restore them (e.g. an assessment-mode surface, or tests).
+   */
+  readonly surfacePracticeFrames?: boolean;
   readonly clock?: Clock;
   readonly idGenerator?: IdGenerator;
   readonly nodeId?: string;
@@ -1073,7 +1082,9 @@ export class SurfaceSession {
       // UCS (ADR-0030; Phase 2): practice becomes its own anchored Cognitive Frame — the learner
       // sees the problem as a viewport-complete state, voiced separately. The block remains the
       // canonical/observable backing; the frame is the progressive on-screen state.
-      if (onPlannerFramePath) {
+      // Teaching-surface default (product): the practice FRAME is suppressed so the flow stays pure
+      // teaching (the practice block + mastery substrate still run above); opt in with surfacePracticeFrames.
+      if (onPlannerFramePath && this.deps.surfacePracticeFrames) {
         // Put the Coach's REAL generated problem on the board (N3), not `input.practicePrompt` (the
         // meta-instruction that produced it). The check segment `pause_after` holds so the frame
         // gives the learner time to work it before the lesson moves on.
@@ -1181,7 +1192,9 @@ export class SurfaceSession {
       // labeled HONESTLY (review N2): only a real five-test depth gate is called "mastery verified";
       // absent a graded gate this is a readiness self-check ("taught — practice to verify"), never a
       // fabricated claim that the learner passed tests they were never given.
-      if (onPlannerFramePath) {
+      // Teaching-surface default (product): the checkpoint FRAME is suppressed (the mastery is still
+      // recorded above); opt in with surfacePracticeFrames for an assessment-mode surface.
+      if (onPlannerFramePath && this.deps.surfacePracticeFrames) {
         const summary = !gatePassed
           ? "Not yet — let's reinforce the gaps and return."
           : depthGate
