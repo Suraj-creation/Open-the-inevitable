@@ -78,6 +78,7 @@ import {
   policyRef,
   type AdaptivePolicy,
   type CognitiveObjectRef,
+  type ContextManifest,
   type ExplanationStrategy,
 } from "@inevitable/cognitive-loop";
 import { geminiApiKey, geminiModel, persistDir, strictModel, supabaseBackendUrl } from "./env";
@@ -820,6 +821,8 @@ export class SurfaceHost {
               conceptTitle: title ?? concept,
               mode: effectiveMode,
             });
+            // Reconstruction law (spec 11 §6): the model-visible context is a durable, auditable fact.
+            this.recordContextManifest(hosted, explanation.manifest);
             const contribution = new AgentContributionRuntime({
               bus: fixture.bus,
               clock: fixture.clock,
@@ -1376,6 +1379,28 @@ export class SurfaceHost {
         producerCid: "cog-surface-gateway",
         producerType: "gateway.harness",
         payload: { surface_id: hosted.surfaceId, ...payload },
+        classification: "internal",
+        retention: "30d-hot",
+        replayBehavior: "recorded-observation",
+      },
+      { clock: hosted.fixture.clock, hlc: hosted.gatewayHlc, idGenerator: this.gatewayIds },
+    );
+    hosted.gatewayHlc = created.hlc;
+    void hosted.fixture.bus.publish(created.event);
+  }
+
+  /**
+   * Record the model-visible ContextManifest as a durable fact (spec 11 §6, the reconstruction law):
+   * "why did the model see this?" — constitution/policy versions, strategy, system sections, provenance —
+   * answerable from the log. Emitted via the gateway id/HLC stream (recorded-observation, non-perturbing).
+   */
+  private recordContextManifest(hosted: HostedSurface, manifest: ContextManifest): void {
+    const created = createEvent(
+      {
+        eventType: "cognitive.context.compiled",
+        producerCid: "cog-surface-gateway",
+        producerType: "gateway.harness",
+        payload: { surface_id: hosted.surfaceId, manifest },
         classification: "internal",
         retention: "30d-hot",
         replayBehavior: "recorded-observation",

@@ -53,6 +53,25 @@ describe("HarnessExplainer — opt-in live harness→surface wiring", () => {
     expect(explanation.sections[0]?.key).toBe("section-0");
     expect(explanation.sections[0]?.text).toContain("solar panel");
   });
+
+  it("emits a reconstructable ContextManifest (the reconstruction law, spec 11 §6)", async () => {
+    const explanation = await new HarnessExplainer(new FakeModel(OK_OUTPUT)).explain({
+      learnerCid: "cog-l",
+      concept: "photosynthesis",
+      conceptTitle: "Photosynthesis",
+      mode: "student",
+    });
+    const m = explanation.manifest;
+    expect(m.agent_id).toBe("agent.explanation");
+    expect(m.constitution_version).toBe(1);
+    expect(m.policy_version).toBe(1);
+    expect(m.strategy).toBe("concrete-first");
+    expect(m.goal_refs).toEqual(["photosynthesis"]);
+    expect(m.capability_manifest).toContain("faculty");
+    expect(m.system_sections.length).toBeGreaterThan(0);
+    // "Why did the model see this?" — the policy Cognitive Object is captured in the manifest.
+    expect(m.cognitive_object_refs).toContain(m.policy_ref);
+  });
 });
 
 describe("HarnessExplainer — closed governed loop (accumulates per learner)", () => {

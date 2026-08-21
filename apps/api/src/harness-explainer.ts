@@ -19,12 +19,14 @@ import {
   InMemoryPolicyStore,
   ModelRuntimeFaculty,
   Reflection,
+  buildContextManifest,
   constitutionFromManifest,
   policyRef,
   seedPolicy,
   type AdaptivePolicy,
   type CognitiveTask,
   type Constitution,
+  type ContextManifest,
   type ExplanationStrategy,
   type HookBus,
   type LearnerState,
@@ -41,6 +43,8 @@ export interface HarnessExplanation {
   readonly sections: readonly SemanticSection[];
   /** The Adaptive Policy version this explanation was compiled from (accumulation is observable). */
   readonly policyVersion: number;
+  /** The reconstruction record for the model invocation (spec 11 §6): why the model saw what it saw. */
+  readonly manifest: ContextManifest;
 }
 
 export interface HarnessExplainInput {
@@ -145,6 +149,14 @@ export class HarnessExplainer {
       intent: "learn",
     };
     const compiled = this.compiler.compile({ constitution, policy, learner, task });
+    // Reconstruction law (spec 11 §6): capture WHY the model saw what it saw, from durable state.
+    const manifest = buildContextManifest({
+      compiled,
+      processId: `explain:${input.learnerCid}:${input.concept}`,
+      agentId,
+      capabilityManifest: ["compiler", "faculty", "policy-store"],
+      goalRefs: [input.concept],
+    });
     const output = await this.faculty.execute(compiled);
     this.lastStrategy.set(input.learnerCid, compiled.strategy);
     return {
@@ -153,6 +165,7 @@ export class HarnessExplainer {
       strategy: compiled.strategy,
       sections: sectionsFromRoleTexts(output.sections ?? []),
       policyVersion: policy.version,
+      manifest,
     };
   }
 
