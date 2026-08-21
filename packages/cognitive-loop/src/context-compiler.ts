@@ -63,6 +63,42 @@ const STRATEGY_INSTRUCTION: Record<ExplanationStrategy, string> = {
 
 const DEFAULT_BUDGET_CHARS = 4000;
 
+/**
+ * Epistemic roles a produced section may carry — the vocabulary aligns 1:1 to the surface's
+ * `EpistemicRole` at the integration boundary. Named here so the compiler (and the harness) stay free
+ * of a surface dependency (correct dependency direction).
+ */
+const SECTION_ROLES =
+  "intuition, definition, reasoning, example, warning, misconception, insight, observation, evidence, structural";
+
+/** The structured-output contract the model faculty must satisfy (parsed by parseModelFacultyOutput). */
+const OUTPUT_CONTRACT_INSTRUCTION =
+  `Respond with JSON only (no prose, no markdown fences): ` +
+  `{"summary":"<one-sentence essence>","confidence":<0..1>,` +
+  `"sections":[{"role":"<one of: ${SECTION_ROLES}>","title":"<short label>","text":"<content>"}]}. ` +
+  `Lead with the chosen teaching strategy; keep each section to one kind of knowledge.`;
+
+const OUTPUT_CONTRACT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  required: ["summary", "sections"],
+  properties: {
+    summary: { type: "string" },
+    confidence: { type: "number" },
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["role", "text"],
+        properties: {
+          role: { type: "string" },
+          title: { type: "string" },
+          text: { type: "string" },
+        },
+      },
+    },
+  },
+};
+
 export class ContextCompiler {
   compile(input: {
     readonly constitution: Constitution;
@@ -89,6 +125,7 @@ export class ContextCompiler {
         learner.known_concepts.length > 0
           ? `Already understood (build on, do not re-explain): ${learner.known_concepts.join(", ")}`
           : "",
+        OUTPUT_CONTRACT_INSTRUCTION,
       ]
         .filter(Boolean)
         .join("\n"),
@@ -107,6 +144,7 @@ export class ContextCompiler {
       prompt,
       system,
       maxTokens: 2048,
+      responseSchema: OUTPUT_CONTRACT_SCHEMA,
       invocation_key: `${constitution.agent_id}:${task.task_id}:explanation`,
     };
 
