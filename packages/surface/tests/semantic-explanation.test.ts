@@ -7,8 +7,10 @@ import { describe, expect, test } from "vitest";
 import { ManualClock, SeededIdGenerator } from "@inevitable/shared";
 import {
   EXPLANATION_ROLE_VOCAB_VERSION,
+  coerceEpistemicRole,
   createCognitionBlock,
   explanationSectionRole,
+  sectionsFromRoleTexts,
   structureExplanation,
   type EpistemicRole,
   type SemanticSection,
@@ -153,5 +155,29 @@ describe("createCognitionBlock — Structured Semantic Explanation enrichment (s
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.content["sections"]).toBeUndefined();
+  });
+});
+
+describe("coerceEpistemicRole / sectionsFromRoleTexts — the harness→surface integration boundary", () => {
+  test("coerces arbitrary and aliased role strings to valid EpistemicRoles", () => {
+    expect(coerceEpistemicRole("insight")).toBe("insight");
+    expect(coerceEpistemicRole("intuition")).toBe("insight");
+    expect(coerceEpistemicRole("Derivation")).toBe("reasoning");
+    expect(coerceEpistemicRole("nonsense")).toBe("observation");
+    for (const role of ["definition", "example", "warning", "frontier", "code", "visual"]) {
+      expect(VALID_ROLES.has(coerceEpistemicRole(role))).toBe(true);
+    }
+  });
+
+  test("builds ordered SemanticSections from a faculty's role-tagged output, skipping empty text", () => {
+    const sections = sectionsFromRoleTexts([
+      { role: "intuition", title: "Intuition", text: "Think of a solar panel." },
+      { role: "definition", title: "Definition", text: "   " },
+      { role: "definition", title: "Definition", text: "Converts light energy." },
+    ]);
+    expect(sections.map((s) => s.role)).toEqual(["insight", "definition"]);
+    expect(sections.map((s) => s.key)).toEqual(["section-0", "section-1"]);
+    expect(sections.map((s) => s.order)).toEqual([0, 1]);
+    for (const s of sections) expect(VALID_ROLES.has(s.role)).toBe(true);
   });
 });

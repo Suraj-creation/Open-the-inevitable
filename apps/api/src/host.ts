@@ -55,13 +55,17 @@ import {
   type Result,
 } from "@inevitable/shared";
 import {
+  AgentContributionRuntime,
+  EXPLANATION_ROLE_VOCAB_VERSION,
   foldSurfaceEvents,
+  type CognitionBlock,
   type FusedSynthesisView,
   type SurfaceAskInput,
   type SurfaceAskResult,
   type SurfaceState,
 } from "@inevitable/surface";
 import { geminiApiKey, geminiModel, persistDir, strictModel, supabaseBackendUrl } from "./env";
+import { HarnessExplainer } from "./harness-explainer";
 import { IntelligenceSink } from "./intelligence";
 import { LearnerRegistry, type DurableLearnerStore, type LearnerRecord } from "./learners";
 import { SourceHub, type RegisteredSource } from "./sources";
@@ -87,6 +91,8 @@ interface HostedSurface {
   readonly surfaceId: string;
   readonly fixture: DemoFixture;
   readonly goal: string;
+  /** The raw resolved model runtime (real Gemini when keyed), for the opt-in Cognitive Harness path. */
+  readonly model: ModelRuntime;
   /**
    * The owning learner (DPS-003), used to capture cross-surface cognition (DPS-004). Absent only for
    * legacy surfaces rehydrated from a `meta.json` written before learner identity existed.
@@ -137,6 +143,12 @@ export interface ServedSurface {
   interact(input: Parameters<Surface["interact"]>[0]): ReturnType<Surface["interact"]>;
   /** Grade a learner's answer to a concept's practice problem into genuine earned mastery (F14). */
   answer(conceptId: string, text: string): ReturnType<Surface["submitAnswer"]>;
+  /**
+   * Opt-in (spec 11): produce a Structured Semantic Explanation via the Cognitive Harness's real model
+   * faculty and contribute it as an additive block. A dedicated path — the default ask/advance flow is
+   * unchanged. Degrades visibly (typed error) when no real model is configured.
+   */
+  harnessExplain(concept: string, title?: string): Promise<Result<CognitionBlock, CosError>>;
   /** Bind a registered Canonical Source Environment to this surface (CSE M5, CSE-008 §3.1). */
   attachSource(sourceVersionId: string): Promise<Result<RegisteredSource, CosError>>;
   /**
@@ -532,6 +544,7 @@ export class SurfaceHost {
       surfaceId,
       fixture,
       goal,
+      model: inner,
       learnerId: learner.learnerId,
       gatewayHlc: hlcInit("surface-gateway"),
       queue: Promise.resolve(),
@@ -667,6 +680,52 @@ export class SurfaceHost {
           // A graded answer records mastery evidence — capture cross-surface cognition.
           if (result.ok) await this.captureCognition(hosted);
           return result;
+        }),
+      // Opt-in (spec 11): the Cognitive Harness produces a Structured Semantic Explanation via its real
+      // model faculty; we contribute it as an additive block through the SAME path every block uses, so
+      // it streams, folds, and renders identically. A dedicated route — the default ask/advance flow is
+      // untouched. Degrades visibly (typed error) with no real model.
+      harnessExplain: (concept, title) =>
+        this.serialize(hosted, async () => {
+          const learner = hosted.learnerId ? await this.learners.get(hosted.learnerId) : undefined;
+          const learnerCid = learner?.cid ?? hosted.learnerId ?? `cog-anon-${hosted.surfaceId}`;
+          try {
+            const explanation = await new HarnessExplainer(hosted.model).explain({
+              learnerCid,
+              concept,
+              conceptTitle: title ?? concept,
+            });
+            const contribution = new AgentContributionRuntime({
+              bus: fixture.bus,
+              clock: fixture.clock,
+              idGenerator: new CryptoIdGenerator(),
+            });
+            const block = await contribution.contribute({
+              surface_id: hosted.surfaceId,
+              agent_id: "explanation",
+              agent_cid: "agent.explanation",
+              block_type: "explanation",
+              title: title ?? concept,
+              content: {
+                summary: explanation.summary,
+                sections: explanation.sections,
+                strategy: explanation.strategy,
+                role_vocab_version: EXPLANATION_ROLE_VOCAB_VERSION,
+                produced_by: "cognitive-harness",
+              },
+              concept_ids: [concept],
+              reason: "cognitive-harness explanation (opt-in, spec 11)",
+              confidence: explanation.confidence,
+            });
+            if (block.ok) this.persistSnapshots(hosted.surfaceId, fixture);
+            return block;
+          } catch (cause) {
+            return err(
+              cause instanceof CosError
+                ? cause
+                : gatewayError("harness explanation failed", { cause: String(cause) }),
+            ) as Result<CognitionBlock, CosError>;
+          }
         }),
       // CSE M5: bind a registered source environment — the attach event lands on the surface's
       // canonical log, and the binding joins the evidence seam for subsequent frame composition.
@@ -863,6 +922,7 @@ export class SurfaceHost {
       close: async () => replayOnly(),
       interact: async () => replayOnly(),
       answer: async () => replayOnly(),
+      harnessExplain: async () => replayOnly(),
       attachSource: async () => replayOnly(),
       teachSource: async () => replayOnly(),
       fuse: async () => replayOnly(),
@@ -1013,6 +1073,7 @@ export class SurfaceHost {
       surfaceId,
       fixture,
       goal,
+      model: inner,
       ...(learnerId !== undefined ? { learnerId } : {}),
       gatewayHlc: hlcInit("surface-gateway"),
       queue: Promise.resolve(),

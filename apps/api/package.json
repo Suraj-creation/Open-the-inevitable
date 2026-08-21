@@ -17,6 +17,7 @@
   "dependencies": {
     "@inevitable/adapters": "workspace:*",
     "@inevitable/cli": "workspace:*",
+    "@inevitable/cognitive-loop": "workspace:*",
     "@inevitable/contracts": "workspace:*",
     "@inevitable/events": "workspace:*",
     "@inevitable/intelligence": "workspace:*",

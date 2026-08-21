@@ -100,3 +100,66 @@ export function structureExplanation(
   }
   return sections;
 }
+
+/** The canonical EpistemicRole set as a runtime guard for coercion (representation.ts is the type). */
+const EPISTEMIC_ROLES: ReadonlySet<string> = new Set<EpistemicRole>([
+  "canonical",
+  "definition",
+  "reasoning",
+  "example",
+  "warning",
+  "misconception",
+  "insight",
+  "memory-cue",
+  "observation",
+  "evidence",
+  "structural",
+]);
+
+/** Aliases a producing faculty may use → the canonical EpistemicRole (the integration boundary). */
+const ROLE_ALIASES: Readonly<Record<string, EpistemicRole>> = {
+  intuition: "insight",
+  analogy: "insight",
+  story: "insight",
+  derivation: "reasoning",
+  math: "reasoning",
+  mathematical: "reasoning",
+  application: "example",
+  applied: "example",
+  code: "example",
+  visual: "structural",
+  diagram: "structural",
+  summary: "observation",
+  frontier: "evidence",
+};
+
+/** Coerce an arbitrary role string (from a model faculty) to a valid EpistemicRole. Unknown → observation. */
+export function coerceEpistemicRole(role: string): EpistemicRole {
+  const key = role.trim().toLowerCase();
+  if (EPISTEMIC_ROLES.has(key)) return key as EpistemicRole;
+  return ROLE_ALIASES[key] ?? "observation";
+}
+
+/**
+ * Build durable, ordered SemanticSections from a faculty's role-tagged output — the integration
+ * boundary between a Cognitive Harness faculty (spec 11, OutputSection) and the surface. Arbitrary
+ * role strings are coerced to the canonical EpistemicRole; empty text is skipped.
+ */
+export function sectionsFromRoleTexts(
+  items: readonly { readonly role: string; readonly title: string; readonly text: string }[],
+): SemanticSection[] {
+  const sections: SemanticSection[] = [];
+  let order = 0;
+  for (const item of items) {
+    if (typeof item.text !== "string" || item.text.trim().length === 0) continue;
+    sections.push({
+      key: `section-${order}`,
+      role: coerceEpistemicRole(item.role),
+      title: item.title,
+      text: item.text,
+      order,
+    });
+    order += 1;
+  }
+  return sections;
+}

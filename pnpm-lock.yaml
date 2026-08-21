@@ -72,6 +72,9 @@ importers:
       '@inevitable/cli':
         specifier: workspace:*
         version: link:../cli
+      '@inevitable/cognitive-loop':
+        specifier: workspace:*
+        version: link:../../packages/cognitive-loop
       '@inevitable/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

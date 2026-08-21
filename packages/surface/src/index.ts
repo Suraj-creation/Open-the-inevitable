@@ -146,6 +146,8 @@ export { deriveEpisodes, currentEpisode, type Episode } from "./episodes";
 export {
   structureExplanation,
   explanationSectionRole,
+  coerceEpistemicRole,
+  sectionsFromRoleTexts,
   EXPLANATION_ROLE_VOCAB_VERSION,
   type SemanticSection,
 } from "./semantic-explanation";

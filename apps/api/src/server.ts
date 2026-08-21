@@ -535,6 +535,31 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
     return sendJson(res, 200, { ok: true, blocks: taught.value.blocks.length });
   }
 
+  // Opt-in (spec 11) — POST /api/surface/:id/harness-explain { concept?, title? }: produce a Structured
+  // Semantic Explanation via the Cognitive Harness's real model faculty, contributed as an additive
+  // block. A dedicated route; the default ask/advance flow is unchanged. 422 (visible degradation) when
+  // no real model is configured.
+  if (action === "harness-explain" && method === "POST") {
+    const body = await readJson(req);
+    const concept =
+      typeof body["concept"] === "string" && (body["concept"] as string).trim()
+        ? (body["concept"] as string).trim()
+        : served.goal;
+    const title =
+      typeof body["title"] === "string" && (body["title"] as string).trim()
+        ? (body["title"] as string).trim()
+        : undefined;
+    const result = await served.harnessExplain(concept, title);
+    if (!result.ok) return sendError(res, 422, result.error);
+    const sections = result.value.content["sections"];
+    return sendJson(res, 200, {
+      ok: true,
+      block_id: result.value.block_id,
+      strategy: result.value.content["strategy"] ?? null,
+      sections: Array.isArray(sections) ? sections.length : 0,
+    });
+  }
+
   // CSE M9 T1 — POST /api/surface/:id/fuse { concept_refs }: reconcile the surface's bound sources
   // over a concept set into one cognitive environment (Source Fusion, CSE-015).
   if (action === "fuse" && method === "POST") {
