@@ -9,7 +9,14 @@ import type {
   ModelGenerationResult,
   ModelRuntime,
 } from "@inevitable/contracts";
+import { InMemoryPolicyStore, type ExplanationStrategy } from "@inevitable/cognitive-loop";
 import { HarnessExplainer } from "../src/harness-explainer";
+
+const OK_OUTPUT = JSON.stringify({
+  summary: "s",
+  confidence: 0.8,
+  sections: [{ role: "insight", title: "T", text: "body" }],
+});
 
 class FakeModel implements ModelRuntime {
   constructor(private readonly text: string) {}
@@ -45,5 +52,57 @@ describe("HarnessExplainer — opt-in live harness→surface wiring", () => {
     expect(explanation.sections.map((s) => s.role)).toEqual(["insight", "definition"]);
     expect(explanation.sections[0]?.key).toBe("section-0");
     expect(explanation.sections[0]?.text).toContain("solar panel");
+  });
+});
+
+describe("HarnessExplainer — closed governed loop (accumulates per learner)", () => {
+  it("adapts the teaching strategy across explain→feedback cycles and converges to the best", async () => {
+    // The model output is fixed — the STRATEGY is chosen by the compiler from the policy, not the model.
+    const loop = new HarnessExplainer(new FakeModel(OK_OUTPUT), {
+      policies: new InMemoryPolicyStore(),
+      lastStrategy: new Map<string, ExplanationStrategy>(),
+    });
+    const L = "cog-l";
+    const ask = async (): Promise<string> =>
+      (await loop.explain({ learnerCid: L, concept: "c", conceptTitle: "C" })).strategy;
+
+    const s1 = await ask();
+    loop.recordOutcome({ learnerCid: L, score: 0.2 }); // concrete-first taught poorly
+    const s2 = await ask();
+    loop.recordOutcome({ learnerCid: L, score: 0.2 }); // abstract-first taught poorly
+    const s3 = await ask();
+    loop.recordOutcome({ learnerCid: L, score: 0.9 }); // visual-first taught well
+    const s4 = await ask();
+
+    // Seed weights (=1) keep untried strategies preferred, so the loop explores all three, then the
+    // governed policy converges on the one that taught well.
+    expect([s1, s2, s3]).toEqual(["concrete-first", "abstract-first", "visual-first"]);
+    expect(s4).toBe("visual-first");
+    // Accumulation is real + observable: the Adaptive Policy version advanced past the seed.
+    const version = (await loop.explain({ learnerCid: L, concept: "c", conceptTitle: "C" }))
+      .policyVersion;
+    expect(version).toBeGreaterThan(1);
+  });
+
+  it("keeps each learner's adaptation isolated (one learner never affects another)", async () => {
+    const loop = new HarnessExplainer(new FakeModel(OK_OUTPUT), {
+      policies: new InMemoryPolicyStore(),
+      lastStrategy: new Map<string, ExplanationStrategy>(),
+    });
+    await loop.explain({ learnerCid: "cog-a", concept: "c", conceptTitle: "C" });
+    loop.recordOutcome({ learnerCid: "cog-a", score: 0.1 });
+    const bStrategy = (await loop.explain({ learnerCid: "cog-b", concept: "c", conceptTitle: "C" }))
+      .strategy;
+    expect(bStrategy).toBe("concrete-first"); // learner B starts fresh (seed), unaffected by A
+  });
+
+  it("feedback with no prior explanation is a visible no-op, not an error", () => {
+    const loop = new HarnessExplainer(new FakeModel("{}"), {
+      policies: new InMemoryPolicyStore(),
+      lastStrategy: new Map<string, ExplanationStrategy>(),
+    });
+    const outcome = loop.recordOutcome({ learnerCid: "cog-x", score: 0.9 });
+    expect(outcome.accepted).toBe(false);
+    expect(outcome.strategy).toBeNull();
   });
 });

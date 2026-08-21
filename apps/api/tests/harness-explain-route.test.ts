@@ -51,4 +51,26 @@ describe("POST /api/surface/:id/harness-explain (opt-in, spec 11)", () => {
     expect(body.ok).toBe(false);
     expect(body.error?.code).toBe("E_FACULTY_OUTPUT_MALFORMED");
   });
+
+  test("harness-feedback route is wired; feedback with no prior explanation is a visible no-op", async () => {
+    const base = await start();
+    const enter = await fetch(`${base}/api/surface`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ goal: "Teach me Photosynthesis" }),
+    });
+    const entered = (await enter.json()) as { surface_id: string };
+
+    const res = await fetch(`${base}/api/surface/${entered.surface_id}/harness-feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ score: 0.9 }),
+    });
+
+    expect(res.status).toBe(200); // route exists and returns a valid outcome
+    const body = (await res.json()) as { ok: boolean; accepted: boolean; strategy: string | null };
+    expect(body.ok).toBe(true);
+    expect(body.accepted).toBe(false); // no prior explanation offline → visible no-op
+    expect(body.strategy).toBeNull();
+  });
 });

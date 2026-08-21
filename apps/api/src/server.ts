@@ -560,6 +560,26 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
     });
   }
 
+  // Close the loop (spec 11) — POST /api/surface/:id/harness-feedback { score }: a real outcome signal
+  // (0..1) for the learner's most recent harness explanation → governed Adaptive-Policy update, so the
+  // next explanation compiles with the adapted teaching strategy.
+  if (action === "harness-feedback" && method === "POST") {
+    const body = await readJson(req);
+    const score = typeof body["score"] === "number" ? (body["score"] as number) : Number.NaN;
+    if (Number.isNaN(score)) {
+      return sendError(res, 400, gatewayError("harness-feedback requires score (number 0..1)"));
+    }
+    const result = await served.harnessFeedback(score);
+    if (!result.ok) return sendError(res, 422, result.error);
+    return sendJson(res, 200, {
+      ok: true,
+      accepted: result.value.accepted,
+      strategy: result.value.strategy,
+      policy_version: result.value.policyVersion,
+      reason: result.value.reason,
+    });
+  }
+
   // CSE M9 T1 — POST /api/surface/:id/fuse { concept_refs }: reconcile the surface's bound sources
   // over a concept set into one cognitive environment (Source Fusion, CSE-015).
   if (action === "fuse" && method === "POST") {

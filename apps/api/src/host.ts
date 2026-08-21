@@ -64,8 +64,9 @@ import {
   type SurfaceAskResult,
   type SurfaceState,
 } from "@inevitable/surface";
+import { InMemoryPolicyStore, type ExplanationStrategy } from "@inevitable/cognitive-loop";
 import { geminiApiKey, geminiModel, persistDir, strictModel, supabaseBackendUrl } from "./env";
-import { HarnessExplainer } from "./harness-explainer";
+import { HarnessExplainer, type HarnessOutcome } from "./harness-explainer";
 import { IntelligenceSink } from "./intelligence";
 import { LearnerRegistry, type DurableLearnerStore, type LearnerRecord } from "./learners";
 import { SourceHub, type RegisteredSource } from "./sources";
@@ -149,6 +150,11 @@ export interface ServedSurface {
    * unchanged. Degrades visibly (typed error) when no real model is configured.
    */
   harnessExplain(concept: string, title?: string): Promise<Result<CognitionBlock, CosError>>;
+  /**
+   * Close the loop (spec 11): feed a real outcome signal (0..1) for this learner's most recent harness
+   * explanation → governed Adaptive-Policy update, so the NEXT explanation compiles with the new policy.
+   */
+  harnessFeedback(score: number): Promise<Result<HarnessOutcome, CosError>>;
   /** Bind a registered Canonical Source Environment to this surface (CSE M5, CSE-008 §3.1). */
   attachSource(sourceVersionId: string): Promise<Result<RegisteredSource, CosError>>;
   /**
@@ -262,6 +268,14 @@ export class SurfaceHost {
   private readonly surfaces = new Map<string, HostedSurface>();
   private readonly gatewayIds = new CryptoIdGenerator();
   private counter = 0;
+  /**
+   * Opt-in Cognitive Harness loop state (spec 11), host-level so a learner's teaching-strategy
+   * adaptation persists across their surfaces within the process: the durable-per-learner Adaptive
+   * Policy store and the last strategy used per learner (for outcome attribution). Postgres
+   * durablization across restarts is the L1.5 gate.
+   */
+  private readonly harnessPolicies = new InMemoryPolicyStore();
+  private readonly harnessLastStrategy = new Map<string, ExplanationStrategy>();
   private readonly persistDir: string | undefined;
   /** Out-of-band audio for narration; the media route serves bytes from here (ADR-0007/0008). */
   readonly media: MediaStore;
@@ -690,7 +704,10 @@ export class SurfaceHost {
           const learner = hosted.learnerId ? await this.learners.get(hosted.learnerId) : undefined;
           const learnerCid = learner?.cid ?? hosted.learnerId ?? `cog-anon-${hosted.surfaceId}`;
           try {
-            const explanation = await new HarnessExplainer(hosted.model).explain({
+            const explanation = await new HarnessExplainer(hosted.model, {
+              policies: this.harnessPolicies,
+              lastStrategy: this.harnessLastStrategy,
+            }).explain({
               learnerCid,
               concept,
               conceptTitle: title ?? concept,
@@ -726,6 +743,19 @@ export class SurfaceHost {
                 : gatewayError("harness explanation failed", { cause: String(cause) }),
             ) as Result<CognitionBlock, CosError>;
           }
+        }),
+      // Close the loop (spec 11): a real outcome signal for the learner's last harness explanation runs
+      // reflect → propose → govern → persist over their durable Adaptive Policy (host-level, per learner),
+      // so the NEXT explanation compiles with the adapted strategy — the live explanation accumulates.
+      harnessFeedback: (score) =>
+        this.serialize(hosted, async () => {
+          const learner = hosted.learnerId ? await this.learners.get(hosted.learnerId) : undefined;
+          const learnerCid = learner?.cid ?? hosted.learnerId ?? `cog-anon-${hosted.surfaceId}`;
+          const outcome = new HarnessExplainer(hosted.model, {
+            policies: this.harnessPolicies,
+            lastStrategy: this.harnessLastStrategy,
+          }).recordOutcome({ learnerCid, score });
+          return ok(outcome);
         }),
       // CSE M5: bind a registered source environment — the attach event lands on the surface's
       // canonical log, and the binding joins the evidence seam for subsequent frame composition.
@@ -923,6 +953,7 @@ export class SurfaceHost {
       interact: async () => replayOnly(),
       answer: async () => replayOnly(),
       harnessExplain: async () => replayOnly(),
+      harnessFeedback: async () => replayOnly(),
       attachSource: async () => replayOnly(),
       teachSource: async () => replayOnly(),
       fuse: async () => replayOnly(),
