@@ -147,6 +147,76 @@ describe("curriculumFor — starts at the first real chapter (Slice 2)", () => {
   });
 });
 
+describe("unifiedCurriculumFor — all attached books as one non-redundant timeline (Slice 3)", () => {
+  const BOOK_A = [
+    "# Vectors",
+    "",
+    "A vector has magnitude and direction.",
+    "",
+    "# Dot Product",
+    "",
+    "The dot product measures alignment.",
+    "",
+    "# Cross Product",
+    "",
+    "The cross product yields a perpendicular vector.",
+  ].join("\n");
+  const BOOK_B = [
+    "# Dot Product",
+    "",
+    "Another treatment of the dot product.",
+    "",
+    "# Eigenvalues",
+    "",
+    "An eigenvalue scales its eigenvector.",
+  ].join("\n");
+
+  test("dedups shared concepts, appends distinctive ones, records cross-book coverage", async () => {
+    const hub = new SourceHub();
+    const a = await hub.register({ content: BOOK_A, modality: "markdown", title: "Book A" });
+    const b = await hub.register({ content: BOOK_B, modality: "markdown", title: "Book B" });
+    expect(a.ok && b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+    const av = a.value.source_version_id;
+    const bv = b.value.source_version_id;
+
+    const unified = hub.unifiedCurriculumFor([av, bv]);
+    expect(unified).not.toBeNull();
+    const titles = unified!.concepts.map((c) => c.title);
+    // Lead book's order first, then Book B's distinctive concept — each taught ONCE (no redundancy).
+    expect(titles).toEqual(["Vectors", "Dot Product", "Cross Product", "Eigenvalues"]);
+    expect(titles.filter((t) => t === "Dot Product")).toHaveLength(1);
+
+    const dot = unified!.concepts.find((c) => c.title === "Dot Product")!;
+    expect(dot.primarySourceVersionId).toBe(av); // taught from the first book to introduce it
+    expect([...dot.coveredBy].sort()).toEqual([av, bv].sort()); // both books' matching chapter
+
+    const eig = unified!.concepts.find((c) => c.title === "Eigenvalues")!;
+    expect(eig.primarySourceVersionId).toBe(bv);
+    expect(eig.coveredBy).toEqual([bv]); // unique to Book B — taught from it alone
+
+    // One connected linear reading order across books; entry depends on nothing.
+    expect(unified!.entry).toBe(unified!.concepts[0]!.id);
+    expect(unified!.concepts[0]!.prerequisites).toEqual([]);
+    for (let i = 1; i < unified!.concepts.length; i += 1) {
+      expect(unified!.concepts[i]!.prerequisites).toEqual([unified!.concepts[i - 1]!.id]);
+    }
+    expect(unified!.sourceVersionIds).toEqual([av, bv]);
+  });
+
+  test("returns null when no attached book has teachable structure", async () => {
+    const hub = new SourceHub();
+    const flat = await hub.register({
+      content: "No headings here.",
+      modality: "text",
+      title: "Flat",
+    });
+    expect(flat.ok).toBe(true);
+    if (!flat.ok) return;
+    expect(hub.unifiedCurriculumFor([flat.value.source_version_id])).toBeNull();
+  });
+});
+
 let active: Server | null = null;
 afterEach(async () => {
   if (active) await new Promise<void>((resolve) => active!.close(() => resolve()));
@@ -209,6 +279,85 @@ describe("POST /api/surface/:id/teach-source (R2c)", () => {
       // and the Director points at the source region (its focus anchor is populated, not null).
       expect((state.viewport_plans ?? []).length).toBeGreaterThan(0);
       expect(state.latest_directive?.focus?.source_anchor_ref).toBeTruthy();
+    } finally {
+      if (active) await new Promise<void>((resolve) => active!.close(() => resolve()));
+      active = null;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("POST /api/surface/:id/teach-source across multiple books (Slice 3)", () => {
+  const BOOK_A = [
+    "# Vectors",
+    "",
+    "A vector has magnitude and direction.",
+    "",
+    "# Dot Product",
+    "",
+    "The dot product measures alignment.",
+  ].join("\n");
+  const BOOK_B = [
+    "# Dot Product",
+    "",
+    "Another treatment of the dot product.",
+    "",
+    "# Eigenvalues",
+    "",
+    "An eigenvalue scales its eigenvector.",
+  ].join("\n");
+
+  test("with no source named, teaches all attached books as one non-redundant timeline", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cos-teach-multi-"));
+    try {
+      const host = new SurfaceHost({ persistDir: dir, voiceRuntime: new NullVoiceRuntime() });
+      const server = createGatewayServer(host);
+      active = server;
+      const base = await new Promise<string>((resolve) => {
+        server.listen(0, () => {
+          const { port } = server.address() as AddressInfo;
+          resolve(`http://127.0.0.1:${port}`);
+        });
+      });
+
+      const post = (path: string, body: string, ct = "application/json") =>
+        fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": ct }, body });
+
+      const regA = await post(
+        "/api/sources?modality=markdown&title=BookA",
+        BOOK_A,
+        "text/markdown",
+      );
+      const regB = await post(
+        "/api/sources?modality=markdown&title=BookB",
+        BOOK_B,
+        "text/markdown",
+      );
+      const { source: sa } = (await regA.json()) as { source: { source_version_id: string } };
+      const { source: sb } = (await regB.json()) as { source: { source_version_id: string } };
+
+      const created = await post(
+        "/api/surface",
+        JSON.stringify({ goal: "Teach me linear algebra", seed: "teach-multi-1" }),
+      );
+      const { surface_id: id } = (await created.json()) as { surface_id: string };
+      for (const v of [sa.source_version_id, sb.source_version_id]) {
+        await post(`/api/surface/${id}/sources`, JSON.stringify({ source_version_id: v }));
+      }
+
+      const taught = await post(`/api/surface/${id}/teach-source`, JSON.stringify({}));
+      expect(taught.status).toBe(200);
+
+      const stateRes = await fetch(`${base}/api/surface/${id}/state`);
+      const { state } = (await stateRes.json()) as {
+        state: { timeline: { nodes: { title: string }[] } | null };
+      };
+      const nodeTitles = state.timeline?.nodes.map((n) => n.title) ?? [];
+      // The timeline spans BOTH books' distinctive concepts (cross-book coverage)...
+      expect(nodeTitles).toContain("Vectors");
+      expect(nodeTitles).toContain("Eigenvalues");
+      // ...with the concept both books share taught exactly once (no redundancy).
+      expect(nodeTitles.filter((t) => t === "Dot Product")).toHaveLength(1);
     } finally {
       if (active) await new Promise<void>((resolve) => active!.close(() => resolve()));
       active = null;

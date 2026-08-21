@@ -563,13 +563,15 @@ export class SurfaceHost {
       // UCS (ADR-0030; Phase 2): decompose each concept into a progressive sequence of Cognitive
       // Frames (and render practice/assessment as frames), instead of a single composed frame.
       framePlanner: true,
-      // Look-ahead budget: a DEEP rolling buffer of 10 upcoming concepts pre-composed in the
-      // background (ADR-0064, ADR-0063 Phase D) so the surface always holds a substantial lesson
-      // built ahead of the learner (Slice 2) — never one thin frame at a time. Affordable because the
-      // buffer is an idempotent top-up (hasLiveFrameForConcept): the first ask pays a one-time
-      // warm-up, then each advance promotes one frame and re-warms just the tail (~1 compose/advance).
+      // Look-ahead budget: a deep rolling buffer of 5 upcoming concepts pre-composed in the background
+      // (ADR-0064, ADR-0063 Phase D, deepened in Slice 2 from 3) so the surface always holds a
+      // substantial lesson built ahead of the learner — never one thin frame at a time. The idempotent
+      // top-up (hasLiveFrameForConcept) keeps it deep for ~1 compose/advance in steady state. Held at 5
+      // (not 10+) on purpose: the FIRST ask warms the whole buffer serially, each concept resolving
+      // evidence across every bound source, so a larger buffer would compete with first-frame latency
+      // (the TTFF north star, ADR-0063). Per-concept depth (a whole chapter) is maxFrames=8, ADR-0064.
       // Recorded, never surfaced until promoted. Live-governable (a rollout may raise/lower it).
-      lookaheadBudget: 10,
+      lookaheadBudget: 5,
       // UCS (ADR-0030; Phase 4): the Image Agent owns the image-as-cognition decision (prompt +
       // caption + callout labels), replacing the composer's inline image_plan on the frame path.
       imagePlanner: true,
@@ -934,7 +936,14 @@ export class SurfaceHost {
               CosError
             >;
           }
-          const curriculum = this.sources.curriculumFor(versionId);
+          // Slice 3 (CSE-008): with several books attached and none named, teach ACROSS all of them —
+          // one non-redundant timeline of distinctive concepts, each taught from its primary book and
+          // cross-referred to the others' matching chapter (the evidence seam already spans every
+          // binding). A named source, or a single book, keeps the exact single-book path (R2c).
+          const multiBook = !sourceVersionId && hosted.sourceBindings.length >= 2;
+          const curriculum = multiBook
+            ? this.sources.unifiedCurriculumFor(hosted.sourceBindings)
+            : this.sources.curriculumFor(versionId);
           if (!curriculum || curriculum.concepts.length === 0) {
             return err(
               gatewayError("source has no teachable structure yet (no concepts or headings)", {
@@ -945,8 +954,10 @@ export class SurfaceHost {
           const focusTitle =
             curriculum.concepts.find((c) => c.id === curriculum.entry)?.title ?? curriculum.entry;
           const input: SurfaceAskInput = {
-            goal: `Teach me this document`,
-            pathId: `path-source-${versionId.slice(0, 16)}`,
+            goal: multiBook ? `Teach me these documents` : `Teach me this document`,
+            pathId: multiBook
+              ? `path-source-fused-${hosted.surfaceId.slice(0, 12)}`
+              : `path-source-${versionId.slice(0, 16)}`,
             concepts: curriculum.concepts.map((c) => ({
               id: c.id,
               title: c.title,
@@ -1208,8 +1219,8 @@ export class SurfaceHost {
       // UCS (ADR-0030; Phase 2): decompose each concept into a progressive sequence of Cognitive
       // Frames (and render practice/assessment as frames), instead of a single composed frame.
       framePlanner: true,
-      // Deep rolling look-ahead buffer of 10 (ADR-0064, Slice 2; matches create()).
-      lookaheadBudget: 10,
+      // Deep rolling look-ahead buffer of 5 (ADR-0064, Slice 2; matches create()).
+      lookaheadBudget: 5,
       // UCS (ADR-0030; Phase 4): the Image Agent owns image-as-cognition (matches create()).
       imagePlanner: true,
       // R4-model (CSE-018, ADR-0058): the RIA (matches create()).

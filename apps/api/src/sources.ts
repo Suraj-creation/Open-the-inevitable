@@ -158,6 +158,28 @@ export interface SourceCurriculum {
   readonly entry: string;
 }
 
+/** One concept in a MULTI-BOOK curriculum (CSE-008; Slice 3) — taught from one book, cross-referred. */
+export interface UnifiedCurriculumConcept extends SourceCurriculumConcept {
+  /** The book whose chapter introduces this concept — the one taught FROM (deep-cited on the surface). */
+  readonly primarySourceVersionId: string;
+  /** Every attached book with a matching chapter for this concept (⊇ {primary}); the others are
+   *  background-referred. A concept no other book covers is taught from the primary alone. */
+  readonly coveredBy: readonly string[];
+}
+
+/**
+ * All attached books taught as ONE non-redundant timeline (CSE-008; Slice 3): distinctive concepts in
+ * a linear reading order, deduplicated across books so nothing is taught twice, each carrying which
+ * books cover it. The evidence seam (which spans every binding) then cites the primary book's passage
+ * and the others' matching chapters at frame time.
+ */
+export interface UnifiedCurriculum {
+  readonly concepts: readonly UnifiedCurriculumConcept[];
+  readonly entry: string;
+  /** The bound books this curriculum spans, in binding order (the first is the lead book). */
+  readonly sourceVersionIds: readonly string[];
+}
+
 /**
  * Order L2 concepts so prerequisites come first (Kahn's topological sort; stable on the input order,
  * cycle-tolerant — a remaining cycle is appended in input order rather than dropped). Pure.
@@ -1285,6 +1307,65 @@ export class SourceHub {
     // Linear reading order: each section depends on the one before it (the document's own sequence).
     for (let i = 1; i < chain.length; i += 1) chain[i]!.prerequisites.push(chain[i - 1]!.id);
     return { concepts: chain, entry: chain[0]!.id };
+  }
+
+  /**
+   * Reconcile every attached book into ONE non-redundant teaching timeline (CSE-008; Slice 3). Each
+   * book's own curriculum (front-matter already skipped, R2c/Slice 2) is merged by concept identity —
+   * `slug(title)` — so a concept several books share is TAUGHT ONCE, from the first book to introduce
+   * it, while the others are recorded as `coveredBy` (their matching chapter is background-referred at
+   * frame time via the all-bindings evidence seam). Concepts unique to a later book are appended in its
+   * own reading order. The result is a single linear chain — a deterministic cross-book order; deeper
+   * semantic alignment (differently-worded concepts, contradictions) is the fusion path's job, not
+   * this. Returns null when no bound book has teachable structure. Pure over the source store.
+   */
+  unifiedCurriculumFor(versionIds: readonly string[]): UnifiedCurriculum | null {
+    const perBook = versionIds
+      .map((versionId) => ({ versionId, curriculum: this.curriculumFor(versionId) }))
+      .filter(
+        (b): b is { versionId: string; curriculum: SourceCurriculum } => b.curriculum !== null,
+      );
+    if (perBook.length === 0) return null;
+
+    // slug(title) → the placed concept's covering-book set (dedup identity; first book wins its slot).
+    const placed = new Map<string, { index: number; covered: Set<string> }>();
+    const concepts: {
+      id: string;
+      title: string;
+      prerequisites: string[];
+      primarySourceVersionId: string;
+    }[] = [];
+    let prevId: string | null = null; // the last concept placed, for linear cross-book chaining
+
+    for (const { versionId, curriculum } of perBook) {
+      for (const c of curriculum.concepts) {
+        const key = slug(c.title) || c.id;
+        const seen = placed.get(key);
+        if (seen) {
+          // Same concept in another book → background-refer it; never teach it twice (no redundancy).
+          seen.covered.add(versionId);
+          continue;
+        }
+        placed.set(key, { index: concepts.length, covered: new Set([versionId]) });
+        concepts.push({
+          id: c.id,
+          title: c.title,
+          prerequisites: prevId ? [prevId] : [],
+          primarySourceVersionId: versionId,
+        });
+        prevId = c.id;
+      }
+    }
+
+    const unified: UnifiedCurriculumConcept[] = concepts.map((c) => {
+      const key = slug(c.title) || c.id;
+      return { ...c, coveredBy: [...placed.get(key)!.covered] };
+    });
+    return {
+      concepts: unified,
+      entry: unified[0]!.id,
+      sourceVersionIds: perBook.map((b) => b.versionId),
+    };
   }
 
   /** Registration summary for an already-registered version (attach route). A redacted version
