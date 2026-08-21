@@ -549,7 +549,11 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
       typeof body["title"] === "string" && (body["title"] as string).trim()
         ? (body["title"] as string).trim()
         : undefined;
-    const result = await served.harnessExplain(concept, title);
+    const mode =
+      typeof body["mode"] === "string" && (body["mode"] as string).trim()
+        ? (body["mode"] as string).trim()
+        : undefined;
+    const result = await served.harnessExplain(concept, title, mode);
     if (!result.ok) return sendError(res, 422, result.error);
     const sections = result.value.content["sections"];
     return sendJson(res, 200, {

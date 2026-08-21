@@ -94,6 +94,8 @@ interface HostedSurface {
   readonly goal: string;
   /** The raw resolved model runtime (real Gemini when keyed), for the opt-in Cognitive Harness path. */
   readonly model: ModelRuntime;
+  /** Product mode (F13) the surface was entered with; drives mode-aware harness cognition. */
+  readonly mode?: string;
   /**
    * The owning learner (DPS-003), used to capture cross-surface cognition (DPS-004). Absent only for
    * legacy surfaces rehydrated from a `meta.json` written before learner identity existed.
@@ -149,7 +151,11 @@ export interface ServedSurface {
    * faculty and contribute it as an additive block. A dedicated path — the default ask/advance flow is
    * unchanged. Degrades visibly (typed error) when no real model is configured.
    */
-  harnessExplain(concept: string, title?: string): Promise<Result<CognitionBlock, CosError>>;
+  harnessExplain(
+    concept: string,
+    title?: string,
+    mode?: string,
+  ): Promise<Result<CognitionBlock, CosError>>;
   /**
    * Close the loop (spec 11): feed a real outcome signal (0..1) for this learner's most recent harness
    * explanation → governed Adaptive-Policy update, so the NEXT explanation compiles with the new policy.
@@ -559,6 +565,7 @@ export class SurfaceHost {
       fixture,
       goal,
       model: inner,
+      ...(options.mode !== undefined ? { mode: options.mode } : {}),
       learnerId: learner.learnerId,
       gatewayHlc: hlcInit("surface-gateway"),
       queue: Promise.resolve(),
@@ -699,10 +706,11 @@ export class SurfaceHost {
       // model faculty; we contribute it as an additive block through the SAME path every block uses, so
       // it streams, folds, and renders identically. A dedicated route — the default ask/advance flow is
       // untouched. Degrades visibly (typed error) with no real model.
-      harnessExplain: (concept, title) =>
+      harnessExplain: (concept, title, mode) =>
         this.serialize(hosted, async () => {
           const learner = hosted.learnerId ? await this.learners.get(hosted.learnerId) : undefined;
           const learnerCid = learner?.cid ?? hosted.learnerId ?? `cog-anon-${hosted.surfaceId}`;
+          const effectiveMode = mode ?? hosted.mode ?? "student";
           try {
             const explanation = await new HarnessExplainer(hosted.model, {
               policies: this.harnessPolicies,
@@ -711,6 +719,7 @@ export class SurfaceHost {
               learnerCid,
               concept,
               conceptTitle: title ?? concept,
+              mode: effectiveMode,
             });
             const contribution = new AgentContributionRuntime({
               bus: fixture.bus,
@@ -727,6 +736,7 @@ export class SurfaceHost {
                 summary: explanation.summary,
                 sections: explanation.sections,
                 strategy: explanation.strategy,
+                mode: effectiveMode,
                 role_vocab_version: EXPLANATION_ROLE_VOCAB_VERSION,
                 produced_by: "cognitive-harness",
               },

@@ -106,3 +106,47 @@ describe("HarnessExplainer — closed governed loop (accumulates per learner)", 
     expect(outcome.strategy).toBeNull();
   });
 });
+
+class CapturingModel implements ModelRuntime {
+  public lastSystem = "";
+  generate(input: ModelGenerationRequest): Promise<ModelGenerationResult> {
+    this.lastSystem = input.system ?? "";
+    return Promise.resolve({ text: OK_OUTPUT, model: "fake-1", finishReason: "stop" });
+  }
+  embed(): Promise<number[]> {
+    return Promise.resolve([]);
+  }
+}
+
+describe("HarnessExplainer — F13 mode-aware cognition", () => {
+  it("compiles a different teaching stance per product mode", async () => {
+    const student = new CapturingModel();
+    await new HarnessExplainer(student).explain({
+      learnerCid: "cog-l",
+      concept: "c",
+      conceptTitle: "C",
+      mode: "student",
+    });
+    const educator = new CapturingModel();
+    await new HarnessExplainer(educator).explain({
+      learnerCid: "cog-l",
+      concept: "c",
+      conceptTitle: "C",
+      mode: "educator",
+    });
+
+    expect(student.lastSystem).toContain("genuinely understands");
+    expect(educator.lastSystem).toContain("how to teach");
+    expect(student.lastSystem).not.toEqual(educator.lastSystem);
+  });
+
+  it("defaults to student mode when unspecified", async () => {
+    const model = new CapturingModel();
+    await new HarnessExplainer(model).explain({
+      learnerCid: "cog-l",
+      concept: "c",
+      conceptTitle: "C",
+    });
+    expect(model.lastSystem).toContain("genuinely understands");
+  });
+});

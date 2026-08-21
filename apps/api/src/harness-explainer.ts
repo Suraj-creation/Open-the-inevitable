@@ -49,6 +49,8 @@ export interface HarnessExplainInput {
   readonly agentId?: string;
   readonly knownConcepts?: readonly string[];
   readonly level?: number;
+  /** Product mode (F13): student (default) · educator · researcher · institution · open. */
+  readonly mode?: string;
 }
 
 export interface HarnessOutcome {
@@ -66,7 +68,26 @@ export interface HarnessExplainerDeps {
   readonly lastStrategy?: Map<string, ExplanationStrategy>;
 }
 
-const AGENT_ROLE = "Explains concepts so a learner genuinely understands them.";
+/**
+ * F13 mode-aware cognition: the product mode selects the agent's Constitution directive, so the same
+ * concept is compiled into a different teaching stance (a real behavioural difference driven by mode,
+ * not a cosmetic flag). Strategy adaptation stays mode-independent (a learner's best-fit strategy is
+ * learner-general), so one durable policy serves the learner across modes.
+ */
+const MODE_DIRECTIVE: Readonly<Record<string, string>> = {
+  student:
+    "Explains concepts so a learner genuinely understands them — lead with intuition and build up.",
+  educator:
+    "Explains the concept AND how to teach it: surface the pedagogical structure, the prerequisites, and the common misconceptions an educator should anticipate.",
+  researcher:
+    "Explains the concept with rigor, including the open questions and research frontier a specialist would probe.",
+  institution: "Explains the concept clearly for an organizational learning context.",
+  open: "Explains the concept clearly and accessibly for a general audience.",
+};
+
+function roleForMode(mode: string | undefined): string {
+  return MODE_DIRECTIVE[mode ?? "student"] ?? MODE_DIRECTIVE["student"]!;
+}
 
 function clamp01(n: number): number {
   if (Number.isNaN(n)) return 0;
@@ -88,8 +109,8 @@ export class HarnessExplainer {
     this.lastStrategy = deps.lastStrategy ?? new Map();
   }
 
-  private constitutionFor(agentId: string): Constitution {
-    return constitutionFromManifest({ id: agentId, role: AGENT_ROLE });
+  private constitutionFor(agentId: string, mode?: string): Constitution {
+    return constitutionFromManifest({ id: agentId, role: roleForMode(mode) });
   }
 
   /** Read the learner's durable Adaptive Policy, seeding (and persisting) a fresh one when absent. */
@@ -107,7 +128,7 @@ export class HarnessExplainer {
 
   async explain(input: HarnessExplainInput): Promise<HarnessExplanation> {
     const agentId = input.agentId ?? "agent.explanation";
-    const constitution = this.constitutionFor(agentId);
+    const constitution = this.constitutionFor(agentId, input.mode);
     const policy = this.policyFor(agentId, input.learnerCid, constitution);
     const learner: LearnerState = {
       learner_cid: input.learnerCid,
