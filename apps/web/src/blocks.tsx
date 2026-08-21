@@ -7,7 +7,11 @@
  * mirroring the fold). Layout/composition is a projection concern (SRF-001 §2).
  */
 import type { ReactNode } from "react";
-import type { CognitionBlock, CognitionBlockType } from "@inevitable/surface/client";
+import type {
+  CognitionBlock,
+  CognitionBlockType,
+  SemanticSection,
+} from "@inevitable/surface/client";
 
 type BlockRenderer = (block: CognitionBlock) => ReactNode;
 
@@ -39,16 +43,31 @@ export function blockLede(block: CognitionBlock): string {
 function ProseBody({ block }: { block: CognitionBlock }): ReactNode {
   const summary =
     typeof block.content["summary"] === "string" ? (block.content["summary"] as string) : null;
+  // Structured Semantic Explanation (surface slice): typed, role-tagged sections styled token-driven
+  // by the CDL via `data-epistemic-role` — exactly as MCCR board elements are. Falls back to the
+  // legacy layers prose when a block predates structuring.
+  const sections = Array.isArray(block.content["sections"])
+    ? (block.content["sections"] as SemanticSection[])
+    : null;
   const layers = block.content["layers"] as Record<string, unknown> | undefined;
   const text = typeof block.content["text"] === "string" ? (block.content["text"] as string) : null;
-  if (!summary && !layers && !text) {
+  if (!summary && !sections && !layers && !text) {
     return <p className="block-meta-note">processed · awaiting generated content</p>;
   }
   return (
     <>
       {summary ? <p className="block-lede">{summary}</p> : null}
       {text && !summary ? <p className="block-lede">{text}</p> : null}
-      {layers ? (
+      {sections ? (
+        <div className="sections">
+          {sections.map((section) => (
+            <div key={section.key} className="section" data-epistemic-role={section.role}>
+              <span className="section-tag">{section.title}</span>
+              <p className="section-text">{section.text}</p>
+            </div>
+          ))}
+        </div>
+      ) : layers ? (
         <div className="layers">
           {Object.keys(layers)
             .sort()

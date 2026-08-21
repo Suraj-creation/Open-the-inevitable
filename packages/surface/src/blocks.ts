@@ -9,6 +9,8 @@
  */
 import { CosError, type Clock, type IdGenerator, type Result, err, ok } from "@inevitable/shared";
 
+import { EXPLANATION_ROLE_VOCAB_VERSION, structureExplanation } from "./semantic-explanation";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -99,6 +101,27 @@ function blockError(message: string, details?: Record<string, unknown>): CosErro
 const BLOCK_TYPE_SET: ReadonlySet<string> = new Set(COGNITION_BLOCK_TYPES);
 
 /**
+ * Structured Semantic Explanation enrichment (the single construction chokepoint, so every path —
+ * contribute, streaming, replay-fold — produces identical structured content). An `explanation` block
+ * carrying the F04 `layers` bag gains typed, role-tagged `sections` (via the canonical EpistemicRole
+ * mapping) plus the mapping's `role_vocab_version`. Additive and deterministic: the legacy `layers`
+ * remain for back-compat, and content that already carries `sections` (e.g. agent-emitted) is left
+ * untouched. Non-explanation blocks pass through unchanged.
+ */
+function enrichBlockContent(
+  blockType: CognitionBlockType,
+  content: Record<string, unknown>,
+): Record<string, unknown> {
+  if (blockType !== "explanation") return { ...content };
+  if (Array.isArray(content["sections"])) return { ...content };
+  const layers = content["layers"];
+  if (layers === null || typeof layers !== "object") return { ...content };
+  const sections = structureExplanation(layers as Record<string, unknown>);
+  if (sections.length === 0) return { ...content };
+  return { ...content, sections, role_vocab_version: EXPLANATION_ROLE_VOCAB_VERSION };
+}
+
+/**
  * Create a version-1 cognition block. Fails (typed error, never throws) when the block
  * would be untraceable or semantically invalid.
  */
@@ -131,7 +154,7 @@ export function createCognitionBlock(
     created_at: new Date(ctx.clock.nowMs()).toISOString(),
     hlc: ctx.hlc,
     title: input.title,
-    content: { ...input.content },
+    content: enrichBlockContent(input.block_type, input.content),
     concept_ids: [...(input.concept_ids ?? [])],
     classification: input.classification ?? "internal",
     confidence,

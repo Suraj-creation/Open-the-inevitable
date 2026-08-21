@@ -611,6 +611,30 @@
   color: var(--ink-soft);
   line-height: 1.6;
 }
+/* Structured Semantic Explanation sections (SRF; CSE-018 roles): the explanation block rendered as
+   role-tagged semantic objects, styled token-driven by --role-hue exactly as MCCR board elements are.
+   Colour is never the sole carrier of meaning — each section also shows its role label (.section-tag). */
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+.section {
+  padding-left: var(--s-3);
+  border-left: 2px solid var(--role-hue, var(--ink-faint));
+  animation: rise var(--dur-slow) var(--ease-expo) both;
+}
+.section-tag {
+  font-size: var(--t-2xs);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--role-hue, var(--ink-faint));
+}
+.section-text {
+  margin: var(--s-2) 0 0;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
 .block-meta-note {
   color: var(--ink-ghost);
   font-style: italic;
@@ -3024,28 +3048,29 @@
   transition: opacity var(--dur, 240ms) ease;
 }
 
-/* R4b (ADR-0058; CSE-018 Law 5): the RIA's epistemic role → the CDL visual language. The role is a
-   SEPARATE semantic layer from the element type (it will diverge under model-backed planning, R4d);
-   here it tints the element's kind-tag so the learner reads the KIND of knowledge without a label.
-   `--role-hue` is the hook downstream treatments read; additive, never conflicts with type styling. */
-.mccr-el[data-epistemic-role] {
+/* R4b (ADR-0058; CSE-018 Law 5): the epistemic role → the CDL visual language. The role is a SEPARATE
+   semantic layer from the element type. `--role-hue` is the SHARED authority — assigned on ANY element
+   carrying data-epistemic-role (MCCR board elements AND explanation sections), so the role→token
+   mapping lives in exactly one place (no duplicated colour constants). Consumers read --role-hue;
+   assignment is additive and never conflicts with type styling. */
+[data-epistemic-role] {
   --role-hue: var(--ink-faint);
 }
-.mccr-el[data-epistemic-role="misconception"],
-.mccr-el[data-epistemic-role="warning"] {
+[data-epistemic-role="misconception"],
+[data-epistemic-role="warning"] {
   --role-hue: var(--state-confusion, #e8927c);
 }
-.mccr-el[data-epistemic-role="insight"] {
+[data-epistemic-role="insight"] {
   --role-hue: var(--state-mastery, #d9b25f);
 }
-.mccr-el[data-epistemic-role="canonical"],
-.mccr-el[data-epistemic-role="definition"] {
+[data-epistemic-role="canonical"],
+[data-epistemic-role="definition"] {
   --role-hue: var(--state-learning, #7fb7c9);
 }
-.mccr-el[data-epistemic-role="evidence"] {
+[data-epistemic-role="evidence"] {
   --role-hue: var(--state-discovery, #ffc46b);
 }
-.mccr-el[data-epistemic-role="example"] {
+[data-epistemic-role="example"] {
   --role-hue: var(--state-practice, #8bbf7a);
 }
 .mccr-el[data-epistemic-role] .mccr-el-tag {
@@ -3437,6 +3462,21 @@
 .next-step-btn:hover {
   transform: translateY(-2px);
   background: color-mix(in oklab, var(--stage-tint, var(--accent)) 24%, var(--plane-raised));
+}
+/* ADR-0064: the next step is already composed in the background — the affordance reads as instant. */
+.next-step-btn.is-prebuilt {
+  border-color: color-mix(in oklab, var(--stage-tint, var(--accent)) 80%, transparent);
+  background: color-mix(in oklab, var(--stage-tint, var(--accent)) 22%, var(--plane-raised));
+}
+.next-step-spark {
+  color: var(--stage-tint, var(--accent));
+}
+.next-step-buffer {
+  font-size: 0.64rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  opacity: 0.85;
 }
 
 /* Consolidate motion (CDL §7) — a mastered concept crystallizes and drifts into the Path. */
@@ -5724,6 +5764,18 @@
   margin: var(--s-2) 0 0;
   font-size: 0.76rem;
   color: var(--ink-faint);
+}
+
+/* A failed attach/teach is stated, never silent — the dock stays open so the learner can retry. */
+.source-dock-failure {
+  margin: var(--s-2) 0 0;
+  padding: var(--s-2) var(--s-3);
+  border-left: 2px solid var(--warn, #d08c3c);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--warn, #d08c3c) 8%, transparent);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--ink);
 }
 
 /* ── M12 T1 — Source Cognition deep-transparency (ADR-0050). The runtime made visible: activity

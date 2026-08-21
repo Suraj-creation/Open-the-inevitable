@@ -51,6 +51,7 @@ export type {
 } from "./representation";
 export { deriveEpisodes, currentEpisode } from "./episodes";
 export type { Episode } from "./episodes";
+export type { SemanticSection } from "./semantic-explanation";
 export type {
   CognitionBlock,
   CognitionBlockType,
