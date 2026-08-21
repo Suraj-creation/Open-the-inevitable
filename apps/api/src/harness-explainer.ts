@@ -26,6 +26,7 @@ import {
   type CognitiveTask,
   type Constitution,
   type ExplanationStrategy,
+  type HookBus,
   type LearnerState,
   type PolicyStore,
 } from "@inevitable/cognitive-loop";
@@ -66,6 +67,8 @@ export interface HarnessExplainerDeps {
   readonly policies?: PolicyStore;
   /** The last strategy used per learner, for outcome attribution (host-level). Absent ⇒ private map. */
   readonly lastStrategy?: Map<string, ExplanationStrategy>;
+  /** Live HookBus (spec 11 §5) routed into the model faculty for interception/observability/recording. */
+  readonly hooks?: HookBus;
 }
 
 /**
@@ -104,7 +107,7 @@ export class HarnessExplainer {
   private readonly lastStrategy: Map<string, ExplanationStrategy>;
 
   constructor(model: ModelRuntime, deps: HarnessExplainerDeps = {}) {
-    this.faculty = new ModelRuntimeFaculty(model);
+    this.faculty = new ModelRuntimeFaculty(model, deps.hooks);
     this.policies = deps.policies ?? new InMemoryPolicyStore();
     this.lastStrategy = deps.lastStrategy ?? new Map();
   }

@@ -18,6 +18,7 @@ export * from "./adaptive-policy";
 export * from "./context-compiler";
 export * from "./context-manifest";
 export * from "./faculty";
+export * from "./hook-bus";
 export * from "./learner-simulator";
 export * from "./events";
 export * from "./reflection";

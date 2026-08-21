@@ -41,7 +41,12 @@ import {
   type DemoRestore,
 } from "@inevitable/cli";
 import type { ProductMode } from "@inevitable/product-cognition";
-import type { ModelRuntime, VectorStore } from "@inevitable/contracts";
+import type {
+  ModelGenerationRequest,
+  ModelGenerationResult,
+  ModelRuntime,
+  VectorStore,
+} from "@inevitable/contracts";
 import { createEvent } from "@inevitable/events";
 import type { CognitiveEvent } from "@inevitable/protocols";
 import {
@@ -64,7 +69,12 @@ import {
   type SurfaceAskResult,
   type SurfaceState,
 } from "@inevitable/surface";
-import { InMemoryPolicyStore, type ExplanationStrategy } from "@inevitable/cognitive-loop";
+import {
+  HOOKS,
+  HookBus,
+  InMemoryPolicyStore,
+  type ExplanationStrategy,
+} from "@inevitable/cognitive-loop";
 import { geminiApiKey, geminiModel, persistDir, strictModel, supabaseBackendUrl } from "./env";
 import { HarnessExplainer, type HarnessOutcome } from "./harness-explainer";
 import { IntelligenceSink } from "./intelligence";
@@ -711,10 +721,25 @@ export class SurfaceHost {
           const learner = hosted.learnerId ? await this.learners.get(hosted.learnerId) : undefined;
           const learnerCid = learner?.cid ?? hosted.learnerId ?? `cog-anon-${hosted.surfaceId}`;
           const effectiveMode = mode ?? hosted.mode ?? "student";
+          // Live HookBus (spec 11 §5): record every harness model invocation as a durable fact —
+          // "model-visible is logged", the seam the raw-model path previously bypassed.
+          const hooks = new HookBus();
+          hooks.on<{ request: ModelGenerationRequest; result: ModelGenerationResult }>(
+            HOOKS.postModelRequest,
+            ({ request, result }) => {
+              this.recordModelInvocation(hosted, {
+                model: result.model,
+                invocation_key: request.invocation_key ?? "",
+                request_chars: (request.system?.length ?? 0) + request.prompt.length,
+                finish_reason: result.finishReason ?? "unknown",
+              });
+            },
+          );
           try {
             const explanation = await new HarnessExplainer(hosted.model, {
               policies: this.harnessPolicies,
               lastStrategy: this.harnessLastStrategy,
+              hooks,
             }).explain({
               learnerCid,
               concept,
@@ -1225,6 +1250,36 @@ export class SurfaceHost {
         payload: { surface_id: hosted.surfaceId },
         classification: "internal",
         retention: "1d",
+        replayBehavior: "recorded-observation",
+      },
+      { clock: hosted.fixture.clock, hlc: hosted.gatewayHlc, idGenerator: this.gatewayIds },
+    );
+    hosted.gatewayHlc = created.hlc;
+    void hosted.fixture.bus.publish(created.event);
+  }
+
+  /**
+   * Record a harness model invocation as a durable observation (spec 11 §5→§6: "model-visible is
+   * logged"). Emitted on the surface bus via the gateway id/HLC stream so it never perturbs the
+   * session's seeded determinism; `recorded-observation` keeps it out of the deterministic replay fold.
+   */
+  private recordModelInvocation(
+    hosted: HostedSurface,
+    payload: {
+      readonly model: string;
+      readonly invocation_key: string;
+      readonly request_chars: number;
+      readonly finish_reason: string;
+    },
+  ): void {
+    const created = createEvent(
+      {
+        eventType: "cognitive.model.request",
+        producerCid: "cog-surface-gateway",
+        producerType: "gateway.harness",
+        payload: { surface_id: hosted.surfaceId, ...payload },
+        classification: "internal",
+        retention: "30d-hot",
         replayBehavior: "recorded-observation",
       },
       { clock: hosted.fixture.clock, hlc: hosted.gatewayHlc, idGenerator: this.gatewayIds },

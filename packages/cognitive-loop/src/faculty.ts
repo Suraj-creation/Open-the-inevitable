@@ -11,6 +11,7 @@ import type { ModelRuntime } from "@inevitable/contracts";
 import { CosError } from "@inevitable/shared";
 import type { ExplanationStrategy } from "./constitution";
 import type { CompiledContext } from "./context-compiler";
+import { HOOKS, type HookBus } from "./hook-bus";
 
 /**
  * A role-tagged unit of explanation content produced by a faculty. `role` aligns 1:1 to the surface's
@@ -118,14 +119,24 @@ export function parseModelFacultyOutput(text: string): ModelFacultyOutput {
  * capability substitution through the CapabilityRegistry (no loop change).
  */
 export class ModelRuntimeFaculty implements Faculty {
-  constructor(private readonly model: ModelRuntime) {}
+  constructor(
+    private readonly model: ModelRuntime,
+    /** Optional live HookBus (spec 11 §5): interceptors observe/transform the request and observe the
+     *  result around the model call — the seam for policy, observability, cancellation, recording. */
+    private readonly hooks?: HookBus,
+  ) {}
 
   async execute(compiled: CompiledContext): Promise<CognitiveOutput> {
-    const result = await this.model.generate(compiled.model_request);
+    const request = this.hooks
+      ? await this.hooks.run(HOOKS.preModelRequest, compiled.model_request)
+      : compiled.model_request;
+    const result = await this.model.generate(request);
+    // Observe the invocation (even a refusal is logged) before interpreting it.
+    if (this.hooks) await this.hooks.run(HOOKS.postModelRequest, { request, result });
     if (result.finishReason === "refusal" || result.finishReason === "safety") {
       throw new CosError("E_FACULTY_REFUSAL", `model refused generation (${result.finishReason})`, {
         specRef: SPEC_REF,
-        details: { invocation_key: compiled.model_request.invocation_key },
+        details: { invocation_key: request.invocation_key },
       });
     }
     const parsed = parseModelFacultyOutput(result.text);
