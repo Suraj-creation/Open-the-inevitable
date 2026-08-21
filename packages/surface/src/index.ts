@@ -99,6 +99,7 @@ export {
 } from "./theater";
 export {
   planSourceProjection,
+  planSourceRender,
   readSourceBinding,
   readSourceHighlight,
   readSourceRegion,
@@ -127,6 +128,9 @@ export {
   type SourceViewportPlanRecord,
   type ViewportChangeCause,
   type ViewportEmphasis,
+  type SourceRenderDecision,
+  type SourceRenderPlacement,
+  type PlanSourceRenderInput,
 } from "./source-projection";
 export {
   planRepresentation,

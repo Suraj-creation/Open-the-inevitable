@@ -4331,6 +4331,24 @@
   gap: var(--s-4);
   align-items: stretch;
 }
+/* Slice 1 (CSE-008): the document as a small AGENT-PLACED CORNER region — a bounded peripheral card
+   the composing agent surfaces for light reference while the board holds the full surface behind it.
+   Retired (not rendered) the moment the frame stops citing the source: the doc is part of the surface,
+   shown only when needed, never an always-on panel over it. */
+.board-plane--source-corner {
+  position: relative;
+}
+.board-plane--source-corner .source-reference {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  top: auto;
+  flex: none;
+  width: clamp(240px, 30%, 380px);
+  max-height: 46%;
+  z-index: 3;
+  box-shadow: var(--shadow-e3, 0 12px 40px rgba(0, 0, 0, 0.45));
+}
 /* R2e (ADR-0057 D5): source-as-stage. Teaching FROM the document ⇒ the document takes the stage
    (leads, dominant width) and the MCCR board recedes to a companion gloss column beside it —
    spatial contiguity: the explanation sits next to what it explains. */

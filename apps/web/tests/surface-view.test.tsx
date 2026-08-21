@@ -733,8 +733,10 @@ describe("SurfaceView — the Cognitive Stage (a projection of SurfaceState)", (
     expect(html).toContain('data-shot="semantic-zoom-in"');
   });
 
-  test("source-as-stage engages only when teaching FROM the source, not merely attaching one (R2e)", () => {
-    // A source attached with NO viewport plans (e.g. bound for fusion) stays an aside, not the stage.
+  test("a merely-attached source the active frame does not reference is retired (hidden), not an always-on aside (Slice 1, CSE-008)", () => {
+    // Slice 1: the document is an AGENT-PLACED region shown ONLY when the active frame references it.
+    // A source bound with no viewport plan / highlights for this frame (e.g. attached for fusion) is
+    // retired — no source layout modifier, the board holds the full surface. "Part of, not over."
     const attachedOnly: SurfaceState = {
       ...fixture,
       sources: [
@@ -751,8 +753,9 @@ describe("SurfaceView — the Cognitive Stage (a projection of SurfaceState)", (
       viewport_plans: [],
     };
     const html = render(attachedOnly);
-    expect(html).toContain("board-plane--with-source");
-    expect(html).not.toContain("board-plane--source-stage");
+    expect(html).toContain('data-source-placement="hidden"');
+    expect(html).not.toContain("board-plane--source");
+    expect(html).not.toContain("board-plane--with-source");
   });
 
   test("makes multi-agent cognition visible: ensemble panel, typed graph edges, interaction controls (S1.4)", () => {

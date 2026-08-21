@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   SourceHighlightRecord,
+  SourceRenderPlacement,
   SourceViewport,
   SurfaceState,
 } from "@inevitable/surface/client";
@@ -29,6 +30,8 @@ interface SourceReferenceProps {
   readonly activeFrameId: string | null;
   /** The narration segment currently voicing (choreographer cursor) — drives the attention contract. */
   readonly currentSegmentId: string | null;
+  /** Agent-decided placement of the region within the surface (Slice 1, CSE-008). */
+  readonly placement?: SourceRenderPlacement;
 }
 
 interface FetchedSource {
@@ -49,7 +52,12 @@ async function sha256Hex(bytes: Uint8Array): Promise<string | null> {
   }
 }
 
-export function SourceReference({ state, activeFrameId, currentSegmentId }: SourceReferenceProps) {
+export function SourceReference({
+  state,
+  activeFrameId,
+  currentSegmentId,
+  placement = "beside",
+}: SourceReferenceProps) {
   // ── Derive the frame's projection from folded state (pure; the fold is the only truth). ──────
   const plan = useMemo(
     () => (state?.viewport_plans ?? []).find((p) => p.frame_id === activeFrameId) ?? null,
@@ -156,6 +164,7 @@ export function SourceReference({ state, activeFrameId, currentSegmentId }: Sour
       className="source-reference"
       aria-label={`Source: ${source.title}`}
       data-modality={source.modality}
+      data-placement={placement}
     >
       <header className="source-reference-head">
         <span className="source-reference-eyebrow">Source</span>

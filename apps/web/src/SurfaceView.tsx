@@ -8,6 +8,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CognitionBlock, SurfaceState } from "@inevitable/surface/client";
+import { planSourceRender } from "@inevitable/surface/client";
 import { closeSurface, type SurfaceInteractionKind } from "./api";
 import { hasFrames, isPracticeFrame } from "./frames";
 import { CognitiveStage } from "./components/CognitiveStage";
@@ -186,10 +187,33 @@ export function SurfaceView({
   // CSE M5: the Living Reference — when a source is bound, the reference pane renders it beside
   // the board (dual experience without canonical panel state, CSE-008 §3.3). Pure projection.
   const hasSource = (state?.sources?.length ?? 0) > 0;
-  // R2e (ADR-0057 D5): source-as-stage. When the lesson is actively taught FROM the document
-  // (source projection planned → viewport_plans present), the document takes the stage and the MCCR
-  // board becomes a companion gloss column. A source merely attached (e.g. for fusion) stays an aside.
-  const sourceMode = hasSource && (state?.viewport_plans?.length ?? 0) > 0;
+  // Slice 1 (CSE-008): the document is an AGENT-PLACED REGION of the surface — "part of it, not over
+  // it". `planSourceRender` (surface pkg, one authority) decides, for the ACTIVE frame only, whether
+  // the doc is shown, where (spotlight/beside/corner), or retired — from the agent's own projection
+  // (this frame's viewport plan + emphasis + highlights). No always-on full-bleed reader.
+  const sourceRender = useMemo(() => {
+    if (!hasSource) return { visible: false, placement: "hidden" as const, reason: "no source" };
+    const plan =
+      (state?.viewport_plans ?? []).find((p) => p.frame_id === choreo.activeFrameId) ?? null;
+    const highlights = (state?.source_highlights ?? []).filter(
+      (h) => h.frame_id === choreo.activeFrameId && !h.cleared,
+    );
+    const focusVp =
+      plan?.viewports.find((v) => v.emphasis === "focus") ?? plan?.viewports[0] ?? null;
+    return planSourceRender({
+      plan,
+      currentViewport: focusVp,
+      hasHighlights: highlights.length > 0,
+    });
+  }, [hasSource, state, choreo.activeFrameId]);
+  const sourcePlacementClass =
+    sourceRender.placement === "spotlight"
+      ? "board-plane--source-stage"
+      : sourceRender.placement === "beside"
+        ? "board-plane--with-source"
+        : sourceRender.placement === "corner"
+          ? "board-plane--source-corner"
+          : "";
 
   // The next step on the path — the concept to teach when the learner continues. Preferred: the next
   // "available" concept; else any not-yet-mastered concept other than the current focus.
@@ -269,9 +293,8 @@ export function SurfaceView({
           nothing can ever float over an anchor (CDL: the board is sacred). */}
       <main className="stage-wrap">
         <div
-          className={`board-plane${hasSource ? " board-plane--with-source" : ""}${
-            sourceMode ? " board-plane--source-stage" : ""
-          }`}
+          className={`board-plane${sourceRender.visible ? ` ${sourcePlacementClass}` : ""}`}
+          data-source-placement={sourceRender.visible ? sourceRender.placement : "hidden"}
         >
           {descentFromTitle ? (
             <div className="descent-trail" role="status">
@@ -305,13 +328,15 @@ export function SurfaceView({
               relatedMedia={relatedMedia}
             />
           )}
-          {/* The Living Reference (CSE M5): the actual source beside the living cognition —
-              viewports glide, highlights light by role, narration binds through anchors. */}
-          {hasSource ? (
+          {/* The Living Reference (CSE M5) as an AGENT-PLACED REGION (Slice 1, CSE-008): rendered only
+              when this frame references the source, placed by emphasis, retired otherwise — it emerges
+              from the surface, never floats over it as an always-on panel. */}
+          {sourceRender.visible ? (
             <SourceReference
               state={state}
               activeFrameId={choreo.activeFrameId}
               currentSegmentId={choreo.current?.segment_id ?? null}
+              placement={sourceRender.placement}
             />
           ) : null}
         </div>

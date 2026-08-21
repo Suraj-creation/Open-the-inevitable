@@ -116,4 +116,8 @@ export type {
   ViewportChangeCause,
   ViewportEmphasis,
   SurfaceFrontierProvider,
+  SourceRenderDecision,
+  SourceRenderPlacement,
+  PlanSourceRenderInput,
 } from "./source-projection";
+export { planSourceRender } from "./source-projection";

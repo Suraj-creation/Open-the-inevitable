@@ -199,6 +199,58 @@ export interface SourceSyncBindingRecord {
 }
 
 // ---------------------------------------------------------------------------
+// Source render decision — the document as an AGENT-PLACED REGION of the surface
+// (CSE-008; "part of the surface, not over it")
+// ---------------------------------------------------------------------------
+
+/**
+ * Where — and whether — the source document occupies the Cognitive Surface right now.
+ * `hidden` = retired (not rendered); `spotlight` = the agent is teaching FROM the doc so it leads a
+ * bounded region with cognition beside it; `beside` = a reference column; `corner` = a small
+ * peripheral region. The document is never a full-bleed always-on reader.
+ */
+export type SourceRenderPlacement = "hidden" | "spotlight" | "beside" | "corner";
+
+export interface SourceRenderDecision {
+  readonly visible: boolean;
+  readonly placement: SourceRenderPlacement;
+  /** Why the region is shown or retired — traceable ("teaching from p.3" / "no source reference"). */
+  readonly reason: string;
+}
+
+export interface PlanSourceRenderInput {
+  /** The ACTIVE frame's viewport plan, if any — the agent's gaze into the source for this moment. */
+  readonly plan: SourceViewportPlanRecord | null;
+  /** The viewport driving prominence (its emphasis maps to placement). */
+  readonly currentViewport: SourceViewport | null;
+  /** Whether any uncleared highlights exist for the active frame. */
+  readonly hasHighlights: boolean;
+}
+
+/**
+ * Decide whether — and how — the source document occupies the surface for the ACTIVE frame (Slice 1,
+ * CSE-008). Pure + deterministic. The region appears ONLY when this frame references the source (a
+ * viewport plan or a highlight), is placed by the agent's viewport emphasis, and RETIRES (hidden)
+ * otherwise. The agent emits semantic intent (viewport emphasis); the renderer realizes the placement
+ * (directive §11) — the surface is a projection, never an always-on document panel.
+ */
+export function planSourceRender(input: PlanSourceRenderInput): SourceRenderDecision {
+  const references = !!input.plan && input.plan.viewports.length > 0;
+  if (!references && !input.hasHighlights) {
+    return { visible: false, placement: "hidden", reason: "no source reference in this frame" };
+  }
+  const emphasis: ViewportEmphasis = input.currentViewport?.emphasis ?? "context";
+  const placement: SourceRenderPlacement =
+    emphasis === "focus" ? "spotlight" : emphasis === "orientation" ? "corner" : "beside";
+  const page = input.currentViewport?.region.page ?? null;
+  return {
+    visible: true,
+    placement,
+    reason: page !== null ? `teaching from p.${page}` : "teaching from the source",
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Defensive readers — plain-JSON payloads → typed records (deterministic, fold-grade)
 // ---------------------------------------------------------------------------
 
