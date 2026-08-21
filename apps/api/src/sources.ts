@@ -201,6 +201,83 @@ function slug(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+// The non-teaching structural pages a book carries around its content (R2c; Slice 2). A "teach this
+// source" curriculum must begin at the first real chapter, not the Contents or Preface, and must not
+// waste frames on the Index or Bibliography. Enumerated (with spelling/plural variants) rather than
+// pattern-guessed, so the classifier is predictable and conservative.
+const FRONT_MATTER_EXACT: ReadonlySet<string> = new Set([
+  "contents",
+  "brief contents",
+  "detailed contents",
+  "contents at a glance",
+  "acknowledgements",
+  "acknowledgments",
+  "acknowledgement",
+  "acknowledgment",
+  "copyright",
+  "copyright page",
+  "copyright notice",
+  "dedication",
+  "title page",
+  "half title",
+  "half title page",
+  "frontispiece",
+  "colophon",
+  "epigraph",
+  "imprint",
+  "index",
+  "subject index",
+  "author index",
+  "name index",
+  "glossary",
+  "glossary of terms",
+  "bibliography",
+  "references",
+  "further reading",
+  "additional reading",
+  "suggested reading",
+  "recommended reading",
+  "notes",
+  "endnotes",
+  "footnotes",
+  "errata",
+  "credits",
+  "image credits",
+  "photo credits",
+  "permissions",
+]);
+
+// Front-matter families with open-ended suffixes ("Preface to the Second Edition", "List of Figures").
+// Matched as a leading token run so a real chapter ("Index Funds", "Prefaces in Ancient Texts") is not
+// swept up — the trailing space is what keeps the prefix from matching a longer word.
+const FRONT_MATTER_PREFIXES: readonly string[] = [
+  "preface",
+  "foreword",
+  "table of contents",
+  "list of",
+  "about the author",
+  "about the authors",
+  "about this book",
+  "about the book",
+];
+
+/**
+ * True when a heading names a non-teaching structural page (front-/back-matter), so a "teach this
+ * source" curriculum can start at the first real chapter (R2c; Slice 2). Case-, punctuation-, and
+ * whitespace-insensitive. Conservative by design: an ambiguous heading that often carries real
+ * material — "Introduction", "Prologue", "Appendix", "Summary", "Notation" — is KEPT, never skipped.
+ * Pure.
+ */
+export function isFrontMatterHeading(text: string): boolean {
+  const norm = text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  if (norm.length === 0) return false;
+  if (FRONT_MATTER_EXACT.has(norm)) return true;
+  return FRONT_MATTER_PREFIXES.some((p) => norm === p || norm.startsWith(`${p} `));
+}
+
 /** Meaning-bearing tokens of a concept title (short stopwords drop out of the match). */
 function titleTokens(title: string): string[] {
   return slug(title)
@@ -1170,7 +1247,17 @@ export class SourceHub {
     const vid = versionId as SourceVersionId;
     const concepts = this.store.semanticConcepts(vid);
     if (concepts.length > 0) {
-      const ordered = orderByPrerequisites(concepts);
+      // Skip front-/back-matter concepts so teaching starts at the first real chapter (Slice 2), and
+      // drop prerequisite refs to the removed ones so the ordering stays well-formed. If EVERYTHING
+      // looks like front matter (pathological), keep the full set — better to teach than to refuse.
+      const taught = concepts.filter((c) => !isFrontMatterHeading(c.label));
+      const kept = taught.length > 0 ? taught : concepts;
+      const keptIds = new Set(kept.map((c) => c.concept_id));
+      const pruned = kept.map((c) => ({
+        ...c,
+        prerequisites: c.prerequisites.filter((p) => keptIds.has(p)),
+      }));
+      const ordered = orderByPrerequisites(pruned);
       return {
         concepts: ordered.map((c) => ({
           id: c.concept_id,
@@ -1180,10 +1267,14 @@ export class SourceHub {
         entry: ordered[0]!.concept_id,
       };
     }
-    const headings = this.store
+    const allHeadings = this.store
       .structuralRegions(vid)
       .filter((r) => r.kind === "heading" && r.text.trim().length > 0);
-    if (headings.length === 0) return null;
+    if (allHeadings.length === 0) return null;
+    // Start the reading-order curriculum at the first real chapter — skip Contents/Preface/Index/etc
+    // (Slice 2). If every heading is front matter, fall back to the full outline (don't strand).
+    const taughtHeadings = allHeadings.filter((r) => !isFrontMatterHeading(r.text));
+    const headings = taughtHeadings.length > 0 ? taughtHeadings : allHeadings;
     const seen = new Set<string>();
     const chain: SourceCurriculumConcept[] = headings.map((r, i) => {
       let id = slug(r.text) || `section-${i + 1}`;

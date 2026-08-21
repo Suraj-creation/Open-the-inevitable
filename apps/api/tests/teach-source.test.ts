@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { type AddressInfo } from "node:net";
 import { type Server } from "node:http";
 import { NullVoiceRuntime } from "@inevitable/adapters";
-import { SourceHub } from "../src/sources";
+import { SourceHub, isFrontMatterHeading } from "../src/sources";
 import { SurfaceHost } from "../src/host";
 import { createGatewayServer } from "../src/server";
 
@@ -60,6 +60,90 @@ describe("curriculumFor — the document's own teaching order (R2c)", () => {
     expect(reg.ok).toBe(true);
     if (!reg.ok) return;
     expect(hub.curriculumFor(reg.value.source_version_id)).toBeNull();
+  });
+});
+
+describe("isFrontMatterHeading — the non-teaching structural pages (Slice 2)", () => {
+  test("flags front-/back-matter, including open-ended families (case/punctuation-insensitive)", () => {
+    for (const h of [
+      "Contents",
+      "Table of Contents",
+      "Preface",
+      "Preface to the Second Edition",
+      "FOREWORD",
+      "Acknowledgements",
+      "Acknowledgments",
+      "Copyright",
+      "Dedication",
+      "About the Author",
+      "About the Authors",
+      "List of Figures",
+      "Index",
+      "Bibliography",
+      "References",
+      "Glossary",
+    ]) {
+      expect(isFrontMatterHeading(h)).toBe(true);
+    }
+  });
+
+  test("keeps real chapters and ambiguous-but-teachable headings", () => {
+    for (const h of [
+      "Introduction",
+      "Chapter 1: Foundations",
+      "Prologue",
+      "Appendix A: Notation",
+      "Summary",
+      "Index Funds", // NOT the back-matter "Index"
+      "Prefaces in Ancient Texts", // NOT "Preface ..."
+      "Backpropagation",
+    ]) {
+      expect(isFrontMatterHeading(h)).toBe(false);
+    }
+  });
+});
+
+const BOOK = [
+  "# Contents",
+  "",
+  "A listing of the chapters that follow.",
+  "",
+  "# Preface to the Second Edition",
+  "",
+  "Thanks for reading this revised edition.",
+  "",
+  "# Introduction",
+  "",
+  "This book teaches gradient methods from the ground up.",
+  "",
+  "# Chapter 1: Foundations",
+  "",
+  "A function's gradient points uphill; we descend against it.",
+  "",
+  "# Index",
+  "",
+  "gradient, loss, minimum.",
+].join("\n");
+
+describe("curriculumFor — starts at the first real chapter (Slice 2)", () => {
+  test("skips front-/back-matter, entering at the first teachable heading with no prerequisites", async () => {
+    const hub = new SourceHub();
+    const reg = await hub.register({ content: BOOK, modality: "markdown", title: "Gradients" });
+    expect(reg.ok).toBe(true);
+    if (!reg.ok) return;
+
+    const curriculum = hub.curriculumFor(reg.value.source_version_id);
+    expect(curriculum).not.toBeNull();
+    const titles = curriculum!.concepts.map((c) => c.title);
+    // Contents / Preface / Index are gone; Introduction (ambiguous, kept) leads into Chapter 1.
+    expect(titles).toEqual(["Introduction", "Chapter 1: Foundations"]);
+    expect(titles).not.toContain("Contents");
+    expect(titles).not.toContain("Index");
+    // The entry is the first REAL chapter and depends on nothing (we start at chapter 1, not preface).
+    expect(curriculum!.entry).toBe(curriculum!.concepts[0]!.id);
+    expect(curriculum!.concepts[0]!.title).toBe("Introduction");
+    expect(curriculum!.concepts[0]!.prerequisites).toEqual([]);
+    expect(curriculum!.concepts[1]!.prerequisites).toEqual([curriculum!.concepts[0]!.id]);
   });
 });
 

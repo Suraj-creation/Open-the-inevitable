@@ -563,10 +563,13 @@ export class SurfaceHost {
       // UCS (ADR-0030; Phase 2): decompose each concept into a progressive sequence of Cognitive
       // Frames (and render practice/assessment as frames), instead of a single composed frame.
       framePlanner: true,
-      // Look-ahead budget: a rolling buffer of 3 next concepts pre-composed in the background
-      // (ADR-0064, ADR-0063 Phase D) so advancing is instant and the lesson builds continuously
-      // ahead of the learner. Recorded, never surfaced until promoted. Live-governable.
-      lookaheadBudget: 3,
+      // Look-ahead budget: a DEEP rolling buffer of 10 upcoming concepts pre-composed in the
+      // background (ADR-0064, ADR-0063 Phase D) so the surface always holds a substantial lesson
+      // built ahead of the learner (Slice 2) — never one thin frame at a time. Affordable because the
+      // buffer is an idempotent top-up (hasLiveFrameForConcept): the first ask pays a one-time
+      // warm-up, then each advance promotes one frame and re-warms just the tail (~1 compose/advance).
+      // Recorded, never surfaced until promoted. Live-governable (a rollout may raise/lower it).
+      lookaheadBudget: 10,
       // UCS (ADR-0030; Phase 4): the Image Agent owns the image-as-cognition decision (prompt +
       // caption + callout labels), replacing the composer's inline image_plan on the frame path.
       imagePlanner: true,
@@ -1205,8 +1208,8 @@ export class SurfaceHost {
       // UCS (ADR-0030; Phase 2): decompose each concept into a progressive sequence of Cognitive
       // Frames (and render practice/assessment as frames), instead of a single composed frame.
       framePlanner: true,
-      // Rolling look-ahead buffer of 3 (ADR-0064; matches create()).
-      lookaheadBudget: 3,
+      // Deep rolling look-ahead buffer of 10 (ADR-0064, Slice 2; matches create()).
+      lookaheadBudget: 10,
       // UCS (ADR-0030; Phase 4): the Image Agent owns image-as-cognition (matches create()).
       imagePlanner: true,
       // R4-model (CSE-018, ADR-0058): the RIA (matches create()).
