@@ -2,9 +2,9 @@
  * SourceDock pure helpers (CSE-017, ADR-0056): modality inference (with honest refusal before
  * upload) and the canonicalization narrative built from the pipeline's OWN registration summary.
  */
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import { describeLayers, inferModality } from "../src/components/SourceDock";
-import type { RegisteredSourceView } from "../src/api";
+import { attachSource, teachSource, type RegisteredSourceView } from "../src/api";
 
 describe("inferModality", () => {
   test("maps supported extensions to their modality + binary flag", () => {
@@ -58,5 +58,52 @@ describe("describeLayers", () => {
 
   test("an unusable source says so, never pretends", () => {
     expect(describeLayers({ ...base, usable: false }).verdict).toMatch(/not yet usable/i);
+  });
+});
+
+// ── Regression: the consent step must never fail silently ────────────────────────────────────
+// Before this, `attachSource`/`teachSource` were called as `.catch(() => {})` and the dock closed
+// regardless, so an upload that never reached the surface was indistinguishable from one that did:
+// "I uploaded a document and nothing rendered." Both now throw the gateway's own message.
+describe("attach/teach failure surfacing", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  const stub = (init: { ok: boolean; status: number; body: string }) => {
+    globalThis.fetch = (async () => ({
+      ok: init.ok,
+      status: init.status,
+      text: async () => init.body,
+      json: async () => JSON.parse(init.body),
+    })) as unknown as typeof fetch;
+  };
+
+  test("attachSource throws the gateway message on a non-OK response", async () => {
+    stub({ ok: false, status: 404, body: "surface not found" });
+    await expect(attachSource("srf-1", "srcv-1")).rejects.toThrow(/surface not found/);
+  });
+
+  test("attachSource throws on a non-JSON error body instead of an opaque parse error", async () => {
+    // A cold-start gateway returns an HTML 502; res.json() used to throw before status was read.
+    stub({ ok: false, status: 502, body: "<html>Bad Gateway</html>" });
+    await expect(attachSource("srf-1", "srcv-1")).rejects.toThrow(/Bad Gateway/);
+  });
+
+  test("attachSource throws when the gateway answers ok:false", async () => {
+    stub({ ok: true, status: 200, body: '{"ok":false}' });
+    await expect(attachSource("srf-1", "srcv-1")).rejects.toThrow(/could not be bound/i);
+  });
+
+  test("teachSource throws when no timeline could be built", async () => {
+    stub({ ok: true, status: 200, body: '{"ok":false}' });
+    await expect(teachSource("srf-1", "srcv-1")).rejects.toThrow(/no timeline/i);
+  });
+
+  test("both resolve true on a healthy response", async () => {
+    stub({ ok: true, status: 200, body: '{"ok":true}' });
+    await expect(attachSource("srf-1", "srcv-1")).resolves.toBe(true);
+    await expect(teachSource("srf-1", "srcv-1")).resolves.toBe(true);
   });
 });

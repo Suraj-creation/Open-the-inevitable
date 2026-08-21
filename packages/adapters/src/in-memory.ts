@@ -99,11 +99,15 @@ export class InMemoryVectorStore implements VectorStore {
     collection: string,
     vector: number[],
     limit: number,
-  ): Promise<Array<{ id: string; score: number }>> {
+  ): Promise<Array<{ id: string; score: number; payload?: Record<string, unknown> }>> {
     const coll = this.collections.get(collection);
     if (!coll) return [];
     return [...coll.entries()]
-      .map(([id, record]) => ({ id, score: cosineSimilarity(vector, record.vector) }))
+      .map(([id, record]) => ({
+        id,
+        score: cosineSimilarity(vector, record.vector),
+        ...(record.payload ? { payload: record.payload } : {}),
+      }))
       .sort((a, b) => b.score - a.score)
       .slice(0, Math.max(0, limit));
   }

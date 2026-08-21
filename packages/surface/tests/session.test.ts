@@ -1019,6 +1019,59 @@ describe("SurfaceSession — end-to-end 'Teach me Neural Networks'", () => {
     expect(types.filter((t) => t === "surface.frame.promoted")).toHaveLength(1);
   });
 
+  test("ADR-0064: a budget>1 pre-composes a ROLLING buffer of the next concepts and keeps the tail warm across an advance", async () => {
+    const { surface, bus } = makeFixture("surface-lookahead-rolling", {
+      composerModel: fakeComposerModel(),
+      framePlannerModel: fakeFramePlannerModel(),
+      lookaheadBudget: 2,
+    });
+    await surface.start("Teach me Neural Networks");
+
+    // Ask 1 (focus linear-algebra): the buffer pre-composes the next TWO concepts, not one.
+    const first = await surface.ask(teachMeNeuralNetworks());
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw first.error;
+    await surface.settle();
+    const afterFirst = surface.state()!;
+    const specConcepts = afterFirst.speculative_frames
+      .filter((f) => f.status === "speculative")
+      .map((f) => f.concept_id)
+      .sort();
+    expect(specConcepts).toEqual(["gradient-descent", "perceptron"]);
+
+    // Ask 2: advance to gradient-descent. It promotes; perceptron is STILL AHEAD so it stays warm
+    // (the buffer survives the advance); the tail re-tops toward neural-networks.
+    const second = await surface.ask(askForConcept("gradient-descent"));
+    expect(second.ok).toBe(true);
+    if (!second.ok) throw second.error;
+    await surface.settle();
+    const afterSecond = surface.state()!;
+
+    // gradient-descent promoted onto the canonical line.
+    expect(
+      afterSecond.frames.some(
+        (f) => f.concept_id === "gradient-descent" && f.status === "promoted",
+      ),
+    ).toBe(true);
+    // perceptron was NOT discarded — it is still a live speculative frame (never invalidated).
+    const perceptron = afterSecond.speculative_frames.filter((f) => f.concept_id === "perceptron");
+    expect(perceptron.some((f) => f.status === "speculative")).toBe(true);
+    expect(perceptron.every((f) => f.status !== "invalidated")).toBe(true);
+    // The buffer widened to the next concept on the path.
+    expect(
+      afterSecond.speculative_frames.some(
+        (f) => f.concept_id === "neural-networks" && f.status === "speculative",
+      ),
+    ).toBe(true);
+
+    // No wasted recompute: perceptron was composed once, not re-prepared on ask 2.
+    const preparedConcepts = bus
+      .replay({ subject: "surface.>" })
+      .filter((e) => e.event_type === "surface.frame.speculation.prepared")
+      .map((e) => (e.payload as { concept_id?: string }).concept_id);
+    expect(preparedConcepts.filter((c) => c === "perceptron")).toHaveLength(1);
+  });
+
   test("UCS Phase 3: a speculative frame is invalidated when the learner diverges, never surfacing", async () => {
     const { surface, bus } = makeFixture("surface-lookahead-invalidate", {
       composerModel: fakeComposerModel(),

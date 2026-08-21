@@ -7,6 +7,7 @@
  * Spec: spec/surface/cognitive-surface-runtime.md, spec/product/product-cognition-runtime.md §11.
  */
 import { InMemoryToolRuntime, InMemoryVectorStore } from "@inevitable/adapters";
+import type { VectorStore } from "@inevitable/contracts";
 import {
   ContextAssembler,
   type RetrievableMemoryItem,
@@ -442,6 +443,13 @@ export interface DemoOptions {
   readonly evaluationModel?: ModelRuntime;
   /** Semantic embed fn for ContextAssembler. Absent ⇒ local FNV-1a fallback. */
   readonly embedFn?: (text: string) => Promise<number[]>;
+  /**
+   * Durable retrieval index (ADR-0065). The gateway passes a `PgVectorStore` when the Supabase
+   * backend is configured, so a learner's semantic memory is retrievable across sessions/redeploys;
+   * absent ⇒ an ephemeral `InMemoryVectorStore` (the offline/CLI default). Isolation is per-learner
+   * via the `context:<cid>` collection, so a shared store never cross-serves one learner to another.
+   */
+  readonly vectors?: VectorStore;
 }
 
 /** A learner the surface is owned by (DPS-003). Defaults to the demo learner for the CLI/tests. */
@@ -934,7 +942,10 @@ export function buildDemoSession(options: DemoOptions): DemoFixture {
   // Context-lease-bounded retrieval (DPS-005): assemble the learner's relevant prior knowledge into
   // working memory on demand, bounded by the session's context lease. VectorStore-backed; deterministic.
   const contextAssembler = new ContextAssembler({
-    vectors: new InMemoryVectorStore(),
+    vectors: options.vectors ?? new InMemoryVectorStore(),
+    // Per-learner collection so a shared durable store isolates learners (defence in depth beside the
+    // lease's `allowed_users` filter). Default "context" preserved when no learner cid is available.
+    collection: session.learnerIdentity.cid ? `context:${session.learnerIdentity.cid}` : "context",
     ...(options.embedFn ? { embedFn: options.embedFn } : {}),
   });
   const ownerUserId = session.intentLease.owner_user_id;

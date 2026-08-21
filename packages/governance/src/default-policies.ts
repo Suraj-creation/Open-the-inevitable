@@ -1,5 +1,5 @@
 /**
- * Default governance policies (illustrative baselines from advanced-agent-architecture#10).
+ * Default governance policies (illustrative baselines from ../../../spec/architecture/uci-architecture.md#14-governance).
  * Real deployments register tenant/domain policies; these establish the enforcement shape.
  */
 import type { Policy, PolicyRequest, PolicyOutcome } from "./policy";

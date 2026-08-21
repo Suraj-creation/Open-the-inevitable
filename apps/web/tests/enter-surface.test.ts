@@ -117,15 +117,24 @@ describe("enterSurface", () => {
     expect(JSON.parse(store.get(KEY)!)).toEqual({ learnerId: "lnr-fresh", apiKey: "key-fresh" });
   });
 
-  test("a genuine failure (no stored credential) still surfaces as an error", async () => {
+  test("a genuine failure surfaces the gateway's OWN message, not a parser error", async () => {
     installStorage();
     vi.stubGlobal("fetch", () =>
       Promise.resolve(
         new Response(JSON.stringify({ ok: false, error: { message: "boom" } }), { status: 500 }),
       ),
     );
+    // Previously this threw a generic string; before that, an unchecked res.json() on an empty body
+    // threw "Unexpected end of JSON input". The learner now reads the reason the gateway gave.
+    await expect(enterSurface("teach me transformer", "student")).rejects.toThrow("boom");
+  });
+
+  test("an unreachable gateway says so, instead of failing to parse an empty body", async () => {
+    installStorage();
+    // Exactly what the Vite proxy returns when nothing is listening on :8787.
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response("", { status: 500 })));
     await expect(enterSurface("teach me transformer", "student")).rejects.toThrow(
-      "gateway: failed to enter surface",
+      /Cannot reach the gateway/i,
     );
   });
 });

@@ -73,6 +73,13 @@ function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
 }
 
+/**
+ * Upper bound on hits fetched from a durable store when the session has indexed little or nothing
+ * (ADR-0065) — a returning learner retrieves from the store, not from an empty session map. The
+ * lease's token budget and `limit` still bound what is actually admitted.
+ */
+const DURABLE_SEARCH_CAP = 64;
+
 export class ContextAssembler {
   private readonly vectors: VectorStore;
   private readonly collection: string;
@@ -98,13 +105,37 @@ export class ContextAssembler {
     return embedText(text, this.dim);
   }
 
-  /** Index (or re-index) eligible memory items. Idempotent by id; items without text are skipped. */
+  /**
+   * Index (or re-index) eligible memory items. Idempotent by id; items without text are skipped.
+   * The item's metadata is persisted as the vector's PAYLOAD (ADR-0065), so a later session over a
+   * durable store can reconstruct it from `search()` alone — retrieval that survives the process.
+   */
   async index(items: readonly RetrievableMemoryItem[]): Promise<void> {
     for (const item of items) {
       if (!item.text || !item.text.trim()) continue;
       this.items.set(item.id, item);
-      await this.vectors.upsert(this.collection, item.id, await this.embed(item.text));
+      await this.vectors.upsert(this.collection, item.id, await this.embed(item.text), {
+        text: item.text,
+        memoryLayer: item.memoryLayer,
+        ownerUserId: item.ownerUserId,
+        confidence: item.confidence,
+      });
     }
+  }
+
+  /** Reconstruct a retrievable item from a vector-store payload (durable cross-session path). */
+  private itemFromPayload(
+    id: string,
+    payload: Record<string, unknown> | undefined,
+  ): RetrievableMemoryItem | null {
+    if (!payload || typeof payload["text"] !== "string" || !payload["text"]) return null;
+    return {
+      id,
+      text: payload["text"],
+      memoryLayer: typeof payload["memoryLayer"] === "string" ? payload["memoryLayer"] : "semantic",
+      ownerUserId: typeof payload["ownerUserId"] === "string" ? payload["ownerUserId"] : "",
+      confidence: typeof payload["confidence"] === "number" ? payload["confidence"] : 0,
+    };
   }
 
   /** Number of indexed items (for inspection/tests). */
@@ -132,27 +163,26 @@ export class ContextAssembler {
       const expiresAt = Date.parse(lease.expires_at);
       if (Number.isFinite(expiresAt) && expiresAt <= input.nowMs) return empty(true);
     }
-    if (this.items.size === 0) return empty(false);
 
     const allowedLayers = new Set(lease.memory_layers);
     const allowedUsers = lease.allowed_users; // undefined ⇒ no user restriction
     const minScore = input.minScore ?? 0;
 
-    // Rank every indexed item by similarity (search returns id+score; we hold the payloads).
-    const ranked = await this.vectors.search(
-      this.collection,
-      await this.embed(query),
-      this.items.size,
-    );
+    // Rank by similarity. The search bound is the larger of this session's indexed count and a
+    // durable-store cap (ADR-0065): a returning session may have indexed nothing yet still retrieve
+    // from the durable store, so we never bound the search by an empty session map.
+    const searchLimit = Math.max(this.items.size, input.limit ?? 0, DURABLE_SEARCH_CAP);
+    const ranked = await this.vectors.search(this.collection, await this.embed(query), searchLimit);
 
     const admitted: AssembledContextItem[] = [];
     let tokensUsed = 0;
     let droppedForBudget = 0;
     let excludedByLease = 0;
 
-    for (const { id, score } of ranked) {
+    for (const { id, score, payload } of ranked) {
       if (score <= minScore) continue; // off-topic ⇒ not relevant (not a lease exclusion)
-      const item = this.items.get(id);
+      // Prefer this session's item; else reconstruct from the durable payload (cross-session).
+      const item = this.items.get(id) ?? this.itemFromPayload(id, payload);
       if (!item) continue;
       if (!allowedLayers.has(item.memoryLayer)) {
         excludedByLease++;

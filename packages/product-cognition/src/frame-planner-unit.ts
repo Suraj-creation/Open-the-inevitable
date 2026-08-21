@@ -123,8 +123,13 @@ export interface FramePlannerUnitDeps {
   readonly maxFrames?: number;
 }
 
-const DEFAULT_MAX_FRAMES = 5;
+// ADR-0064: a concept covers its material across up to 8 frames (was 5), so a chapter is genuinely
+// taught rather than fragmented into a few sparse boards. "Fewer is better — never pad" still
+// governs the model; this is only the ceiling.
+const DEFAULT_MAX_FRAMES = 8;
 const DEFAULT_SLOTS: readonly PlannableSlot[] = ["core_concept", "definition"];
+// ADR-0064: keep a few look-ahead bets so the rolling buffer can pre-warm several next steps.
+const LOOKAHEAD_ENTRY_CAP = 3;
 
 const VALID_SLOTS: ReadonlySet<string> = new Set(PLANNABLE_SLOTS);
 const VALID_ARCHETYPES: ReadonlySet<string> = new Set(FRAME_ARCHETYPES);
@@ -319,8 +324,9 @@ export function parseFramePlan(text: string, conceptTitle: string, maxFrames: nu
   for (const entry of lookaheadRaw) {
     const parsed = parseLookaheadEntry(entry);
     if (parsed) lookahead.push(parsed);
-    // Look-ahead is a bounded buffer, not a lesson — one bet is enough to pre-warm the next step.
-    if (lookahead.length >= 1) break;
+    // Look-ahead is a bounded rolling buffer (ADR-0064), not a lesson — a few bets pre-warm the next
+    // steps. The runtime look-ahead budget still governs how many are actually pre-composed.
+    if (lookahead.length >= LOOKAHEAD_ENTRY_CAP) break;
   }
   const pacingRaw = (obj.pacing ?? {}) as Record<string, unknown>;
   return {
@@ -437,8 +443,10 @@ export class FramePlannerUnit implements CognitiveUnit {
       "slice it teaches) so a downstream composer can distill DIFFERENT anchors for each.",
       "Respond with JSON only (no markdown fences) matching:",
       '{"frames":[{"title":"short frame title","sub_focus":"the precise slice this frame teaches","archetype":"concept-first|image-led|compare|formal|example-led","slots":["core_concept","definition","key_formula","diagram","relationship","mental_model","table","key_example","misconception","memory_cue"],"intent":"introduce|build|illustrate|connect|deepen|summarize"}],"lookahead":[{"title":"opening frame of the likely NEXT step","sub_focus":"what that next step introduces","archetype":"concept-first","slots":["core_concept"],"trigger_assumption":"learner masters this concept and advances"}],"pacing":{"strategy":"progressive","notes":"why this sequence"}}',
-      `Rules: 1–${this.maxFrames} frames (fewer is better — never pad). Each frame's \`slots\` lists ONLY`,
-      "the MCCR anchors that frame will actually fill (≤ 7 per frame so it fits one screen); always",
+      `Rules: 1–${this.maxFrames} frames — cover the concept THOROUGHLY (a rich concept or a whole`,
+      "chapter section earns its full sequence; a trivial one needs few). Never pad, but never leave the",
+      "material half-taught. Each frame's `slots` lists ONLY",
+      "the MCCR anchors that frame will actually fill (≤ 8 per frame so it fits one screen); always",
       "include core_concept. A frame should carry a COMPLETE slice — formula, worked example, and the",
       "misconception it attracts belong on the board, not behind a link. Order frames so understanding",
       "compounds. The FIRST frame introduces; the LAST consolidates. Distinct sub_focus per frame —",

@@ -163,6 +163,67 @@ describe("RecordingModelRuntime — replay mode", () => {
   });
 });
 
+describe("RecordingModelRuntime — embeddings (ADR-0065, replay-safe)", () => {
+  test("record → replay reproduces the exact vector and never re-invokes the provider", async () => {
+    let innerEmbeds = 0;
+    const inner: ModelRuntime = {
+      async generate() {
+        return { text: "{}", model: "stub" };
+      },
+      async embed(text) {
+        innerEmbeds++;
+        // A deterministic but text-dependent vector so a wrong lookup would be caught.
+        return [text.length, text.charCodeAt(0) ?? 0, 0.5];
+      },
+    };
+    const { bus, runtime: recorder } = harness("record", inner);
+    const vEntropy = await recorder.embed("entropy");
+    const vBoltzmann = await recorder.embed("boltzmann");
+    expect(innerEmbeds).toBe(2);
+
+    // Replay from the same bus log — the provider must never be touched.
+    const spy: ModelRuntime = {
+      async generate() {
+        throw new Error("replay must not generate");
+      },
+      async embed() {
+        throw new Error("replay must never invoke the embedding provider");
+      },
+    };
+    const replayer = new RecordingModelRuntime({ mode: "replay", bus, inner: spy });
+    // Keyed by text (embedding is a pure function), so order is irrelevant on replay.
+    expect(await replayer.embed("boltzmann")).toEqual(vBoltzmann);
+    expect(await replayer.embed("entropy")).toEqual(vEntropy);
+    expect(innerEmbeds).toBe(2); // provider untouched during replay
+  });
+
+  test("record-before-use: model.embedding.recorded is published before embed() returns", async () => {
+    const order: string[] = [];
+    const inner: ModelRuntime = {
+      async generate() {
+        return { text: "{}", model: "stub" };
+      },
+      async embed() {
+        order.push("inner-embed");
+        return [1, 2, 3];
+      },
+    };
+    const { bus, runtime } = harness("record", inner);
+    bus.subscribe("model.>", () => {
+      order.push("recorded-event");
+    });
+    await runtime.embed("x");
+    expect(order).toEqual(["inner-embed", "recorded-event"]);
+  });
+
+  test("a missing embedding record fails closed with E_MODEL_REPLAY_MISS", async () => {
+    const { runtime } = harness("replay");
+    await expect(runtime.embed("never-embedded")).rejects.toMatchObject({
+      code: "E_MODEL_REPLAY_MISS",
+    });
+  });
+});
+
 describe("GeminiModelRuntime", () => {
   test("connect() resolves a client via the guarded import (SDK provisioned), never throws", async () => {
     // @google/genai is edge-provisioned at the workspace root (ADR-0005). The guarded dynamic

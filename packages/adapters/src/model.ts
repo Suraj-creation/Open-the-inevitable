@@ -37,6 +37,7 @@ const SPEC_REF = "protocols/model-invocation-protocol";
 
 export const MODEL_OUTPUT_RECORDED = "model.output.recorded";
 export const MODEL_INVOCATION_FAILED = "model.invocation.failed";
+export const MODEL_EMBEDDING_RECORDED = "model.embedding.recorded";
 export const MODEL_RECORDING_FORMAT_VERSION = "1.0.0";
 
 function modelError(code: string, message: string, details?: Record<string, unknown>): CosError {
@@ -180,13 +181,16 @@ export class GeminiModelRuntime implements ModelRuntime {
     const mod = await requireOptional<GenAiModule>("@google/genai");
     if (!mod.ok) return mod;
     const client = new mod.value.GoogleGenAI({ apiKey: config.apiKey });
-    return ok(new GeminiModelRuntime(client, config.defaultModel ?? "gemini-2.5-flash"));
+    // Default to the floating `-latest` alias, not a pinned version: Google retires pinned model ids
+    // (a 404 "no longer available to new users" that silently degrades every call to stub cognition),
+    // and new/free accounts are often granted ONLY the `-latest` aliases. Overridable via GEMINI_MODEL.
+    return ok(new GeminiModelRuntime(client, config.defaultModel ?? "gemini-flash-latest"));
   }
 
   /** Test seam: build the adapter around an injected (fake) client — no SDK, no network. */
   static fromClient(
     client: GenAiClientLike,
-    defaultModel = "gemini-2.5-flash",
+    defaultModel = "gemini-flash-latest",
   ): GeminiModelRuntime {
     return new GeminiModelRuntime(client, defaultModel);
   }
@@ -374,6 +378,7 @@ export class RecordingModelRuntime implements ModelRuntime {
   private readonly idGenerator: IdGenerator;
   private readonly ordinals = new Map<string, number>();
   private replayIndex: Map<string, RecordedInvocation[]> | undefined;
+  private embeddingReplayIndex: Map<string, number[]> | undefined;
   private hlc: Hlc;
 
   constructor(deps: RecordingModelRuntimeDeps) {
@@ -510,11 +515,62 @@ export class RecordingModelRuntime implements ModelRuntime {
     });
   }
 
+  /**
+   * Replay-safe embeddings (ADR-0065). An embedding is a pure function of (text, model), so the
+   * record is keyed by the exact text — order-independent, unlike generate()'s ordinals. Record
+   * mode calls the provider and emits `model.embedding.recorded` (record-before-use); replay resolves
+   * the recorded vector and NEVER re-invokes the provider, so a seeded record→replay run reproduces
+   * byte-identical retrieval. Without this, persisting real (Gemini) embeddings would break replay
+   * determinism the moment replay hit an embed() call.
+   */
   async embed(text: string): Promise<number[]> {
-    if (this.mode === "replay") {
-      throw modelError("E_MODEL_REPLAY_MISS", "embed() results are not recorded in Phase 2B");
+    if (this.mode === "replay") return this.resolveEmbeddingFromRecord(text);
+    const embedding = await this.inner!.embed(text);
+    await this.recordEmbedding(text, embedding);
+    return embedding;
+  }
+
+  private async recordEmbedding(text: string, embedding: number[]): Promise<void> {
+    const published = await this.emit(MODEL_EMBEDDING_RECORDED, {
+      text,
+      embedding,
+      dim: embedding.length,
+      provider: this.provider,
+      format_version: MODEL_RECORDING_FORMAT_VERSION,
+    });
+    if (published.status !== "published" && published.status !== "modified") {
+      throw modelError(
+        "E_MODEL_RECORDING_FAILED",
+        `embedding recording was not published (status: ${published.status}); result must not be used`,
+        { reason: published.reason },
+      );
     }
-    return this.inner!.embed(text);
+  }
+
+  private resolveEmbeddingFromRecord(text: string): number[] {
+    if (!this.embeddingReplayIndex) this.embeddingReplayIndex = this.buildEmbeddingReplayIndex();
+    const match = this.embeddingReplayIndex.get(text);
+    if (!match) {
+      throw modelError(
+        "E_MODEL_REPLAY_MISS",
+        "no recorded embedding for this text; replay refuses to fabricate",
+        { textPreview: text.slice(0, 64) },
+      );
+    }
+    return match;
+  }
+
+  private buildEmbeddingReplayIndex(): Map<string, number[]> {
+    const source = this.recordingsOverride ?? this.bus.replay({ subject: "model.>" });
+    const index = new Map<string, number[]>();
+    for (const event of source) {
+      if (event.event_type !== MODEL_EMBEDDING_RECORDED) continue;
+      const payload = event.payload as { text?: string; embedding?: number[] };
+      if (typeof payload.text === "string" && Array.isArray(payload.embedding)) {
+        index.set(payload.text, payload.embedding);
+      }
+    }
+    return index;
   }
 
   private resolveFromRecord(key: string, ordinal: number): ModelGenerationResult {

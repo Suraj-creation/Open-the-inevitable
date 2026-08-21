@@ -1231,7 +1231,94 @@ export class SourceHub {
         (await this.anchorsFromAttention(versionId, conceptId, conceptTitle));
       if (views && views.length > 0) return views;
     }
+    // ADR-0064 — topic-grounded rendering: a bound document must appear on the surface even when the
+    // topic's wording does not lexically overlap it (the old behavior returned [] → the document
+    // silently never rendered in topic mode). Fall back to the first usable source's best-effort
+    // region (soft match, else the structural lead), anchored as lower-confidence/positional.
+    // Honest absence remains only when NO bound source has any usable structure.
+    for (const versionId of versionIds) {
+      const fallback = await this.bestEffortEvidence(versionId, conceptId, conceptTitle);
+      if (fallback && fallback.length > 0) return fallback;
+    }
     return [];
+  }
+
+  /**
+   * Best-effort evidence for topic mode (ADR-0064). Pick the region with the best SOFT (substring)
+   * overlap with the concept; if none, the source's structural lead region (first heading, else the
+   * first region in reading order). Anchored `created_by: "viewport-fallback"` — positional,
+   * lower-confidence provenance, never conflated with a real lexical anchor. Returns null only when
+   * the source has no usable structure (honest absence). The anchor it creates carries the concept
+   * ref, so the next `evidenceFor` resolves it via `existingAnchorViews` and never recomposes.
+   */
+  private async bestEffortEvidence(
+    versionId: string,
+    conceptId: string,
+    conceptTitle: string,
+  ): Promise<readonly SourceEvidenceAnchorView[] | null> {
+    const structural = this.structuralOf(versionId);
+    if (!structural) return null;
+    const usable = structural.regions.filter(
+      (r) => r.confidence >= 0.5 && r.text.trim().length > 0,
+    );
+    if (usable.length === 0) return null;
+
+    const tokens = [...new Set([...titleTokens(conceptTitle), ...titleTokens(conceptId)])];
+    // Soft overlap: a title token and a region word share a substring (min length 4). Weaker than
+    // anchorsFromAttention's full containment, so it points at the most relevant passage rather than
+    // defaulting to the lead — but it never fabricates a match where none plausibly exists.
+    const softScore = (region: StructuralRegion): number => {
+      if (tokens.length === 0) return 0;
+      const words = new Set(
+        slug(region.text)
+          .split("-")
+          .filter((w) => w.length > 3),
+      );
+      let score = 0;
+      for (const t of tokens) {
+        for (const w of words) {
+          if (w.includes(t) || t.includes(w)) {
+            score += 1;
+            break;
+          }
+        }
+      }
+      return score;
+    };
+    const best = [...usable]
+      .map((region) => ({ region, score: softScore(region) }))
+      .sort((a, b) => b.score - a.score || a.region.ordinal - b.region.ordinal)[0];
+    const lead =
+      usable.find((r) => r.kind === "heading") ??
+      [...usable].sort((a, b) => a.ordinal - b.ordinal)[0]!;
+    const chosen = best && best.score > 0 ? best.region : lead;
+
+    const selectors: AnchorSelector[] = [
+      { type: "structural", path: chosen.path },
+      { type: "text-quote", exact: chosen.text },
+    ];
+    if (typeof chosen.page === "number" && chosen.bbox) {
+      selectors.push({ type: "region", page: chosen.page, bbox: chosen.bbox });
+    }
+    const created = this.store.createAnchorAt({
+      version_id: versionId as SourceVersionId,
+      selectors,
+      granularity: chosen.kind === "heading" ? "section" : "paragraph",
+      concept_refs: [conceptId],
+      created_by: "viewport-fallback",
+    });
+    if (!created.ok) return null;
+    const view = this.regionView(versionId, chosen.path, chosen.text);
+    if (!view) return null;
+    return [
+      {
+        anchor_id: created.value.anchor_id,
+        source_version_id: versionId,
+        concept_ref: conceptId,
+        granularity: created.value.granularity,
+        region: view,
+      },
+    ];
   }
 
   /**

@@ -46,7 +46,7 @@ async function main(): Promise<void> {
           learnerId?: string;
         })
       : {};
-    const learner = meta.learnerId ? learners.get(meta.learnerId) : undefined;
+    const learner = meta.learnerId ? await learners.get(meta.learnerId) : undefined;
     const learnerCid = learner?.cid ?? `cog-unknown-${meta.learnerId ?? surfaceId}`;
 
     const { artifacts, skipped } = distillSession({

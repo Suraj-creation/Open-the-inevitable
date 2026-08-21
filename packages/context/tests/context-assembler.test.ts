@@ -146,3 +146,71 @@ describe("DPS-005 — ContextAssembler (lease-bounded retrieval)", () => {
     expect(ctx.leaseExpired).toBe(false);
   });
 });
+
+// A collection-aware shared store — faithful to InMemoryVectorStore / PgVectorStore, which both key
+// by (collection, id). Stands in for a DURABLE store: it survives across ContextAssembler instances,
+// exactly as PgVectorStore survives across sessions/redeploys (same conformance).
+class SharedVectors implements VectorStore {
+  private readonly m = new Map<string, Map<string, { vector: number[]; payload?: object }>>();
+  private col(c: string) {
+    let x = this.m.get(c);
+    if (!x) this.m.set(c, (x = new Map()));
+    return x;
+  }
+  async upsert(
+    c: string,
+    id: string,
+    vector: number[],
+    payload?: Record<string, unknown>,
+  ): Promise<void> {
+    this.col(c).set(id, { vector, ...(payload ? { payload } : {}) });
+  }
+  async search(c: string, vector: number[], limit: number) {
+    return [...this.col(c).entries()]
+      .map(([id, r]) => ({
+        id,
+        score: cosine(vector, r.vector),
+        ...(r.payload ? { payload: r.payload as Record<string, unknown> } : {}),
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, Math.max(0, limit));
+  }
+  async delete(c: string, id: string): Promise<void> {
+    this.col(c).delete(id);
+  }
+}
+
+describe("ADR-0065 — durable, cross-session, per-learner retrieval", () => {
+  test("a later session retrieves what an earlier one indexed (durable store survives the session)", async () => {
+    const durable = new SharedVectors();
+    const collection = "context:cog-maya";
+
+    // Session 1: index the learner's semantic memory, then the process ends (assembler discarded).
+    const session1 = new ContextAssembler({ vectors: durable, collection });
+    await session1.index([
+      item({ id: "m1", text: "entropy measures disorder" }),
+      item({ id: "m2", text: "the boltzmann relation counts microstates" }),
+    ]);
+
+    // Session 2: a BRAND-NEW assembler over the SAME durable store — nothing carried in memory.
+    // It must still retrieve the earlier session's knowledge (this is the whole point of durability).
+    const session2 = new ContextAssembler({ vectors: durable, collection });
+    const ctx = await session2.assemble({ query: "entropy microstates", lease: lease() });
+    expect(ctx.items.length).toBeGreaterThan(0);
+    expect(ctx.items.map((i) => i.id)).toContain("m2");
+  });
+
+  test("per-learner collection isolates learners on a shared durable store", async () => {
+    const durable = new SharedVectors();
+    const maya = new ContextAssembler({ vectors: durable, collection: "context:cog-maya" });
+    const arjun = new ContextAssembler({ vectors: durable, collection: "context:cog-arjun" });
+    await maya.index([item({ id: "maya-1", text: "maya studied gradient descent" })]);
+    await arjun.index([item({ id: "arjun-1", text: "arjun studied gradient descent" })]);
+
+    // Arjun's assembler must NEVER surface Maya's memory, even for an identical query.
+    const ctx = await arjun.assemble({ query: "gradient descent", lease: lease() });
+    const ids = ctx.items.map((i) => i.id);
+    expect(ids).toContain("arjun-1");
+    expect(ids).not.toContain("maya-1");
+  });
+});

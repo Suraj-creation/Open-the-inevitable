@@ -1270,13 +1270,15 @@ export class SurfaceSession {
       await this.resolveEvaluation(surfaceId, input, cycle);
     }
 
-    // 11. UCS (ADR-0030; Phase 3) — Governed look-ahead: after clean forward progress (mastery ran,
-    // no confusion descent), pre-compose the likely NEXT frame within the budget. Recorded but never
-    // surfaced until a future ask promotes it. A descent means the learner struggled — no speculation.
+    // 11. UCS (ADR-0030; Phase 3 → ADR-0064 rolling buffer) — Governed look-ahead: after mastery,
+    // pre-compose the next N concepts within the budget (N = look-ahead budget). Recorded but never
+    // surfaced until a future ask promotes it. A prerequisite descent means the learner struggled on
+    // THIS concept, but the path ahead is unchanged — so we still pre-warm it (ADR-0064), which is
+    // exactly when instant next steps matter most.
     // DETACHED (review §22): speculation's cost is never paid inside the learner's ask latency —
     // the response returns now, the speculative events stream in behind it, and `settle()` (next
     // ask / close / tests) awaits completion.
-    if (onPlannerFramePath && !descentInfo && cycle.mastery) {
+    if (onPlannerFramePath && cycle.mastery) {
       // Cancellable (ADR-0063 Phase F): a learner interrupt aborts this stale speculation at its next
       // checkpoint, so the gateway stops before the look-ahead frame's image + emits.
       const abort = new AbortController();
@@ -1371,11 +1373,21 @@ export class SurfaceSession {
     const state = this.state();
     const pending = (state?.speculative_frames ?? []).filter((f) => f.status === "speculative");
     if (pending.length === 0) return false;
+    // ADR-0064 rolling buffer: the focus's frame is promoted; frames for concepts STILL AHEAD on the
+    // path are kept warm (the buffer survives an advance); only frames now behind or off-path are
+    // discarded. `ahead` is the set of concept ids after the new focus in path order.
+    const focusIndex = args.input.concepts.findIndex((c) => c.id === args.input.focusConceptId);
+    const ahead = new Set(
+      focusIndex >= 0 ? args.input.concepts.slice(focusIndex + 1).map((c) => c.id) : [],
+    );
     let promoted = false;
     for (const spec of pending) {
       if (!promoted && spec.concept_id === args.input.focusConceptId) {
         await this.promoteSpeculation(args.surfaceId, spec, args.conceptNodeId, args.input);
         promoted = true;
+      } else if (spec.concept_id && ahead.has(spec.concept_id)) {
+        // Still on the road ahead — leave it speculative so the learner reaches an instant frame.
+        continue;
       } else {
         await this.emit("surface.frame.speculation.invalidated", {
           surface_id: args.surfaceId,
@@ -2629,60 +2641,70 @@ export class SurfaceSession {
   }): Promise<void> {
     const budget = this.deps.getLookaheadBudget?.() ?? this.deps.lookaheadBudget ?? 0;
     if (budget <= 0) return;
-    const nextConcept = this.nextConceptAfter(args.input);
-    if (!nextConcept) return; // end of the path — nothing to look ahead to
     if (args.signal?.aborted) return; // interrupted before composing began (ADR-0063 Phase F)
 
-    const bet = this.pendingLookahead?.entries[0];
+    // ADR-0064 rolling buffer: pre-compose the next `budget` concepts, not just one. Concepts that
+    // already have a live (speculative or composed/promoted) frame are skipped, so this is an
+    // idempotent top-up — each advance promotes one and re-warms the tail without recomposing.
+    const upcoming = this.conceptsAhead(args.input, budget);
+    if (upcoming.length === 0) return; // end of the path — nothing to look ahead to
     const plannerPacketId = this.pendingLookahead?.plannerPacketId ?? null;
-    const triggerAssumption =
-      bet?.trigger_assumption ??
-      `learner masters ${args.input.focusConceptId} and advances to ${nextConcept.id}`;
-    const archetype = bet?.archetype ?? "concept-first";
 
-    const artifacts = await this.dispatchComposerForConcept({
-      surfaceId: args.surfaceId,
-      conceptId: nextConcept.id,
-      conceptTitle: nextConcept.title,
-      goal: args.input.goal,
-      ...(bet?.sub_focus ? { subFocus: bet.sub_focus } : {}),
-      frameFocus: bet?.title ?? `Next — ${nextConcept.title}`,
-      ...(args.signal ? { signal: args.signal } : {}),
-    });
-    if (!artifacts) return; // blocked/empty ⇒ nothing prepared (observable degradation)
-    if (args.signal?.aborted) return; // interrupted while composing — emit no speculative frame (Phase F)
+    for (let i = 0; i < upcoming.length; i += 1) {
+      if (args.signal?.aborted) return; // interrupted between frames — stop widening the buffer
+      const nextConcept = upcoming[i]!;
+      if (this.hasLiveFrameForConcept(nextConcept.id)) continue; // already warm — don't recompute
+      // Each look-ahead bet lines up positionally with the concept it pre-warms.
+      const bet = this.pendingLookahead?.entries[i];
+      const triggerAssumption =
+        bet?.trigger_assumption ??
+        `learner reaches ${nextConcept.id} on the ${args.input.pathId} path`;
+      const archetype = bet?.archetype ?? "concept-first";
 
-    const frameId = `cfr-${this.idGenerator.hex(12)}`;
-    const ordinal = this.nextFrameOrdinal();
-    const nextConceptNodeId = `concept:${nextConcept.id}`;
-    const slots = bet?.slots ?? Object.keys(artifacts.mccr);
+      const artifacts = await this.dispatchComposerForConcept({
+        surfaceId: args.surfaceId,
+        conceptId: nextConcept.id,
+        conceptTitle: nextConcept.title,
+        goal: args.input.goal,
+        ...(bet?.sub_focus ? { subFocus: bet.sub_focus } : {}),
+        frameFocus: bet?.title ?? `Next — ${nextConcept.title}`,
+        ...(args.signal ? { signal: args.signal } : {}),
+      });
+      if (!artifacts) continue; // blocked/empty ⇒ this one not prepared (observable degradation)
+      if (args.signal?.aborted) return; // interrupted while composing — emit no speculative frame
 
-    // The pre-composed MCCR lands in speculative_frames[] (never frames[]) with the bet it rests on.
-    await this.emit("surface.frame.speculation.prepared", {
-      surface_id: args.surfaceId,
-      frame_id: frameId,
-      ordinal,
-      speculative_of: null,
-      concept_id: nextConcept.id,
-      title: bet?.title ?? nextConcept.title,
-      kind: "teach", // look-ahead frames are always the next teach frame (ADR-0055 D6)
-      trigger_assumption: triggerAssumption,
-      mccr_layout: this.buildFrameLayout(archetype, slots),
-      mccr: artifacts.mccr,
-      planner_packet_id: plannerPacketId,
-      producer_cid: artifacts.composerCid,
-      reason: "frame planner pre-composed a discardable look-ahead frame",
-      world_state_nodes: [nextConceptNodeId],
-    });
-    // Record the script + image decision under the speculative frame_id (resolvable at promotion) —
-    // but DO NOT voice: a speculative frame never surfaces until promoted.
-    await this.recordFrameArtifacts({
-      surfaceId: args.surfaceId,
-      frameId,
-      mccr: artifacts.mccr,
-      scriptSegments: artifacts.scriptSegments,
-      imagePlan: artifacts.imagePlan,
-    });
+      const frameId = `cfr-${this.idGenerator.hex(12)}`;
+      const ordinal = this.nextFrameOrdinal();
+      const nextConceptNodeId = `concept:${nextConcept.id}`;
+      const slots = bet?.slots ?? Object.keys(artifacts.mccr);
+
+      // The pre-composed MCCR lands in speculative_frames[] (never frames[]) with the bet it rests on.
+      await this.emit("surface.frame.speculation.prepared", {
+        surface_id: args.surfaceId,
+        frame_id: frameId,
+        ordinal,
+        speculative_of: null,
+        concept_id: nextConcept.id,
+        title: bet?.title ?? nextConcept.title,
+        kind: "teach", // look-ahead frames are always the next teach frame (ADR-0055 D6)
+        trigger_assumption: triggerAssumption,
+        mccr_layout: this.buildFrameLayout(archetype, slots),
+        mccr: artifacts.mccr,
+        planner_packet_id: plannerPacketId,
+        producer_cid: artifacts.composerCid,
+        reason: "frame planner pre-composed a discardable look-ahead frame",
+        world_state_nodes: [nextConceptNodeId],
+      });
+      // Record the script + image decision under the speculative frame_id (resolvable at promotion) —
+      // but DO NOT voice: a speculative frame never surfaces until promoted.
+      await this.recordFrameArtifacts({
+        surfaceId: args.surfaceId,
+        frameId,
+        mccr: artifacts.mccr,
+        scriptSegments: artifacts.scriptSegments,
+        imagePlan: artifacts.imagePlan,
+      });
+    }
   }
 
   /** The concept immediately after the focus in the ask's ordered concept list, or null at the end. */
@@ -2690,6 +2712,27 @@ export class SurfaceSession {
     const index = input.concepts.findIndex((c) => c.id === input.focusConceptId);
     if (index < 0 || index + 1 >= input.concepts.length) return null;
     return input.concepts[index + 1] ?? null;
+  }
+
+  /** Up to `count` concepts after the focus, in path order (ADR-0064 rolling look-ahead). */
+  private conceptsAhead(input: SurfaceAskInput, count: number): ConceptSeed[] {
+    const index = input.concepts.findIndex((c) => c.id === input.focusConceptId);
+    if (index < 0) return [];
+    return input.concepts.slice(index + 1, index + 1 + Math.max(0, count));
+  }
+
+  /**
+   * True when a concept already has a live frame — a composed/promoted frame on the canonical line
+   * or a still-pending speculative frame. Keeps the rolling buffer from recomposing what's warm.
+   */
+  private hasLiveFrameForConcept(conceptId: string): boolean {
+    const state = this.state();
+    if (!state) return false;
+    const live = (f: CognitiveFrame): boolean => f.status !== "invalidated";
+    return (
+      state.frames.some((f) => f.concept_id === conceptId && live(f)) ||
+      state.speculative_frames.some((f) => f.concept_id === conceptId && f.status === "speculative")
+    );
   }
 
   /** Allocate the next sparse, monotone frame ordinal (UCS, ADR-0030 risk #2). */

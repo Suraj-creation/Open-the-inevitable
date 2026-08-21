@@ -202,6 +202,19 @@ export function SurfaceView({
   // The continue ribbon is PERSISTENT here (never auto-hidden) so the learner is never stranded.
   const atStoppingPoint = choreo.atEnd && (state?.frames?.length ?? 0) > 0;
 
+  // ADR-0064 rolling buffer, made visible: the surface pre-builds the next concepts in the
+  // background. Show the learner how many steps are already composed and waiting, and whether the
+  // NEXT step specifically is pre-built (so "Continue" is instant, not a wait). Pure projection over
+  // speculative_frames — the client owns no truth, it just reflects the buffer.
+  const readyAhead = (state?.speculative_frames ?? []).filter(
+    (f) => f.status === "speculative",
+  ).length;
+  const nextIsPrebuilt =
+    !!nextConcept &&
+    (state?.speculative_frames ?? []).some(
+      (f) => f.status === "speculative" && f.concept_id === nextConcept.concept_id,
+    );
+
   // The active frame; when it's a practice frame the learner is invited to ANSWER (graded → real
   // mastery, F14). One answer per frame; the affordance retires once submitted.
   const activeFrame =
@@ -407,15 +420,34 @@ export function SurfaceView({
                 next step (continuity — understanding compounds, it never restarts). */}
             {atStoppingPoint && onAdvance ? (
               <div className="next-step" role="group" aria-label="Continue learning">
-                <span className="next-step-eyebrow">Ready for what's next</span>
+                <span className="next-step-eyebrow">
+                  {nextIsPrebuilt ? (
+                    <>
+                      <span className="next-step-spark" aria-hidden>
+                        ✦
+                      </span>{" "}
+                      Built ahead — continues instantly
+                    </>
+                  ) : (
+                    "Ready for what's next"
+                  )}
+                </span>
                 <button
                   type="button"
-                  className="next-step-btn"
+                  className={`next-step-btn${nextIsPrebuilt ? " is-prebuilt" : ""}`}
                   onClick={() => onAdvance(nextConcept?.concept_id)}
                 >
                   {nextConcept ? `Continue: ${nextConcept.title}` : "Continue"}
                   <span aria-hidden> →</span>
                 </button>
+                {readyAhead > 0 ? (
+                  <span
+                    className="next-step-buffer"
+                    title="The surface is building the next steps ahead of you"
+                  >
+                    {readyAhead} step{readyAhead === 1 ? "" : "s"} ready ahead
+                  </span>
+                ) : null}
               </div>
             ) : null}
           </div>

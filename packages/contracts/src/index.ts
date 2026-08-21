@@ -4,7 +4,7 @@
  * ADR-0003 mandates "contracts first, implementation choices second": every infrastructure
  * dependency sits behind an adapter so NATS/Kafka, Neo4j/Memgraph, Qdrant/pgvector, hosted/local
  * models, etc. are swappable. These are TypeScript interfaces only — implementations live in
- * `services/` and future adapter packages. Spec: next-generation-cognitive-operating-system-blueprint#3.3.
+ * `services/` and future adapter packages. Spec: ../../../spec/architecture/uci-architecture.md
  */
 import type { Result } from "@inevitable/shared";
 import type { CognitiveEvent } from "@inevitable/protocols";
@@ -47,7 +47,10 @@ export interface VectorStore {
     collection: string,
     vector: number[],
     limit: number,
-  ): Promise<Array<{ id: string; score: number }>>;
+    // The stored payload is returned with each hit (ADR-0065) so a consumer can reconstruct the item
+    // WITHOUT session-local state — the basis of durable, cross-session retrieval. Optional/additive:
+    // a store that persists no payload simply omits it.
+  ): Promise<Array<{ id: string; score: number; payload?: Record<string, unknown> }>>;
   delete(collection: string, id: string): Promise<void>;
 }
 

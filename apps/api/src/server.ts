@@ -307,11 +307,11 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
     const token = extractBearer(req);
     if (!token)
       return sendError(res, 401, gatewayError("Authorization: Bearer <api_key> required"));
-    const caller = host.getLearnerByApiKey(token);
+    const caller = await host.getLearnerByApiKey(token);
     if (!caller) return sendError(res, 401, gatewayError("unknown api key"));
     if (caller.learnerId !== learnerId)
       return sendError(res, 403, gatewayError("api key does not belong to this learner"));
-    const learner = host.getLearner(learnerId);
+    const learner = await host.getLearner(learnerId);
     if (!learner) return sendError(res, 404, gatewayError("unknown learner", { learnerId }));
 
     // CSE M6 — the Understanding Map's read path: a projection over the learner's intelligence
@@ -440,7 +440,7 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
 
     // Auth: a valid bearer authenticates a returning learner; no bearer OR an unknown one → anonymous.
     const token = extractBearer(req);
-    const caller = token !== undefined ? host.getLearnerByApiKey(token) : undefined;
+    const caller = token !== undefined ? await host.getLearnerByApiKey(token) : undefined;
     const authenticated = caller !== undefined;
 
     const created = await host.create(goal, {
@@ -462,7 +462,7 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
     // Echo the api_key whenever the caller was NOT an already-authenticated returning learner — i.e.
     // a fresh mint (no bearer) OR a stale/unknown bearer we just healed — so the client can (re)store
     // it. An authenticated learner already holds their key; echoing it every request would be noisy.
-    const freshLearner = authenticated ? undefined : host.getLearner(created.value.learnerId);
+    const freshLearner = authenticated ? undefined : await host.getLearner(created.value.learnerId);
     return sendJson(res, 201, {
       ok: true,
       surface_id: created.value.surfaceId,

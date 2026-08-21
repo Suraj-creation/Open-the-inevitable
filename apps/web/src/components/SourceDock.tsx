@@ -350,21 +350,47 @@ export function SourceDockNarrative({
 }) {
   const { built, degraded, verdict } = describeLayers(source);
   const [pending, setPending] = useState<null | "use" | "teach">(null);
+  // A failed attach/teach used to be swallowed and the dock closed anyway, so an upload that never
+  // reached the surface looked identical to one that did — the learner saw nothing happen and had
+  // no way to retry. Degradation must be visible (CLAUDE.md §3): the dock STAYS OPEN and says why.
+  const [failure, setFailure] = useState<string | null>(null);
+  const [waking, setWaking] = useState(false);
+
+  const message = (cause: unknown, fallback: string) =>
+    cause instanceof Error && cause.message ? cause.message : fallback;
 
   const use = useCallback(async () => {
     setPending("use");
-    await attachSource(surfaceId, source.source_version_id).catch(() => {});
-    onAttached?.(source);
-    onClose();
+    setFailure(null);
+    try {
+      await attachSource(surfaceId, source.source_version_id, () => setWaking(true));
+      onAttached?.(source);
+      onClose();
+    } catch (cause) {
+      setFailure(message(cause, "Could not add this document to the lesson."));
+    } finally {
+      setPending(null);
+      setWaking(false);
+    }
   }, [surfaceId, source, onAttached, onClose]);
 
   const teach = useCallback(async () => {
     setPending("teach");
-    await attachSource(surfaceId, source.source_version_id).catch(() => {});
-    onAttached?.(source);
-    // Rebuild the lesson from the document — the document becomes the timeline (R2c).
-    await teachSource(surfaceId, source.source_version_id).catch(() => {});
-    onClose();
+    setFailure(null);
+    try {
+      await attachSource(surfaceId, source.source_version_id, () => setWaking(true));
+      onAttached?.(source);
+      // Rebuild the lesson from the document — the document becomes the timeline (R2c).
+      // The source IS bound at this point, so a teach failure leaves a usable "Use this document"
+      // state rather than losing the upload entirely.
+      await teachSource(surfaceId, source.source_version_id, () => setWaking(true));
+      onClose();
+    } catch (cause) {
+      setFailure(message(cause, "Could not rebuild the lesson from this document."));
+    } finally {
+      setPending(null);
+      setWaking(false);
+    }
   }, [surfaceId, source, onAttached, onClose]);
 
   return (
@@ -404,9 +430,15 @@ export function SourceDockNarrative({
             </button>
           </div>
           <p className="source-dock-consent-hint">
-            “Use” weaves it into the lesson as it goes. “Teach” rebuilds the lesson from the
-            document.
+            {waking
+              ? "Waking the server — this can take a few seconds on a cold start…"
+              : "“Use” weaves it into the lesson as it goes. “Teach” rebuilds the lesson from the document."}
           </p>
+          {failure ? (
+            <p className="source-dock-failure" role="alert">
+              {failure} Your document is still registered — try again.
+            </p>
+          ) : null}
         </>
       ) : (
         <button type="button" className="commons-attach-btn" onClick={onClose}>

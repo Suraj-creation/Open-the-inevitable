@@ -164,7 +164,7 @@ describe("parseFramePlan", () => {
     expect(plan.lookahead[0]?.trigger_assumption).toContain("inverse");
   });
 
-  test("drops look-ahead bets without a title or trigger, and caps at one (UCS Phase 3)", () => {
+  test("drops look-ahead bets without a title or trigger, and caps the rolling buffer (ADR-0064)", () => {
     const plan = parseFramePlan(
       JSON.stringify({
         frames: [{ title: "F", slots: ["core_concept"] }],
@@ -173,13 +173,16 @@ describe("parseFramePlan", () => {
           { trigger_assumption: "no title" }, // dropped — no title
           { title: "Bet A", trigger_assumption: "learner advances to A" },
           { title: "Bet B", trigger_assumption: "learner advances to B" },
+          { title: "Bet C", trigger_assumption: "learner advances to C" },
+          { title: "Bet D", trigger_assumption: "learner advances to D" }, // beyond the cap
         ],
       }),
       "X",
       5,
     );
-    expect(plan.lookahead).toHaveLength(1);
-    expect(plan.lookahead[0]?.title).toBe("Bet A");
+    // The rolling buffer keeps up to 3 valid bets (ADR-0064), in order, dropping malformed ones.
+    expect(plan.lookahead).toHaveLength(3);
+    expect(plan.lookahead.map((l) => l.title)).toEqual(["Bet A", "Bet B", "Bet C"]);
   });
 
   test("a plan with no lookahead yields an empty bet list", () => {

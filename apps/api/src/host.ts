@@ -28,6 +28,8 @@ import {
   GeminiVoiceRuntime,
   NullImageRuntime,
   NullModelRuntime,
+  PgVectorStore,
+  PostgresLearnerStore,
   RecordingModelRuntime,
   type ImageRuntime,
   type VoiceRuntime,
@@ -39,7 +41,7 @@ import {
   type DemoRestore,
 } from "@inevitable/cli";
 import type { ProductMode } from "@inevitable/product-cognition";
-import type { ModelRuntime } from "@inevitable/contracts";
+import type { ModelRuntime, VectorStore } from "@inevitable/contracts";
 import { createEvent } from "@inevitable/events";
 import type { CognitiveEvent } from "@inevitable/protocols";
 import {
@@ -59,9 +61,9 @@ import {
   type SurfaceAskResult,
   type SurfaceState,
 } from "@inevitable/surface";
-import { geminiApiKey, persistDir, strictModel, supabaseBackendUrl } from "./env";
+import { geminiApiKey, geminiModel, persistDir, strictModel, supabaseBackendUrl } from "./env";
 import { IntelligenceSink } from "./intelligence";
-import { LearnerRegistry, type LearnerRecord } from "./learners";
+import { LearnerRegistry, type DurableLearnerStore, type LearnerRecord } from "./learners";
 import { SourceHub, type RegisteredSource } from "./sources";
 import { SourcePlanePersistence } from "./source-persistence";
 import type { WebFetchFn } from "./crawler";
@@ -206,7 +208,7 @@ export function gatewayError(message: string, details?: Record<string, unknown>)
 async function resolveModel(): Promise<{ inner: ModelRuntime; provider: string }> {
   const apiKey = geminiApiKey();
   if (apiKey) {
-    const connected = await GeminiModelRuntime.connect({ apiKey });
+    const connected = await GeminiModelRuntime.connect({ apiKey, defaultModel: geminiModel() });
     if (connected.ok) return { inner: connected.value, provider: "gemini" };
   }
   if (strictModel()) {
@@ -253,6 +255,10 @@ export class SurfaceHost {
   readonly media: MediaStore;
   /** Durable first-class learners that own surfaces over time (DPS-003). */
   private readonly learners: LearnerRegistry;
+  /** Resolves once the durable learner store has attached (or failed loudly). */
+  private learnersReady: Promise<void> = Promise.resolve();
+  /** Durable retrieval index (ADR-0065); undefined ⇒ per-surface in-memory (ephemeral) default. */
+  private vectors: VectorStore | undefined;
   /** Test seam: inject a deterministic voice runtime instead of resolving Gemini by key. */
   private readonly injectedVoice: VoiceRuntime | undefined;
   /** Image runtime (S2.1b, SRF-006): injected by tests; resolved per-create in production. */
@@ -277,6 +283,8 @@ export class SurfaceHost {
       intelligenceSink?: IntelligenceSink;
       /** Inject the governed web-fetch seam (tests use a fake so the suite stays offline; ADR-0052). */
       webFetch?: WebFetchFn;
+      /** Inject the durable learner store (tests use a fake pool; ADR-0034, migration 0004). */
+      learnerStore?: DurableLearnerStore;
     } = {},
   ) {
     this.persistDir = deps.persistDir ?? persistDir();
@@ -297,16 +305,51 @@ export class SurfaceHost {
     this.media = this.persistDir
       ? new FileMediaStore(join(this.persistDir, "media"))
       : new InMemoryMediaStore();
-    this.learners = new LearnerRegistry(this.persistDir ? { persistDir: this.persistDir } : {});
+    this.learners = new LearnerRegistry({
+      ...(this.persistDir ? { persistDir: this.persistDir } : {}),
+      ...(deps.learnerStore ? { store: deps.learnerStore } : {}),
+    });
+    // Durable learner identity + carried cognition (ADR-0034, migration 0004). Attached
+    // asynchronously so boot never blocks on the database; until it lands the registry serves from
+    // the local tier, exactly as before. Without it, learner memory dies on every redeploy.
+    const dbUrl = supabaseBackendUrl();
+    if (dbUrl && !deps.learnerStore) {
+      this.learnersReady = PostgresLearnerStore.connect({ connectionString: dbUrl })
+        .then((result) => {
+          if (result.ok) this.learners.attach(result.value);
+          else console.error(`[learners] durable store unavailable: ${result.error.message}`);
+        })
+        .catch((cause: unknown) => {
+          console.error(`[learners] durable store connect threw: ${String(cause)}`);
+        });
+      // Fold into `ready` so the first create() never races an unattached store and mints a learner
+      // that only ever existed on the ephemeral tier.
+      this.ready = Promise.all([this.ready, this.learnersReady]).then(() => undefined);
+    }
+    // Durable retrieval index (ADR-0065): a `PgVectorStore` over the `vectors` table so a learner's
+    // semantic memory is retrievable across sessions and redeploys — "retrieval is half of memory".
+    // Attached asynchronously and folded into `ready`; absent ⇒ per-surface in-memory (ephemeral),
+    // the offline default. Embeddings on this path are replay-safe via RecordingModelRuntime.
+    if (dbUrl) {
+      const vectorsReady = PgVectorStore.connect({ connectionString: dbUrl })
+        .then((result) => {
+          if (result.ok) this.vectors = result.value;
+          else console.error(`[vectors] durable store unavailable: ${result.error.message}`);
+        })
+        .catch((cause: unknown) => {
+          console.error(`[vectors] durable store connect threw: ${String(cause)}`);
+        });
+      this.ready = Promise.all([this.ready, vectorsReady]).then(() => undefined);
+    }
   }
 
   /** A learner profile + the surfaces they own (resume-by-learner, DPS-003). */
-  getLearner(learnerId: string): LearnerRecord | undefined {
+  async getLearner(learnerId: string): Promise<LearnerRecord | undefined> {
     return this.learners.get(learnerId);
   }
 
   /** Resolve a learner by API key (bearer credential). Returns undefined for unknown keys. */
-  getLearnerByApiKey(apiKey: string): LearnerRecord | undefined {
+  async getLearnerByApiKey(apiKey: string): Promise<LearnerRecord | undefined> {
     return this.learners.getByApiKey(apiKey);
   }
 
@@ -367,13 +410,13 @@ export class SurfaceHost {
     const mediaGen = createMediaGenerator(imageRuntime, this.media);
     const seed = options.seed ?? `gw-${++this.counter}`;
     // Resolve (or mint) the durable learner that will own this surface (DPS-003).
-    const learner = this.learners.resolveOrCreate({
+    const learner = await this.learners.resolveOrCreate({
       ...(options.learnerId !== undefined ? { learnerId: options.learnerId } : {}),
       ...(options.trustLevel !== undefined ? { trustLevel: options.trustLevel } : {}),
     });
     // A returning learner's NEW surface draws on their prior cross-surface cognition (DPS-004): load
     // the durable profile and seed it (silently) into the fresh substrate. Empty for a fresh learner.
-    const learnerSeed = this.learners.readCognition(learner.learnerId);
+    const learnerSeed = await this.learners.readCognition(learner.learnerId);
     // CSE M5: the session's source-evidence seam closes over this surface's (late-bound) source
     // bindings — attached after creation, read at frame-composition time.
     const sourceBindings: string[] = [];
@@ -404,9 +447,10 @@ export class SurfaceHost {
       // UCS (ADR-0030; Phase 2): decompose each concept into a progressive sequence of Cognitive
       // Frames (and render practice/assessment as frames), instead of a single composed frame.
       framePlanner: true,
-      // UCS (ADR-0030; Phase 3): a base look-ahead budget of 1 — after clean mastery the surface
-      // pre-composes the likely next frame (recorded, never surfaced until promoted). Live-governable.
-      lookaheadBudget: 1,
+      // Look-ahead budget: a rolling buffer of 3 next concepts pre-composed in the background
+      // (ADR-0064, ADR-0063 Phase D) so advancing is instant and the lesson builds continuously
+      // ahead of the learner. Recorded, never surfaced until promoted. Live-governable.
+      lookaheadBudget: 3,
       // UCS (ADR-0030; Phase 4): the Image Agent owns the image-as-cognition decision (prompt +
       // caption + callout labels), replacing the composer's inline image_plan on the frame path.
       imagePlanner: true,
@@ -448,6 +492,7 @@ export class SurfaceHost {
       ...(provider === "gemini"
         ? { evaluationModel: inner, embedFn: (t: string) => inner.embed(t) }
         : {}),
+      ...(this.vectors ? { vectors: this.vectors } : {}),
     });
 
     // Durable sink: one subscription. The surface id (the log's home) is only known after start(),
@@ -481,7 +526,7 @@ export class SurfaceHost {
       buffer.length = 0;
       this.persistSnapshots(surfaceId, fixture); // world + memory snapshots for live rehydration
     }
-    this.learners.recordSurface(learner.learnerId, { surfaceId, goal });
+    await this.learners.recordSurface(learner.learnerId, { surfaceId, goal });
 
     const hosted: HostedSurface = {
       surfaceId,
@@ -573,14 +618,14 @@ export class SurfaceHost {
         this.serialize(hosted, async () => {
           const result = await this.runAsk(hosted, goal);
           this.persistSnapshots(hosted.surfaceId, fixture);
-          this.captureCognition(hosted);
+          await this.captureCognition(hosted);
           return result;
         }),
       advance: (conceptId) =>
         this.serialize(hosted, async () => {
           const result = await this.runAdvance(hosted, conceptId);
           this.persistSnapshots(hosted.surfaceId, fixture);
-          this.captureCognition(hosted);
+          await this.captureCognition(hosted);
           return result;
         }),
       expand: (blockId, layer) =>
@@ -594,7 +639,7 @@ export class SurfaceHost {
         this.persistSnapshots(hosted.surfaceId, fixture);
         // M3.5 D1 wiring (ADR-0035): fold the closed session's chronicle into the Intelligence
         // Plane — store first, then emit `intelligence.distilled`. Best-effort: never fails close.
-        const learner = hosted.learnerId ? this.learners.get(hosted.learnerId) : undefined;
+        const learner = hosted.learnerId ? await this.learners.get(hosted.learnerId) : undefined;
         await this.intelligence.distillAndStore(
           [...fixture.bus.log],
           {
@@ -611,7 +656,8 @@ export class SurfaceHost {
           const result = await fixture.surface.interact(input);
           this.persistSnapshots(hosted.surfaceId, fixture);
           // A reshaping interaction re-runs the governed cycle, so capture cross-surface cognition.
-          if (result.ok && result.value.effect === "dispatched") this.captureCognition(hosted);
+          if (result.ok && result.value.effect === "dispatched")
+            await this.captureCognition(hosted);
           return result;
         }),
       answer: (conceptId, text) =>
@@ -619,7 +665,7 @@ export class SurfaceHost {
           const result = await fixture.surface.submitAnswer({ conceptId, answer: text });
           this.persistSnapshots(hosted.surfaceId, fixture);
           // A graded answer records mastery evidence — capture cross-surface cognition.
-          if (result.ok) this.captureCognition(hosted);
+          if (result.ok) await this.captureCognition(hosted);
           return result;
         }),
       // CSE M5: bind a registered source environment — the attach event lands on the surface's
@@ -703,7 +749,7 @@ export class SurfaceHost {
         if (hosted.sourceBindings.length === 0) {
           return err(gatewayError("no sources bound to this surface to fuse"));
         }
-        const learner = hosted.learnerId ? this.learners.get(hosted.learnerId) : undefined;
+        const learner = hosted.learnerId ? await this.learners.get(hosted.learnerId) : undefined;
         const result = await this.sources.fuse(
           hosted.sourceBindings,
           conceptRefs,
@@ -725,7 +771,7 @@ export class SurfaceHost {
       },
       // CSE M11 T1: open a learner creation (their artifact) — the system only ever attaches assists.
       startCreation: async (input) => {
-        const learner = hosted.learnerId ? this.learners.get(hosted.learnerId) : undefined;
+        const learner = hosted.learnerId ? await this.learners.get(hosted.learnerId) : undefined;
         const creation = await this.sources.startCreation({
           ...input,
           learnerCid: learner?.cid ?? hosted.learnerId ?? null,
@@ -837,14 +883,14 @@ export class SurfaceHost {
    * into the owning learner's cross-surface cognition profile (DPS-004), which seeds their future
    * surfaces. In-memory always; persisted when `COS_PERSIST_DIR` is set. Idempotent.
    */
-  private captureCognition(hosted: HostedSurface): void {
+  private async captureCognition(hosted: HostedSurface): Promise<void> {
     if (!hosted.learnerId) return; // legacy surface with no durable learner to attribute cognition to
     const seed = extractLearnerCognition(
       hosted.fixture.world,
       hosted.fixture.memory,
       hosted.learnerId,
     );
-    this.learners.mergeCognition(hosted.learnerId, seed);
+    await this.learners.mergeCognition(hosted.learnerId, seed);
   }
 
   /** Persist the world + memory snapshots for live rehydration (DPS-002). No-op without persistence. */
@@ -891,7 +937,7 @@ export class SurfaceHost {
     // surface names a learner we cannot load, fall back to read-side rather than rehydrate wrongly.
     let learner: { userId: string; cid: string; trustLevel: number } | undefined;
     if (learnerId !== undefined) {
-      const record = this.learners.get(learnerId);
+      const record = await this.learners.get(learnerId);
       if (!record) return undefined;
       learner = { userId: record.learnerId, cid: record.cid, trustLevel: record.trustLevel };
     }
@@ -932,8 +978,8 @@ export class SurfaceHost {
       // UCS (ADR-0030; Phase 2): decompose each concept into a progressive sequence of Cognitive
       // Frames (and render practice/assessment as frames), instead of a single composed frame.
       framePlanner: true,
-      // UCS (ADR-0030; Phase 3): base look-ahead budget of 1 (governed; matches create()).
-      lookaheadBudget: 1,
+      // Rolling look-ahead buffer of 3 (ADR-0064; matches create()).
+      lookaheadBudget: 3,
       // UCS (ADR-0030; Phase 4): the Image Agent owns image-as-cognition (matches create()).
       imagePlanner: true,
       // R4-model (CSE-018, ADR-0058): the RIA (matches create()).
@@ -951,6 +997,7 @@ export class SurfaceHost {
       ...(provider === "gemini"
         ? { evaluationModel: inner, embedFn: (t: string) => inner.embed(t) }
         : {}),
+      ...(this.vectors ? { vectors: this.vectors } : {}),
     });
     const resumed = fixture.surface.resume(surfaceId);
     if (!resumed.ok) return undefined;

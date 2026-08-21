@@ -32,6 +32,16 @@ export function geminiApiKey(): string | undefined {
 }
 
 /**
+ * Optional override for the Gemini text model id (e.g. `gemini-flash-latest`, `gemini-pro-latest`).
+ * Absent ⇒ the adapter's default. Lets ops swap models when Google retires a pinned id WITHOUT a code
+ * change (a pinned id returning 404 otherwise degrades every call to stub cognition, silently).
+ */
+export function geminiModel(): string | undefined {
+  const model = process.env["GEMINI_MODEL"];
+  return model && model.trim() ? model.trim() : undefined;
+}
+
+/**
  * True when the gateway must reject startup if no real model is available.
  * Set `COS_STRICT_MODEL=1` (or run with `NODE_ENV=production`) to enable.
  * Prevents NullModelRuntime from silently masquerading as cognition in deployed environments.

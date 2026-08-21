@@ -2,7 +2,8 @@
  * Hybrid Logical Clock — causal ordering across distributed nodes whose wall clocks diverge.
  *
  * Spec: spec/protocols/cognition-packet-protocol.md, spec/protocols/cognitive-event-protocol.md,
- *       advanced-agent-architecture#2.3. Physical time comes from an injected {@link Clock}.
+ *       ../../../spec/architecture/uci-architecture.md#213-supporting-primitives.
+ *       Physical time comes from an injected {@link Clock}.
  */
 import type { Clock } from "./clock";
 

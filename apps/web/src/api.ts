@@ -48,6 +48,54 @@ function clearCredential(): void {
   }
 }
 
+/**
+ * Why a response failed, in words a human can act on.
+ *
+ * The dev proxy answers with an empty-bodied 5xx when the gateway is not running, so calling
+ * `res.json()` first produced "Unexpected end of JSON input" — a parser complaint that says nothing
+ * about the actual problem. Diagnose from the status and body instead.
+ */
+async function describeFailure(res: Response, what: string): Promise<string> {
+  const body = await res.text().catch(() => "");
+  const trimmed = body.trim();
+  // 502/503/504, or any 5xx with no body at all, means nothing answered behind the proxy.
+  if (
+    res.status === 502 ||
+    res.status === 503 ||
+    res.status === 504 ||
+    (!trimmed && res.status >= 500)
+  ) {
+    return "Cannot reach the gateway. Start it with `pnpm dev:gateway` (it listens on :8787), then try again.";
+  }
+  // The gateway's own envelope is `{ ok:false, error:{ code, message, details } }` — surface the
+  // message it wrote, not the raw JSON.
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as { error?: { message?: unknown } };
+      const message = parsed.error?.message;
+      if (typeof message === "string" && message.trim()) return message.trim();
+    } catch {
+      /* not the envelope — fall through to the raw body */
+    }
+  }
+  if (trimmed) return trimmed.slice(0, 300);
+  return `${what} failed (${res.status})`;
+}
+
+/**
+ * Read `{ ok, <field> }` from a gateway response, tolerantly: a failed request, a non-JSON body, or
+ * `ok:false` all resolve to null rather than throwing a parser error at the caller. Used by the
+ * read paths whose callers already treat null as "not available".
+ */
+async function readField<T>(res: Response, field: string): Promise<T | null> {
+  if (!res.ok) return null;
+  const json = (await res.json().catch(() => null)) as
+    | ({ ok: boolean } & Record<string, unknown>)
+    | null;
+  if (!json || json.ok !== true) return null;
+  return (json[field] as T | undefined) ?? null;
+}
+
 /** One POST to enter a surface, optionally authenticating as a returning learner. */
 function postSurface(
   goal: string,
@@ -121,13 +169,18 @@ export async function enterSurface(
     clearCredential();
     res = await postSurface(goal, mode, null, onWaking);
   }
-  const json = (await res.json()) as {
+  // Status first: a dead gateway answers with an empty-bodied 5xx through the dev proxy, and
+  // parsing that produced "Unexpected end of JSON input" instead of saying the server was down.
+  if (!res.ok) throw new Error(await describeFailure(res, "entering the surface"));
+  const json = (await res.json().catch(() => null)) as {
     ok: boolean;
     surface_id?: string;
     learner_id?: string;
     api_key?: string;
-  };
-  if (!json.ok || !json.surface_id) throw new Error("gateway: failed to enter surface");
+  } | null;
+  if (!json || !json.ok || !json.surface_id) {
+    throw new Error("gateway: failed to enter surface");
+  }
   if (json.learner_id && json.api_key) {
     writeCredential({ learnerId: json.learner_id, apiKey: json.api_key });
   }
@@ -223,8 +276,7 @@ export async function fetchTrace(
   blockId: string,
 ): Promise<BlockTraceView | null> {
   const res = await fetch(`${BASE}/surface/${surfaceId}/trace/${blockId}`);
-  const json = (await res.json()) as { ok: boolean; trace?: BlockTraceView };
-  return json.ok && json.trace ? json.trace : null;
+  return readField<BlockTraceView>(res, "trace");
 }
 
 /** A cross-source contradiction between two claims (CSE M9 T2 Claim Graph, CSE-006 §3.1). */
@@ -294,8 +346,7 @@ export async function fuseSources(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ concept_refs: conceptRefs }),
   });
-  const json = (await res.json()) as { ok: boolean; fusion?: FusionView };
-  return json.ok && json.fusion ? json.fusion : null;
+  return readField<FusionView>(res, "fusion");
 }
 
 /** One typed frontier link from a concept to the living edge, grounded in real citations (M9). */
@@ -326,8 +377,7 @@ export async function researchFrontier(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ concept_ref: conceptRef }),
   });
-  const json = (await res.json()) as { ok: boolean; frontier?: FrontierView };
-  return json.ok && json.frontier ? json.frontier : null;
+  return readField<FrontierView>(res, "frontier");
 }
 
 /** One point on a concept's timeline, grounded in real citations (CSE M9 TKM T1). */
@@ -360,8 +410,7 @@ export async function researchTimeline(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ concept_ref: conceptRef }),
   });
-  const json = (await res.json()) as { ok: boolean; timeline?: TimelineView };
-  return json.ok && json.timeline ? json.timeline : null;
+  return readField<TimelineView>(res, "timeline");
 }
 
 // ── Creative Cognition (CSE M11 T1, CSE-016) ─────────────────────────────────────────────────────
@@ -429,8 +478,7 @@ export async function startCreation(
       ...(input.draft !== undefined ? { draft: input.draft } : {}),
     }),
   });
-  const json = (await res.json()) as { ok: boolean; creation?: CreationView };
-  return json.ok && json.creation ? json.creation : null;
+  return readField<CreationView>(res, "creation");
 }
 
 /** Ask for a disclosed assist over the creation (scaffold|critique|provocation|reference). */
@@ -445,8 +493,7 @@ export async function assistCreation(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode, ...(draft !== undefined ? { draft } : {}) }),
   });
-  const json = (await res.json()) as { ok: boolean; creation?: CreationView };
-  return json.ok && json.creation ? json.creation : null;
+  return readField<CreationView>(res, "creation");
 }
 
 /** Complete a creation with the learner's final draft. */
@@ -460,8 +507,7 @@ export async function completeCreation(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(draft !== undefined ? { draft } : {}),
   });
-  const json = (await res.json()) as { ok: boolean; creation?: CreationView };
-  return json.ok && json.creation ? json.creation : null;
+  return readField<CreationView>(res, "creation");
 }
 
 /**
@@ -479,8 +525,7 @@ export async function contributeCreation(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ consent }),
   });
-  const json = (await res.json()) as { ok: boolean; creation?: CreationView };
-  return json.ok && json.creation ? json.creation : null;
+  return readField<CreationView>(res, "creation");
 }
 
 /** Revoke a contribution's consent + cascade a redaction (ADR-0054 — the right to un-share). The
@@ -495,8 +540,7 @@ export async function revokeCreation(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
   });
-  const json = (await res.json()) as { ok: boolean; creation?: CreationView };
-  return json.ok && json.creation ? json.creation : null;
+  return readField<CreationView>(res, "creation");
 }
 
 // ── Source Cognition — deep-transparency read of the source plane (CSE M12 T1, ADR-0050) ──────────
@@ -557,8 +601,7 @@ export interface SourceCognitionView {
 /** Fetch the source plane's deep-transparency read (host-level; the substrate is shared). */
 export async function fetchSourceCognition(recent = 40): Promise<SourceCognitionView | null> {
   const res = await fetch(`${BASE}/sources/cognition?recent=${recent}`);
-  const json = (await res.json()) as { ok: boolean; cognition?: SourceCognitionView };
-  return json.ok && json.cognition ? json.cognition : null;
+  return readField<SourceCognitionView>(res, "cognition");
 }
 
 // ── The knowledge commons — discovery of contributed creations (ADR-0053) ────────────────────────
@@ -578,19 +621,39 @@ export interface CommonsEntryView {
 /** Browse the knowledge commons — what peers have made and shared, for you to build on. */
 export async function fetchCommons(): Promise<readonly CommonsEntryView[]> {
   const res = await fetch(`${BASE}/sources/commons`);
-  const json = (await res.json()) as { ok: boolean; commons?: readonly CommonsEntryView[] };
-  return json.ok && json.commons ? json.commons : [];
+  return readField<readonly CommonsEntryView[]>(res, "commons").then((v) => v ?? []);
 }
 
-/** Bind a source (e.g. a commons entry) to the current surface so you can teach/fuse from it. */
-export async function attachSource(surfaceId: string, sourceVersionId: string): Promise<boolean> {
-  const res = await fetch(`${BASE}/surface/${surfaceId}/sources`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ source_version_id: sourceVersionId }),
-  });
-  const json = (await res.json()) as { ok: boolean };
-  return json.ok === true;
+/**
+ * Bind a source (e.g. a commons entry) to the current surface so you can teach/fuse from it.
+ *
+ * Throws the gateway's own message on refusal. A non-JSON error body (a cold-start 502 HTML page,
+ * a plain-text 401) previously made `res.json()` throw *before* the status was ever inspected, so
+ * the real failure was lost — the caller saw an opaque parse error, or swallowed it entirely and
+ * showed the learner nothing. Status is checked first, and the wake-aware fetch is used because a
+ * spun-down gateway rejects at the network layer.
+ */
+export async function attachSource(
+  surfaceId: string,
+  sourceVersionId: string,
+  onWaking?: () => void,
+): Promise<boolean> {
+  const res = await wakingFetch(
+    `${BASE}/surface/${surfaceId}/sources`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_version_id: sourceVersionId }),
+    },
+    { onWaking },
+  );
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(detail || `gateway could not attach this source (${res.status})`);
+  }
+  const json = (await res.json().catch(() => ({ ok: false }))) as { ok: boolean };
+  if (json.ok !== true) throw new Error("gateway: source could not be bound to this surface");
+  return true;
 }
 
 /**
@@ -599,18 +662,27 @@ export async function attachSource(surfaceId: string, sourceVersionId: string): 
  * omitted, the gateway teaches the surface's primary source. Returns true when a timeline was built
  * (frames stream in over the surface); throws the gateway's message on refusal (no usable structure).
  */
-export async function teachSource(surfaceId: string, sourceVersionId?: string): Promise<boolean> {
-  const res = await fetch(`${BASE}/surface/${surfaceId}/teach-source`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(sourceVersionId ? { source_version_id: sourceVersionId } : {}),
-  });
+export async function teachSource(
+  surfaceId: string,
+  sourceVersionId?: string,
+  onWaking?: () => void,
+): Promise<boolean> {
+  const res = await wakingFetch(
+    `${BASE}/surface/${surfaceId}/teach-source`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(sourceVersionId ? { source_version_id: sourceVersionId } : {}),
+    },
+    { onWaking },
+  );
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(detail || `gateway could not teach from this source (${res.status})`);
   }
-  const json = (await res.json()) as { ok: boolean };
-  return json.ok === true;
+  const json = (await res.json().catch(() => ({ ok: false }))) as { ok: boolean };
+  if (json.ok !== true) throw new Error("gateway: no timeline could be built from this source");
+  return true;
 }
 
 // ── Source acquisition — the Source Dock's ingest path (CSE-017, ADR-0056) ───────────────────────

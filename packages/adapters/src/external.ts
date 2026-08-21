@@ -103,6 +103,7 @@ interface QdrantPoint {
 interface QdrantHit {
   id: string | number;
   score: number;
+  payload?: Record<string, unknown>;
 }
 interface QdrantClientLike {
   upsert(collection: string, args: { wait?: boolean; points: QdrantPoint[] }): Promise<unknown>;
@@ -135,9 +136,13 @@ export class QdrantVectorStore implements VectorStore {
     collection: string,
     vector: number[],
     limit: number,
-  ): Promise<Array<{ id: string; score: number }>> {
+  ): Promise<Array<{ id: string; score: number; payload?: Record<string, unknown> }>> {
     const hits = await this.client.search(collection, { vector, limit });
-    return hits.map((hit) => ({ id: String(hit.id), score: hit.score }));
+    return hits.map((hit) => ({
+      id: String(hit.id),
+      score: hit.score,
+      ...(hit.payload ? { payload: hit.payload } : {}),
+    }));
   }
 
   async delete(collection: string, id: string): Promise<void> {

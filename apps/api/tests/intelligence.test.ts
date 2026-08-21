@@ -28,7 +28,7 @@ describe("session-close distillation (ADR-0035 D1 wiring)", () => {
     expect(closed.ok).toBe(true);
 
     // The plane holds this learner's artifacts (in-memory sink; Postgres when configured).
-    const learner = host.getLearner(created.value.learnerId);
+    const learner = await host.getLearner(created.value.learnerId);
     expect(learner).toBeDefined();
     const artifacts = host.intelligence.artifactsFor(learner!.cid);
     expect(artifacts.length).toBeGreaterThanOrEqual(1);

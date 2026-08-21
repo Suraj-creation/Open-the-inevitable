@@ -647,7 +647,173 @@
 }
 
 /* ── Responsive ── */
+/* Cinematic chapters */
+.cinematic-chapter {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(18rem, 0.7fr);
+  align-items: center;
+  gap: clamp(var(--s-6), 8vw, var(--s-9));
+  min-height: min(42rem, 78vh);
+  padding: clamp(var(--s-6), 8vw, var(--s-9)) 0;
+}
+.cinematic-chapter-copy {
+  position: relative;
+  z-index: 1;
+}
+.cinematic-chapter-copy > .site-h2 {
+  margin-top: 0;
+}
+.instrument-visual {
+  position: relative;
+  min-height: clamp(17rem, 38vw, 28rem);
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--state-tint, var(--accent)) 25%, var(--hairline));
+  border-radius: var(--r-lg);
+  background:
+    radial-gradient(
+      circle at 50% 50%,
+      color-mix(in oklab, var(--state-tint, var(--accent)) 15%, transparent),
+      transparent 62%
+    ),
+    color-mix(in oklab, var(--void) 88%, var(--state-tint, var(--accent)));
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--ink) 10%, transparent),
+    var(--shadow-e3);
+}
+.instrument-visual::before,
+.instrument-visual::after {
+  content: "";
+  position: absolute;
+  inset: 12%;
+  border: 1px solid color-mix(in oklab, var(--state-tint, var(--accent)) 36%, transparent);
+  border-radius: 50%;
+  opacity: 0.65;
+}
+.instrument-visual::after {
+  inset: 26%;
+  animation: instrument-breathe 7s var(--ease-soft) infinite;
+}
+.instrument-visual-field {
+  position: absolute;
+  inset: 0;
+}
+.instrument-mark {
+  position: absolute;
+  width: 0.55rem;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--state-tint, var(--accent)) 78%, white);
+  box-shadow: 0 0 1.6rem color-mix(in oklab, var(--state-tint, var(--accent)) 68%, transparent);
+  animation: instrument-drift 9s var(--ease-soft) infinite alternate;
+}
+.instrument-mark:nth-child(1) {
+  left: 18%;
+  top: 62%;
+}
+.instrument-mark:nth-child(2) {
+  left: 34%;
+  top: 31%;
+  animation-delay: -2s;
+}
+.instrument-mark:nth-child(3) {
+  left: 52%;
+  top: 50%;
+  animation-delay: -5s;
+}
+.instrument-mark:nth-child(4) {
+  left: 69%;
+  top: 24%;
+  animation-delay: -1s;
+}
+.instrument-mark:nth-child(5) {
+  left: 78%;
+  top: 67%;
+  animation-delay: -4s;
+}
+.instrument-mark:nth-child(6) {
+  left: 38%;
+  top: 76%;
+  animation-delay: -6s;
+}
+.instrument-mark:nth-child(7) {
+  left: 57%;
+  top: 16%;
+  animation-delay: -3s;
+}
+.instrument-mark:nth-child(8) {
+  left: 14%;
+  top: 26%;
+  animation-delay: -7s;
+}
+.instrument-mark:nth-child(9) {
+  left: 83%;
+  top: 43%;
+  animation-delay: -8s;
+}
+.instrument-mark:nth-child(10) {
+  left: 48%;
+  top: 88%;
+  animation-delay: -2.5s;
+}
+.instrument-visual[data-visual="ascent"]::before {
+  border-radius: 48% 48% 8% 8%;
+  transform: perspective(40rem) rotateX(58deg);
+}
+.instrument-visual[data-visual="constitution"]::before {
+  border-radius: var(--r-sm);
+  transform: rotate(45deg) scale(0.7);
+}
+.instrument-visual[data-visual="surface"]::before {
+  inset: 18%;
+  border-radius: var(--r-md);
+  box-shadow: 0 0 0 1.8rem color-mix(in oklab, var(--state-tint, var(--accent)) 9%, transparent);
+}
+.instrument-visual[data-visual="sources"]::before {
+  inset: 18% 22%;
+  border-radius: var(--r-sm);
+  transform: rotate(-8deg);
+}
+.instrument-visual[data-visual="topology"]::before {
+  border-radius: 0;
+  clip-path: polygon(0 49%, 100% 49%, 100% 51%, 0 51%);
+  background: color-mix(in oklab, var(--state-tint, var(--accent)) 45%, transparent);
+}
+.instrument-visual[data-visual="frontier"]::before {
+  inset: 9%;
+  border-style: dashed;
+}
+.instrument-visual[data-visual="timeline"]::before {
+  inset: 49% 8%;
+  border-radius: 0;
+  border-width: 0 0 1px;
+}
+.instrument-visual[data-visual="settle"]::before {
+  inset: 33%;
+  opacity: 0.32;
+}
+@keyframes instrument-breathe {
+  50% {
+    transform: scale(1.08);
+    opacity: 0.35;
+  }
+}
+@keyframes instrument-drift {
+  to {
+    transform: translate3d(0.4rem, -0.55rem, 0) scale(1.15);
+  }
+}
+
 @media (max-width: 860px) {
+  .cinematic-chapter {
+    grid-template-columns: 1fr;
+    min-height: auto;
+    gap: var(--s-5);
+  }
+  .instrument-visual {
+    min-height: min(64vw, 23rem);
+  }
   .site-nav-links {
     position: fixed;
     top: 3.4rem;
@@ -700,5 +866,12 @@
   }
   .site-law {
     grid-template-columns: 2.2rem 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .instrument-visual::after,
+  .instrument-mark {
+    animation: none;
   }
 }
