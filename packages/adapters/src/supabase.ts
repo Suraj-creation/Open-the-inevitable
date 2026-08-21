@@ -608,6 +608,100 @@ export class PostgresLearnerStore {
   }
 }
 
+// ── Postgres Adaptive Policy store (spec 11 / ADR-0066; migration 0005) ──────────────────────────
+
+/** SQL surface for the durable Adaptive Policy (exported so hermetic fakes switch on exact statements). */
+export const POLICY_SQL = {
+  upsert:
+    "INSERT INTO cognitive_policies (tenant_id, ref, agent_id, learner_cid, constitution_id, version, strategy_weights, derived_from_proposal, parent_version, updated_at) " +
+    "VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, now()) " +
+    "ON CONFLICT (tenant_id, ref) DO UPDATE SET " +
+    "version = EXCLUDED.version, strategy_weights = EXCLUDED.strategy_weights, " +
+    "derived_from_proposal = EXCLUDED.derived_from_proposal, parent_version = EXCLUDED.parent_version, updated_at = now()",
+  byRef:
+    "SELECT ref, agent_id, learner_cid, constitution_id, version, strategy_weights, derived_from_proposal, parent_version " +
+    "FROM cognitive_policies WHERE tenant_id = $1 AND ref = $2",
+} as const;
+
+/**
+ * A durable Adaptive Policy row — the wire shape of the versioned Cognitive Object. Kept structural
+ * (not the cognitive-loop `AdaptivePolicy` type) so this low-level adapter never depends on a higher
+ * package; the gateway maps the two (they are field-identical).
+ */
+export interface PolicyRow {
+  readonly ref: string;
+  readonly agent_id: string;
+  readonly learner_cid: string;
+  readonly constitution_id: string;
+  readonly version: number;
+  readonly strategy_weights: Record<string, number>;
+  readonly derived_from_proposal: string | null;
+  readonly parent_version: number | null;
+}
+
+/**
+ * Durable per-learner Adaptive Policy over Postgres (migration 0005). This is what makes the harness
+ * learning loop's per-learner teaching-strategy adaptation survive a restart (the L1.5 gate): one
+ * latest-version row per (agent, learner), upserted by its stable `ref`.
+ */
+export class PostgresPolicyStore {
+  private constructor(
+    private readonly pool: PgPoolLike,
+    private readonly tenantId: string,
+  ) {}
+
+  static async connect(config: {
+    connectionString: string;
+    tenantId?: string;
+  }): Promise<Result<PostgresPolicyStore, CosError>> {
+    const pool = await connectPool(config.connectionString);
+    if (!pool.ok) return pool;
+    return ok(new PostgresPolicyStore(pool.value, config.tenantId ?? "default"));
+  }
+
+  /** Test seam: injected (fake) pool — no driver, no network. */
+  static fromPool(pool: PgPoolLike, tenantId = "default"): PostgresPolicyStore {
+    return new PostgresPolicyStore(pool, tenantId);
+  }
+
+  async save(policy: PolicyRow): Promise<void> {
+    await this.pool.query(POLICY_SQL.upsert, [
+      this.tenantId,
+      policy.ref,
+      policy.agent_id,
+      policy.learner_cid,
+      policy.constitution_id,
+      policy.version,
+      JSON.stringify(policy.strategy_weights),
+      policy.derived_from_proposal,
+      policy.parent_version,
+    ]);
+  }
+
+  async load(ref: string): Promise<PolicyRow | null> {
+    const res = await this.pool.query(POLICY_SQL.byRef, [this.tenantId, ref]);
+    const raw = res.rows[0];
+    if (!raw) return null;
+    const row = raw as Record<string, unknown>;
+    const parent = row["parent_version"];
+    const derived = row["derived_from_proposal"];
+    return {
+      ref: String(row["ref"]),
+      agent_id: String(row["agent_id"]),
+      learner_cid: String(row["learner_cid"]),
+      constitution_id: String(row["constitution_id"]),
+      version: Number(row["version"]),
+      strategy_weights: asJson<Record<string, number>>(row["strategy_weights"], {}),
+      derived_from_proposal: derived === null || derived === undefined ? null : String(derived),
+      parent_version: parent === null || parent === undefined ? null : Number(parent),
+    };
+  }
+
+  async close(): Promise<void> {
+    await this.pool.end?.();
+  }
+}
+
 // ── Supabase Storage object store ──────────────────────────────────────────────────────────────
 
 export interface StoredObject {

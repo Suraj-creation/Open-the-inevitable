@@ -30,8 +30,10 @@ import {
   NullModelRuntime,
   PgVectorStore,
   PostgresLearnerStore,
+  PostgresPolicyStore,
   RecordingModelRuntime,
   type ImageRuntime,
+  type PolicyRow,
   type VoiceRuntime,
 } from "@inevitable/adapters";
 import {
@@ -73,6 +75,9 @@ import {
   HOOKS,
   HookBus,
   InMemoryPolicyStore,
+  policyRef,
+  type AdaptivePolicy,
+  type CognitiveObjectRef,
   type ExplanationStrategy,
 } from "@inevitable/cognitive-loop";
 import { geminiApiKey, geminiModel, persistDir, strictModel, supabaseBackendUrl } from "./env";
@@ -292,6 +297,10 @@ export class SurfaceHost {
    */
   private readonly harnessPolicies = new InMemoryPolicyStore();
   private readonly harnessLastStrategy = new Map<string, ExplanationStrategy>();
+  /** Durable per-learner Adaptive Policy (L1.5, migration 0005); undefined ⇒ in-memory only. */
+  private harnessPolicyStore: PostgresPolicyStore | undefined;
+  /** Learner refs already hydrated from the durable policy store this process (load-on-miss guard). */
+  private readonly hydratedPolicies = new Set<string>();
   private readonly persistDir: string | undefined;
   /** Out-of-band audio for narration; the media route serves bytes from here (ADR-0007/0008). */
   readonly media: MediaStore;
@@ -382,6 +391,70 @@ export class SurfaceHost {
           console.error(`[vectors] durable store connect threw: ${String(cause)}`);
         });
       this.ready = Promise.all([this.ready, vectorsReady]).then(() => undefined);
+    }
+    // Durable per-learner Adaptive Policy (spec 11 / ADR-0066, migration 0005): the harness learning
+    // loop's teaching-strategy adaptation survives a redeploy. Attached async + folded into `ready`;
+    // absent ⇒ host-level in-memory (accumulates within the process only).
+    if (dbUrl) {
+      const policyReady = PostgresPolicyStore.connect({ connectionString: dbUrl })
+        .then((result) => {
+          if (result.ok) this.harnessPolicyStore = result.value;
+          else console.error(`[policies] durable store unavailable: ${result.error.message}`);
+        })
+        .catch((cause: unknown) => {
+          console.error(`[policies] durable store connect threw: ${String(cause)}`);
+        });
+      this.ready = Promise.all([this.ready, policyReady]).then(() => undefined);
+    }
+  }
+
+  /** Map the durable wire row to the cognitive-loop Adaptive Policy object (field-identical). */
+  private static adaptiveFromRow(row: PolicyRow): AdaptivePolicy {
+    return {
+      ref: row.ref as CognitiveObjectRef,
+      version: row.version,
+      agent_id: row.agent_id,
+      learner_cid: row.learner_cid,
+      constitution_id: row.constitution_id,
+      strategy_weights: row.strategy_weights as Record<ExplanationStrategy, number>,
+      derived_from_proposal: row.derived_from_proposal,
+      parent_version: row.parent_version,
+    };
+  }
+
+  /** Map the Adaptive Policy object to the durable wire row. */
+  private static rowFromAdaptive(policy: AdaptivePolicy): PolicyRow {
+    return {
+      ref: policy.ref,
+      agent_id: policy.agent_id,
+      learner_cid: policy.learner_cid,
+      constitution_id: policy.constitution_id,
+      version: policy.version,
+      strategy_weights: { ...policy.strategy_weights },
+      derived_from_proposal: policy.derived_from_proposal,
+      parent_version: policy.parent_version,
+    };
+  }
+
+  /**
+   * Load a learner's durable Adaptive Policy into the in-memory store on first use (write-through
+   * cache): so a returning learner resumes their adapted teaching strategy across restarts. No-op when
+   * the durable store is absent, already hydrated, or already present in memory.
+   */
+  private async hydratePolicy(learnerCid: string): Promise<void> {
+    const store = this.harnessPolicyStore;
+    if (!store) return;
+    const ref = policyRef("agent.explanation", learnerCid);
+    if (this.hydratedPolicies.has(ref)) return;
+    this.hydratedPolicies.add(ref);
+    if (this.harnessPolicies.get(ref)) return;
+    try {
+      const row = await store.load(ref);
+      if (row && !this.harnessPolicies.get(ref)) {
+        this.harnessPolicies.put(SurfaceHost.adaptiveFromRow(row));
+      }
+    } catch (cause) {
+      console.error(`[policies] hydrate failed for ${ref}: ${String(cause)}`);
     }
   }
 
@@ -720,6 +793,7 @@ export class SurfaceHost {
         this.serialize(hosted, async () => {
           const learner = hosted.learnerId ? await this.learners.get(hosted.learnerId) : undefined;
           const learnerCid = learner?.cid ?? hosted.learnerId ?? `cog-anon-${hosted.surfaceId}`;
+          await this.hydratePolicy(learnerCid); // resume the learner's adapted strategy (L1.5)
           const effectiveMode = mode ?? hosted.mode ?? "student";
           // Live HookBus (spec 11 §5): record every harness model invocation as a durable fact —
           // "model-visible is logged", the seam the raw-model path previously bypassed.
@@ -786,10 +860,34 @@ export class SurfaceHost {
         this.serialize(hosted, async () => {
           const learner = hosted.learnerId ? await this.learners.get(hosted.learnerId) : undefined;
           const learnerCid = learner?.cid ?? hosted.learnerId ?? `cog-anon-${hosted.surfaceId}`;
+          await this.hydratePolicy(learnerCid); // adapt the learner's DURABLE policy, not a fresh seed
           const outcome = new HarnessExplainer(hosted.model, {
             policies: this.harnessPolicies,
             lastStrategy: this.harnessLastStrategy,
           }).recordOutcome({ learnerCid, score });
+          if (outcome.accepted) {
+            const updated = this.harnessPolicies.get(policyRef("agent.explanation", learnerCid));
+            if (updated) {
+              // Durability (L1.5): persist the adapted policy so it survives a restart. Best-effort —
+              // the in-memory adaptation already succeeded, so a DB hiccup must never break the loop.
+              if (this.harnessPolicyStore) {
+                try {
+                  await this.harnessPolicyStore.save(SurfaceHost.rowFromAdaptive(updated));
+                } catch (cause) {
+                  console.error(
+                    `[policies] durable save failed for ${updated.ref}: ${String(cause)}`,
+                  );
+                }
+              }
+              // Logged (spec 11 §6): the adaptation is a durable, auditable fact on the surface bus.
+              this.recordPolicyAdaptation(hosted, {
+                learner_cid: learnerCid,
+                strategy: outcome.strategy ?? "",
+                to_version: outcome.policyVersion,
+                score,
+              });
+            }
+          }
           return ok(outcome);
         }),
       // CSE M5: bind a registered source environment — the attach event lands on the surface's
@@ -1275,6 +1373,36 @@ export class SurfaceHost {
     const created = createEvent(
       {
         eventType: "cognitive.model.request",
+        producerCid: "cog-surface-gateway",
+        producerType: "gateway.harness",
+        payload: { surface_id: hosted.surfaceId, ...payload },
+        classification: "internal",
+        retention: "30d-hot",
+        replayBehavior: "recorded-observation",
+      },
+      { clock: hosted.fixture.clock, hlc: hosted.gatewayHlc, idGenerator: this.gatewayIds },
+    );
+    hosted.gatewayHlc = created.hlc;
+    void hosted.fixture.bus.publish(created.event);
+  }
+
+  /**
+   * Record a governed Adaptive-Policy adaptation as a durable, auditable fact (spec 11 §6). Emitted on
+   * the surface bus via the gateway id/HLC stream (recorded-observation, non-perturbing) so "why did
+   * this learner's teaching strategy change?" is answerable from the log.
+   */
+  private recordPolicyAdaptation(
+    hosted: HostedSurface,
+    payload: {
+      readonly learner_cid: string;
+      readonly strategy: string;
+      readonly to_version: number;
+      readonly score: number;
+    },
+  ): void {
+    const created = createEvent(
+      {
+        eventType: "cognitive.policy.accepted",
         producerCid: "cog-surface-gateway",
         producerType: "gateway.harness",
         payload: { surface_id: hosted.surfaceId, ...payload },
