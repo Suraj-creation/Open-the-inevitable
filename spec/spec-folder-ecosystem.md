@@ -12,8 +12,7 @@ The spec system is the single source of truth. If code, architecture, protocols,
 
 The foundational architecture files are:
 
-- `spec/advanced-agent-architecture.md`
-- `spec/next-generation-cognitive-operating-system-blueprint.md`
+- `architecture/uci-architecture.md`
 - `spec/vision-application/The_Inevitable_Master_Vision.md`
 - `spec/vision-application/PLAN.md`
 - `spec/vision-application/referenceRepos.md`

@@ -23,7 +23,7 @@ spec:
   related_observability_systems: [cognitive-observability]
   semantic_tags: [persistence, continuity, rehydration, resume, event-sourcing, replay]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#3.2
+    - ../architecture/uci-architecture.md#42-layered-stack
     - architecture-decisions/ADR-0009-cognitive-continuity-and-rehydration
 ```
 

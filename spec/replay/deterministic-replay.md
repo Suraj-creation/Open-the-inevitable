@@ -22,7 +22,7 @@ spec:
   related_observability_systems: [cognitive-observability, causal-graph]
   semantic_tags: [replay, determinism, journal, event-sourcing, forking, recording]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#12
+    - ../architecture/uci-architecture.md#16-evolution
 ```
 
 # Deterministic Replay

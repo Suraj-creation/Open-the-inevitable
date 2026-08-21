@@ -26,7 +26,7 @@ spec:
   canonical_references:
     - spec/architecture/Cognitive-Architecture.md#layer-2
     - spec/architecture-decisions/ADR-0027-cognitive-evaluation-layer
-    - spec/next-generation-cognitive-operating-system-blueprint.md
+    - ../architecture/uci-architecture.md
 ```
 
 # Cognitive Evaluation Architecture

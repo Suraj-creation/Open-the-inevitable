@@ -23,7 +23,7 @@ spec:
   related_observability_systems: [cognitive-observability]
   semantic_tags: [retrieval, context, lease, working-memory, vector, embedding, bounded, learner]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#8
+    - ../architecture/uci-architecture.md#9-temporal-cognition
     - architecture-decisions/ADR-0012-context-lease-bounded-retrieval
 ```
 

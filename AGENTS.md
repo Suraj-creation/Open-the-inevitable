@@ -6,18 +6,18 @@ The Inevitable is not a normal AI app. It is a long-term, spec-driven cognitive 
 
 Before architecture work, implementation work, refactoring, agent design, memory design, orchestration design, runtime design, protocol design, or infrastructure work, read and synthesize these files:
 
-1. `spec/advanced-agent-architecture.md`
-2. `spec/next-generation-cognitive-operating-system-blueprint.md`
+1. `spec/architecture/uci-architecture.md`
+2. `spec/architecture/uci-architecture.md`
 3. `spec/vision-application/Vision.md`
 4. `spec/vision-application/The_Inevitable_Master_Vision.md`
 5. `spec/vision-application/The_Inevitable_Vision_Comprehensive.md`
 6. `spec/vision-application/Universal-Learning-Intelligence-Agent.md`
-7. `spec/agents-orchestration-deep-dive.md`
+7. `spec/reference-repos/multi-agent-framework-analysis.md`
 8. `spec/vision-application/PLAN.md`
 9. `spec/vision-application/referenceRepos.md`
 10. `spec/spec-folder-ecosystem.md`
 
-`spec/advanced-agent-architecture.md` and `spec/next-generation-cognitive-operating-system-blueprint.md` are complementary foundational architecture references. Do not treat them as conflicting foundations. If one contains a concept missing from the other, treat it as additive context. If implementation or research discovers a stronger abstraction, update the relevant specs so the architecture remains coherent.
+`spec/architecture/uci-architecture.md` and `spec/architecture/uci-architecture.md` are complementary foundational architecture references. Do not treat them as conflicting foundations. If one contains a concept missing from the other, treat it as additive context. If implementation or research discovers a stronger abstraction, update the relevant specs so the architecture remains coherent.
 
 These documents are living research-grade references, not frozen implementation law. They express the intended cognitive operating system direction derived from the core outcome vision.
 
@@ -221,7 +221,7 @@ Never:
 - Create undocumented state transitions.
 - Treat prompts as the whole agent architecture.
 - Treat a planning document as final code law.
-- Let `advanced-agent-architecture.md` and `next-generation-cognitive-operating-system-blueprint.md` drift into contradictory foundations.
+- Let `spec/architecture/uci-architecture.md` and `spec/architecture/uci-architecture.md` drift into contradictory foundations.
 
 ## Implementation Posture
 

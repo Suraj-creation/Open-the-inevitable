@@ -31,7 +31,7 @@ spec:
     - cognitive-observability
   semantic_tags: [model, llm, invocation, recording, replay, determinism, D3, adapter, gemini]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#3.3
+    - ../architecture/uci-architecture.md#43-the-adapter-seam
     - replay/deterministic-replay#determinism-levels
 ```
 
@@ -106,6 +106,12 @@ interface ModelGenerationResult {
 ```
 
 `model.invocation.failed` carries `{ invocation_key, provider, error_code, message }`.
+
+`model.embedding.recorded` payload (format_version `1.0.0`, ADR-0065): `{ text, embedding, dim,
+provider, format_version }`. Embeddings are keyed by the exact `text` rather than an invocation
+ordinal — an embedding is a pure function of `(text, model)`, so replay lookup is order-independent
+and two identical texts collapse to one record. This makes durably-persisted embeddings replay-safe:
+replay resolves the recorded vector and never re-invokes the provider.
 
 ## Protocols and Contracts
 

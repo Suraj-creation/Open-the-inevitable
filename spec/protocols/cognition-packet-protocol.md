@@ -31,8 +31,7 @@ spec:
     - causal-graph
   semantic_tags: [packet, semantic-exchange, causality, hlc, evidence, confidence, typed]
   canonical_references:
-    - advanced-agent-architecture#2.2
-    - next-generation-cognitive-operating-system-blueprint#2.4
+    - ../architecture/uci-architecture.md#24-cognition-packet
 ```
 
 # Cognition Packet Protocol

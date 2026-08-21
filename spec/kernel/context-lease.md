@@ -33,8 +33,7 @@ spec:
     - memory-influence-graph
   semantic_tags: [context, lease, virtual-memory, redaction, least-privilege, provenance]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#2.6
-    - next-generation-cognitive-operating-system-blueprint#16.2
+    - ../architecture/uci-architecture.md#26-context-lease
 ```
 
 # Context Lease

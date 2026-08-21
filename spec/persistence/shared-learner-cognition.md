@@ -24,7 +24,7 @@ spec:
   related_observability_systems: [cognitive-observability]
   semantic_tags: [memory, learner, continuity, mastery, cross-surface, twin, durability, seed]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#8
+    - ../architecture/uci-architecture.md#9-temporal-cognition
     - product/Broader-feature-product#9
     - architecture-decisions/ADR-0011-shared-learner-cognition
 ```

@@ -35,8 +35,8 @@ spec:
     - memory-influence-graph
   semantic_tags: [memory, mutation, evidence, reversible, provenance, redaction, consolidation]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#2.7
-    - next-generation-cognitive-operating-system-blueprint#13.2
+    - ../architecture/uci-architecture.md#27-memory-mutation
+    - ../architecture/uci-architecture.md#123-operations
 ```
 
 # Memory Mutation Protocol

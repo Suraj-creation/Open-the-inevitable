@@ -29,8 +29,8 @@ spec:
   semantic_tags:
     [knowledge-graph, prerequisite-dag, concept-layer, cross-domain, uli-core, adaptive-learning]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#7
-    - advanced-agent-architecture#4
+    - ../architecture/uci-architecture.md#8-orchestration
+    - ../architecture/uci-architecture.md#6-event-driven-cognition
     - spec/product/Broader-feature-product.md#F04
 ```
 

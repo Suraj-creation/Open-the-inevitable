@@ -7,8 +7,7 @@ spec:
   last_reviewed: 2026-06-02
   upstream_dependencies:
     - philosophy/cognitive-os-principles
-    - advanced-agent-architecture
-    - next-generation-cognitive-operating-system-blueprint
+    - architecture/uci-architecture
   downstream_dependencies:
     - kernel/capability-envelope
     - kernel/context-lease
@@ -38,8 +37,7 @@ spec:
     - causal-graph
   semantic_tags: [identity, cid, trust, lineage, attestation, provenance, zero-trust]
   canonical_references:
-    - advanced-agent-architecture#2.1
-    - next-generation-cognitive-operating-system-blueprint#2.3
+    - ../architecture/uci-architecture.md#23-cognitive-identity-cid
 ```
 
 # Cognitive Identity

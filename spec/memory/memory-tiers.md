@@ -20,7 +20,7 @@ spec:
   related_observability_systems: [cognitive-observability]
   semantic_tags: [memory, tiers, consolidation, decay, distribution, subscription, compression, retrieval]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#8
+    - ../architecture/uci-architecture.md#9-temporal-cognition
     - product/Broader-feature-product#9
 ```
 

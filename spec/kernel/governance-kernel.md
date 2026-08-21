@@ -35,8 +35,7 @@ spec:
     - cognitive-observability
   semantic_tags: [governance, policy, kernel, enforcement, audit, adaptive-trust, zero-trust]
   canonical_references:
-    - advanced-agent-architecture#10
-    - next-generation-cognitive-operating-system-blueprint#11
+    - ../architecture/uci-architecture.md#14-governance
 ```
 
 # Governance Kernel

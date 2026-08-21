@@ -23,8 +23,8 @@ spec:
   related_observability_systems: [cognitive-observability, causal-graph]
   semantic_tags: [world-state, graph, deltas, knowledge-graph, learner-model, materialized-view, temporal]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#7
-    - advanced-agent-architecture#4
+    - ../architecture/uci-architecture.md#8-orchestration
+    - ../architecture/uci-architecture.md#6-event-driven-cognition
 ```
 
 # World-State Graph & World-State Delta Protocol
@@ -34,7 +34,7 @@ spec:
 Define the unified, versioned graph that is the single projection of cognition: agents, memory,
 orchestration state, and — for the product — the **learner-specific knowledge graph and learner
 model** (concept nodes, prerequisite edges, mastery/confidence per node). Memory, workflows, and
-runtime state are *views* of this world-state ([blueprint §7](../next-generation-cognitive-operating-system-blueprint.md)).
+runtime state are *views* of this world-state ([blueprint §7](../architecture/uci-architecture.md)).
 
 ## Philosophy
 

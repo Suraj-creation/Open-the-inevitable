@@ -4,8 +4,8 @@
 **Companion to:** [`Tech-Stack.md`](./Tech-Stack.md) — that document maps how the COS **runs**
 (infrastructure technology); this one maps how the COS **thinks, learns, evaluates, researches, and
 improves** (the cognitive architecture that emerges above the substrate).
-**Subordinate to:** `spec/next-generation-cognitive-operating-system-blueprint.md` and
-`spec/advanced-agent-architecture.md` (the foundational architecture) and `CLAUDE.md` §2 (the laws).
+**Subordinate to:** `uci-architecture.md` and
+`uci-architecture.md` (the foundational architecture) and `CLAUDE.md` §2 (the laws).
 **Decision of record:** [ADR-0023](../architecture-decisions/ADR-0023-emergent-cognitive-architecture.md).
 
 ---
@@ -194,7 +194,7 @@ where its **deepening spec** will live.
   through the existing **governed self-evolution** path (proposal → shadow test → governance gate →
   rollout/rollback). It introduces no new enforcement mechanism — it *reuses governance as the immune
   system*. The blueprint names **Cognitive IR** (§26.5) as the prerequisite for self-improving
-  architecture; advanced-agent-architecture §11 sketches persona/workflow self-optimization.
+  architecture; architecture/uci-architecture §11 sketches persona/workflow self-optimization.
 - **New first-class concepts.** Architecture-aware / codebase-aware agents · self-improvement proposal
   (structural, not just pedagogical) · the platform-as-its-own-knowledge-domain.
 - **Activation trigger.** A *trustworthy* evaluation layer (Layer 2) exists **and** Cognitive IR exists

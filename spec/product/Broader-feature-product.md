@@ -10,8 +10,7 @@ spec:
     - vision-application/Vision
     - vision-application/The_Inevitable_Vision_Comprehensive
     - vision-application/Universal-Learning-Intelligence-Agent
-    - advanced-agent-architecture
-    - next-generation-cognitive-operating-system-blueprint
+    - architecture/uci-architecture
   downstream_dependencies:
     - product/features/F01-cognitive-onboarding
     - product/features/F02-dynamic-cognitive-navigation
@@ -64,7 +63,7 @@ spec:
   canonical_references:
     - vision-application/The_Inevitable_Master_Vision
     - vision-application/Universal-Learning-Intelligence-Agent
-    - next-generation-cognitive-operating-system-blueprint#25.4
+    - ../architecture/uci-architecture.md#3-architectural-laws
     - spec-folder-ecosystem
 ```
 

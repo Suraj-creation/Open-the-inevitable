@@ -29,7 +29,7 @@ spec:
   semantic_tags: [evolution, self-improvement, collective-intelligence, shadow-testing, rollback, governance]
   canonical_references:
     - product/Broader-feature-product#13-research-innovation--collective-evolution
-    - advanced-agent-architecture#11-self-evolving-architecture
+    - ../../architecture/uci-architecture.md#16-evolution
 ---
 
 # F12 — Collective Cognitive Evolution (Governed Self-Improvement)
@@ -184,6 +184,6 @@ evidence from F11/F14 must be anonymized and consented before entering evolution
 ## 17. References
 
 - `spec/product/Broader-feature-product.md` §13 and §17.
-- `spec/advanced-agent-architecture.md` §11.
+- `../../architecture/uci-architecture.md` §11.
 - `spec/replay/deterministic-replay.md`.
 - `spec/evolution/`, `spec/experimentation/`, and `spec/cognitive-benchmarks/`.

@@ -10,8 +10,8 @@ observability, events, or execution behavior, update the relevant spec first.
 
 ## Primary Reading Order
 
-1. `spec/advanced-agent-architecture.md`
-2. `spec/next-generation-cognitive-operating-system-blueprint.md`
+1. `architecture/uci-architecture.md`
+2. `architecture/uci-architecture.md`
 3. `spec/product/Broader-feature-product.md` — **canonical product specification** (read before any product/feature/agent/pedagogy/memory/orchestration work; see also `spec/product/README.md`)
 4. `spec/spec-folder-ecosystem.md`
 5. `spec/meta/spec-governance.md`

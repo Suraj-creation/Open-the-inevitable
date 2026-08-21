@@ -29,8 +29,8 @@ spec:
     - cognitive-observability
   semantic_tags: [capability, authorization, least-privilege, envelope, sandbox, policy]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#2.10
-    - advanced-agent-architecture#20
+    - ../architecture/uci-architecture.md#210-capability-envelope
+    - ../architecture/uci-architecture.md#18-resilience-and-security
 ```
 
 # Capability Envelope

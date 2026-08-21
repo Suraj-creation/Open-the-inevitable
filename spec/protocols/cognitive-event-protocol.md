@@ -31,8 +31,7 @@ spec:
     - causal-graph
   semantic_tags: [event, event-sourcing, immutable, causality, replay, retention, classification]
   canonical_references:
-    - advanced-agent-architecture#4.2
-    - next-generation-cognitive-operating-system-blueprint#5.3
+    - ../architecture/uci-architecture.md#63-event-envelope
 ```
 
 # Cognitive Event Protocol

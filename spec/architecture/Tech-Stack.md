@@ -2,7 +2,7 @@
 
 **Status:** Canonical · living strategy document
 **Owns:** the *why* and *where* of every technology choice in the platform
-**Governed by:** `CLAUDE.md` §2 (Architectural Laws), `spec/next-generation-cognitive-operating-system-blueprint.md` §25.4
+**Governed by:** `CLAUDE.md` §2 (Architectural Laws), `uci-architecture.md` §25.4
 **Synthesizes the foundational decisions in:** ADR-0003 (tech stack), ADR-0004 (monorepo/tooling), ADR-0005 (infrastructure adapters), and every later ADR that named a technology.
 
 ---
@@ -498,7 +498,7 @@ proof is explicit: each names the trigger that would justify activating it.
 | `cognitive-filesystem` | Cognition-native, content-addressed, snapshotted storage | Virtual filesystem semantics (COW, semantic addressing) | Storage abstraction outgrows event-log + mutations |
 | `federation` | External agents, federated memory, trust negotiation, data sovereignty | Federated-systems trust + partitioning | Cross-organization/regional cognition is required |
 | `research` · `experimentation` | Research infrastructure: experiment registry, hypothesis/evidence tracking, research graph, finding extraction | Provenance + graph + registry over world-state/memory | The F10 research-mode *product feature* is built (it is fully specced but unimplemented). Today only the `EvolutionEngine`'s `evolution.experiment.*` events exist as a proto-experiment primitive |
-| Architecture-level self-evolution | The platform evolving its own *structure and code* — not just pedagogy/config (which is built; see §6.6, §9.10) | Cognitive IR / compiler + codebase- and architecture-aware agents | A real evaluation layer (§9.9) **and** Cognitive IR exist, and governance is mature enough to gate structural change. Design/pseudocode only today (advanced-agent-architecture §11; blueprint §26.5) |
+| Architecture-level self-evolution | The platform evolving its own *structure and code* — not just pedagogy/config (which is built; see §6.6, §9.10) | Cognitive IR / compiler + codebase- and architecture-aware agents | A real evaluation layer (§9.9) **and** Cognitive IR exist, and governance is mature enough to gate structural change. Design/pseudocode only today (architecture/uci-architecture §11; blueprint §26.5) |
 | `transactions` · `cognitive-gc` · `cognitive-safety` · `semantic-consistency` · `failure-semantics` · `epistemology` | Sagas/atomic mutations · compaction · self-modification limits · truth convergence · formal degraded modes · belief/uncertainty models | Distributed-systems + formal-methods techniques | The corresponding failure mode is observed at scale |
 
 **Rule:** nothing from this tier is implemented "to be safe." It is implemented when the architecture
@@ -595,7 +595,7 @@ live ones.
 10. **Architecture-level self-improvement is unbuilt — and correctly deferred.** The platform can
     evolve *what it teaches* (the `EvolutionEngine`: pedagogy/config proposals, shadow-tested, governed,
     advisory-only). It cannot evolve *how it is built*: agent-persona / workflow self-optimization
-    (advanced-agent-architecture §11) and the Cognitive IR the blueprint (§26.5) names as the
+    (architecture/uci-architecture §11) and the Cognitive IR the blueprint (§26.5) names as the
     prerequisite for self-improving architecture are design/pseudocode only. This is rightly downstream
     of §9.9 and Cognitive IR — trustworthy structural self-change requires a real evaluation layer
     first. It is the **Autonomous Improvement Layer** (Layer 5, deliberately last) in

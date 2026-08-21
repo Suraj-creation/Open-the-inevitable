@@ -8,8 +8,7 @@ spec:
   owner: product-architecture
   last_reviewed: 2026-07-09
   upstream_dependencies:
-    - next-generation-cognitive-operating-system-blueprint
-    - advanced-agent-architecture
+    - architecture/uci-architecture
     - vision-application/The_Inevitable_Master_Vision
     - product/Broader-feature-product
     - product/features/F15-content-ingestion-knowledge-substrate
@@ -26,7 +25,7 @@ spec:
   related_observability_systems: [cognitive-observability, reasoning-trace, learner-outcome-telemetry]
   semantic_tags: [source-environment, principle-zero, cognitive-source, foundations, constitution]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#25-4
+    - ../architecture/uci-architecture.md#3-architectural-laws
     - product/features/F15-content-ingestion-knowledge-substrate
     - research/cse-draft-v1-2026-07
 ---

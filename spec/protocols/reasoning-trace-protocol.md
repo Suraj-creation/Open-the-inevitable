@@ -34,8 +34,8 @@ spec:
     - claim-graph
   semantic_tags: [reasoning-trace, claims, evidence, introspection, confidence, self-critique, debuggability]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#2.8
-    - next-generation-cognitive-operating-system-blueprint#10.2
+    - ../architecture/uci-architecture.md#28-reasoning-trace
+    - ../architecture/uci-architecture.md#132-telemetry-types
 ```
 
 # Reasoning Trace Protocol

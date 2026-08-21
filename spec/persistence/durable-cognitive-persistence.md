@@ -22,7 +22,7 @@ spec:
   related_observability_systems: [cognitive-observability]
   semantic_tags: [persistence, durability, event-sourcing, replay, recovery, adapters]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#3.2
+    - ../architecture/uci-architecture.md#42-layered-stack
     - architecture-decisions/ADR-0008-durable-persistence
 ```
 

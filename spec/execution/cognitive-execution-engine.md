@@ -38,8 +38,8 @@ spec:
     - reasoning-trace
   semantic_tags: [execution, fibers, cooperative-scheduling, determinism, journal, continuations, replay]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#11
-    - advanced-agent-architecture#6
+    - ../architecture/uci-architecture.md#14-governance
+    - ../architecture/uci-architecture.md#8-orchestration
 ```
 
 # Cognitive Execution Engine & Cognitive Fibers

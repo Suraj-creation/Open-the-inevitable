@@ -45,8 +45,7 @@ spec:
     - cognitive-observability
   semantic_tags: [runtime, cognitive-unit, agent-pod, lifecycle, manifest, checkpoint, hydration, warm-pool]
   canonical_references:
-    - advanced-agent-architecture#3
-    - next-generation-cognitive-operating-system-blueprint#4
+    - ../architecture/uci-architecture.md#5-cognitive-runtime
 ```
 
 # Cognitive Unit Runtime

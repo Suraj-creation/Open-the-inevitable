@@ -21,7 +21,7 @@ spec:
   related_observability_systems: [cognitive-observability]
   semantic_tags: [identity, learner, continuity, resume, durability, onboarding]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#3.4
+    - ../architecture/uci-architecture.md#44-kernel-services
     - architecture-decisions/ADR-0010-durable-learner-identity
 ```
 

@@ -31,7 +31,7 @@ spec:
     - cognitive-observability
   semantic_tags: [intent, lease, goal, long-running, workflow, revocation, renewal]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#2.5
+    - ../architecture/uci-architecture.md#25-intent-lease
 ```
 
 # Intent Lease

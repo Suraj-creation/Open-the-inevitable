@@ -1,210 +1,229 @@
 # The Inevitable — Repository Constitution
 
-This file is the **constitution** of this repository: identity, mission, architectural law,
-working doctrine, and retrieval entry points. It is auto-loaded into every agent session, so
-every line here costs context in every conversation. It is governed by §7 — read §7 before
-editing this file. It is **not** a status document, changelog, or implementation inventory.
+This file is the **persistent cognitive orientation** of every agent and engineer entering this
+repository: who we are, what we are building, what must never be compromised, how to think, where
+truth lives, and how to know whether something is *actually implemented*.
 
-## 1. Identity and Mission
+It teaches how to reason about the repository; it does **not** contain the repository. Not a
+specification, roadmap, feature catalog, status document, or manifesto. Auto-loaded into every
+session, so every line costs context in every conversation. Governed by §8.
 
-The Inevitable is not a normal AI app. It is a long-term, spec-driven effort to build a
-**Cognitive Operating System (COS)** for education and human understanding — distributed
-cognition, persistent memory, multi-agent orchestration, governed self-evolution, and
-continuously improving intelligence infrastructure.
+## 1. Identity
 
-What it is ultimately becoming:
+A long-term research and engineering initiative with **two distinct, parallel pursuits** — neither
+subordinate to the other:
 
-- A **Universal Learning Intelligence**: an intelligence that can take any human, from any
-  starting point, to genuine verified mastery of anything — by recursively resolving
-  prerequisites, adapting explanation to the learner's cognitive state, and verifying depth.
-  Not a chatbot that answers questions; an intelligence that grows minds.
-- A **Cognitive Surface**: the central product manifestation — a living, adaptive, multimodal
-  medium (the cognitive whiteboard first; living document, simulation stage, knowledge-graph
-  explorer, authoring canvas as projections of the same substrate) where cognition itself
-  becomes visible: agents work, knowledge appears, explanations evolve, memory forms, and
-  understanding grows in real time. **The UI is a projection; the runtime is the product.**
-- An **education and intelligence-transformation mission**: persistent cognitive memory of each
-  learner, a living universe of interconnected knowledge, collective and institutional
-  intelligence, and a system that improves its own pedagogy through governed evolution.
+```
+                        THE INEVITABLE
+        ┌─────────────────────┴─────────────────────┐
+   PRODUCT ─ Universal Cognitive        RESEARCH ─ cognition · intelligence
+             Infrastructure (UCI)                  learning · reasoning · memory
+             the production platform               multimodal · continual learning
+        └──────────────► validated research ◄──────  autonomous research · discovery
+                    graduates into UCI capability
+```
 
-Evaluate every decision against one question: does it move the system toward a governed,
-replayable, evolving cognitive operating system that transforms how humans learn — or does it
-merely ship a feature?
+**Universal Cognitive Infrastructure (UCI)** is the production platform built here: infrastructure
+through which persistent, contextual, multimodal, agentic cognitive capabilities are composed,
+governed, observed, persisted, retrieved, and projected into human and machine experiences.
+**Education is UCI's first application domain and proving ground — not its definition, not its
+boundary.**
 
-## 2. Architectural Laws
+Terms, used precisely and never interchangeably:
 
-These principles are sacred. The ten non-negotiable invariants live in
-`spec/next-generation-cognitive-operating-system-blueprint.md` §25.4; this is their working form:
+| Term | Is | Is not |
+|---|---|---|
+| **UCI** | The product/platform | Education-specific |
+| **Cognitive Operating System (COS)** | UCI's internal architecture style — kernel, contracts, events, world-state, governance | The product, or a user-facing concept |
+| **Universal Learning Intelligence (ULI)** | The education-domain capability built *on* UCI | The platform definition |
+| **Cognitive Surface** | UCI's primary projection and interaction environment | The cognitive substrate |
+| **Research** | Scientific investigation that may *become* UCI capability | The production codebase |
 
-- Intelligence is modular, composable, observable, governable, persistent, replayable, and evolvable.
-- Agents are cognitive runtime containers, not prompts.
-- Every major interaction flows through protocol-governed events or contracts.
-- Memory, orchestration, workflows, agents, and runtime state are projections of a unified
-  world-state architecture.
-- Cognition unfolds across time: event sourcing, replay, causal tracing, and temporal state are
-  core primitives.
-- Governance is a kernel primitive, not an external moderation layer.
-- Observability tracks reasoning quality, memory influence, drift, disagreement, confidence,
-  and learning outcomes.
-- Self-evolution happens only through governed proposals, evaluation, replay, shadow tests,
-  and rollback.
-- The COS is a substrate, not a product. Every surface, app, agent runtime, API, and integration
-  is a manifestation of it; dependencies point inward — manifestations depend on the substrate, the
-  substrate on its contracts, contracts on nothing — and no vendor, model, transport, or store leaks
-  past its adapter.
+**Direction.** *Near:* build foundational cognitive infrastructure through education. *Medium:*
+generalize memory, retrieval, reasoning, context, knowledge, multimodal interaction, and agentic
+capability beyond it. *Long:* systems that continuously learn, understand, research, discover, and
+create across domains. *Research horizon:* investigate the computational foundations of cognition
+and graduate what validates.
 
-**Never:** bypass protocols, event sourcing, governance, or observability for convenience;
-mutate memory without a typed memory mutation; create undocumented state transitions; hardcode
-fragile orchestration; treat prompts as the agent architecture; treat a planning document as
-final code law; let the two foundational architecture documents drift into contradiction; reverse
-the dependency direction so the substrate depends on a manifestation, a vendor, or an adapter's
-internals.
+Evaluate every decision against one question: **does this make UCI able to do something
+meaningfully intelligent it could not do before — durably, observably, and verifiably?**
+
+## 2. The Truth Model
+
+The most important law in this file, because the repository has previously violated it:
+
+> **Implementation evidence outranks documentation claims.**
+> Documentation expresses intent. Code expresses implementation. Tests express verified behaviour.
+> Runtime evidence expresses operational reality. **No document is evidence that a capability
+> exists** — not a specification, not an ADR, not this file.
+
+Every capability carries exactly one of seven statuses. They must never be conflated:
+
+| Status | Means | Minimum evidence |
+|---|---|---|
+| **VISION** | We aspire to it | A vision document |
+| **RESEARCH** | Under scientific investigation | A research document with an adoption gate |
+| **SPECIFICATION** | Formally designed | A spec and/or an ADR |
+| **PROTOTYPE** | Demonstrated experimentally | Code that runs, on no product path |
+| **PARTIAL** | A meaningful portion exists | Code + tests + a written, named gap |
+| **PRODUCTION** | Works end-to-end in the product | The full path: interface → API → runtime → cognition → persistence → retrieval → response → surface |
+| **PRODUCTION VERIFIED** | Reliable | Production + observability + durability + recovery + runtime evidence |
+
+`VISION ≠ RESEARCH ≠ SPECIFICATION ≠ PROTOTYPE ≠ IMPLEMENTATION ≠ PRODUCTION`.
+
+**An accepted decision is not an implemented decision.** Acceptance and implementation are separate
+axes; an ADR carries both. **Status may be asserted in exactly one place** — the capability's own
+record, and only with evidence. A status claim anywhere else is a constitutional violation.
+
+## 3. Architectural Laws
+
+Sacred, and each stated so that a **violation is detectable**. The detailed, numbered invariants
+live at `spec/architecture/uci-architecture.md` §3; this is their operative summary.
+
+**Cognition**
+
+- **Intelligence is modular, composable, and observable** — cognition emerges from composable units;
+  every cognitive decision emits a reasoning trace.
+- **Cognitive state persists where its future value warrants it.** A capability that cannot survive
+  a process restart is not implemented.
+- **Retrieval is half of memory.** Storage without indexed, ranked, cross-session retrieval is not
+  memory; a tier with no retrieval path is incomplete.
+- **Cognitive state is temporally reconstructable and attributable** — what happened, why, caused by
+  what. *(Event sourcing and replay are the current mechanism, not the law itself.)*
+- **No subsystem becomes an isolated or contradictory source of cognitive truth.**
+- **Governance is intrinsic to cognition**, evaluated before the side effect — never bolted on after.
+- **No fake cognition.** Generated language is not by itself evidence of cognition; a capability must
+  be grounded in state, context, evidence, structure, persistence, or measurable behaviour.
+
+**Boundaries**
+
+- **Agents are cognitive runtime containers, not prompts** — manifest, identity, capability
+  envelope, observability contract, or it is not an agent.
+- **Every semantic exchange is typed** — cognition packets never bare strings; every memory write a
+  typed mutation; context and intent reached only through bounded, revocable leases.
+- **Models and vendors are replaceable.** Nothing leaks past its adapter; UCI never becomes one
+  provider's infrastructure.
+- **Interfaces are projections.** Surface, voice, CLI, API, future devices project cognitive state;
+  they never define the substrate.
+- **Dependencies point inward.** Manifestations → substrate → contracts → nothing.
+
+**Engineering**
+
+- **One concept, one authority.** Every stable concept has one owning source; others reference or
+  constrain it, none redefine it. When two sources claim the same truth, establish the owner and
+  subordinate the rest — never declare them "complementary".
+- **Historical decisions must not masquerade as current architecture** — superseded thinking is
+  preserved and *labelled*.
+- **No speculative architecture; complexity must earn its place.** Build because a capability,
+  validated research, or an explicit requirement demands it — never to satisfy a diagram.
+  Sophistication is justified only by capability, reliability, research value, or leverage.
+- **Build vertical slices before abstractions** — prove end-to-end, observe the pattern, *then*
+  extract the primitive.
+- **Research must not silently become production architecture.** It earns its place through
+  evidence, engineering viability, and product relevance — via an ADR, the only door.
+- **Autonomous change is governed** — proposed, evaluated, reproducible, auditable, reversible.
 
 Code that violates these laws is invalid implementation even if it works locally.
 
-## 3. Canonical Reference Map
+## 4. Where Truth Lives
 
-CLAUDE.md holds pointers, never copies. When a domain below changes, update the owning files —
-not this map (unless a path moves).
+Pointers only, never copies. When a domain changes, update the owning file — not this map.
 
-**Vision and purpose** — upstream source of truth whenever intent or philosophy is ambiguous:
+| Layer | Where | Owns |
+|---|---|---|
+| **Truth of what exists** | `docs/audits/` (latest), then the code and its tests | The honest status of every capability |
+| **Vision** | `spec/vision-application/` | Purpose. *Education-era corpus — read as intent, never cited to settle current scope* |
+| **Product** | `spec/product/` — PRD + `product-cognition-runtime.md` + `features/F01–F16` | What UCI is and does |
+| **Architecture** | `spec/architecture/uci-architecture.md` — **the single architecture document**; `Tech-Stack.md`, `Cognitive-Architecture.md` alongside | How UCI is built. Parts I–II are law; Parts III–IV are not |
+| **Contracts** | `spec/protocols/`, `spec/events/`, `spec/kernel/` | The stable seam — protocols, events, schemas, ABIs |
+| **Experience** | `spec/surface/` (runtime), `spec/design/` (CDL — use the highest version) | The Cognitive Surface and interaction |
+| **Runtime specs** | `spec/source-environment/` (CSE), `spec/persistence/` (DPS), `spec/implementation-roadmaps/` | Executable subsystem contracts |
+| **Decisions** | `spec/architecture-decisions/` | History and rationale. Accepted ≠ implemented |
+| **Research** | `spec/research/` | Scientific agenda. **Never production law** |
+| **Reference** | `spec/reference-repos/` | External analysis and inspiration. **Not law** |
+| **Status** | `IMPLEMENTATION.md` · `CHANGELOG.md` · `docs/history/` | Current state, milestones, narratives |
+| **Retrieval** | `spec/indexes/` | Finding anything as the system grows |
 
-- `spec/vision-application/` — the core vision corpus: `Vision.md`,
-  `The_Inevitable_Master_Vision.md`, `The_Inevitable_Vision_Comprehensive.md`,
-  `Universal-Learning-Intelligence-Agent.md`, `PLAN.md`.
+Where a product requirement and an architectural law conflict, the **law wins**; express the
+requirement *through* it — events, leases, mutations, governed capabilities — never around it.
 
-**Architecture law** — read before architecture, runtime, protocol, memory, orchestration,
-agent, or infrastructure work:
+## 5. Working Doctrine
 
-- `spec/advanced-agent-architecture.md` and
-  `spec/next-generation-cognitive-operating-system-blueprint.md` — complementary foundations,
-  never conflicting; treat differences as additive context.
-- `spec/agents-orchestration-deep-dive.md` — orchestration depth.
-- `spec/spec-folder-ecosystem.md` — the spec domain map.
-- Owning domain specs: `spec/kernel/`, `spec/protocols/`, `spec/events/`, `spec/runtime/`,
-  `spec/memory/`, `spec/world-state/`, `spec/execution/`, `spec/orchestration/`, `spec/scheduler/`.
-- `spec/architecture/` — two companion docs: `Tech-Stack.md` (how the COS *runs* — technology doctrine,
-  the eight-contract adapter seam, per-domain *why/where*) and `Cognitive-Architecture.md` (how it
-  *thinks/learns/researches/improves* — the five emergent cognitive layers; ADR-0023).
+**Specification exists to make implementation clearer, safer, and more coherent — never to
+substitute for it.** When a specification grows more elaborate than the evidence supporting its
+implementation, stop writing and build.
 
-**Product law** (subordinate to architecture law) — read before any product, feature, pedagogy,
-agent-behaviour, memory-policy, UX, or mode/persona work, in this order:
+Ceremony scales with the decision:
 
-1. `spec/product/Broader-feature-product.md` — the master PRD: product thesis, twelve capability
-   pillars, agent ecosystem, modes/personas, North Star, and the authoritative Product →
-   Architecture mapping (§14).
-2. `spec/product/README.md` — product domain entry point and feature index.
-3. The affected feature spec(s) under `spec/product/features/F01`–`F16`, plus their declared
-   upstream/downstream features. Catalog: `spec/indexes/product-feature-index.md`.
-4. `spec/product/features/README.md` — feature-spec template and lifecycle, when authoring specs.
+- **Major / architectural / irreversible** — a new agent or event family, a contract or
+  dependency-direction change, a new capability domain, a cross-cutting invariant, adopting
+  research. Update or create the owning spec *first*, then implement, then validate against it.
+  One **terse ADR**: 2–4 sentences of context, the decision, the rejected alternatives.
+- **Everything else** — additive fields, wiring, renderers, a unit following an existing pattern,
+  fixes, tests, sub-phases of an adopted ADR. **Implement directly** — no new ADR, no new spec file.
+  Touch an owning spec only when you change a contract others depend on. The code and its tests are
+  the record.
 
-Where a product requirement and an architecture invariant conflict, the invariant wins; express
-the requirement *through* the invariant (events, leases, memory mutations, governed
-capabilities), never around it.
+**Before implementing,** read the owning specs, identify the cognitive primitives, and check whether
+the change touches contracts, events, memory mutations, world-state, policies, or manifests.
 
-**The Cognitive Surface** — the central product idea; read before any surface, whiteboard,
-timeline, multimodal, or rendering work:
+**Production-grade** — the bar every cognitive capability is measured against, where applicable:
+clear ownership · typed contracts · persistence · retrieval · observability · failure handling ·
+degradation · recovery · governance · tests · determinism where required · provenance · versioning ·
+end-to-end evidence.
 
-- `spec/cognitive_surface/` — the research corpus behind the cognitive whiteboard: what the
-  surface *is*, why it is the product's heart, and the decision-grade research it rests on.
-  Start with `cognitive-whiteboard-system.md` and `cognitive_surface_dossier.md`.
-- `spec/surface/` — the implemented runtime specs (SRF-001…SRF-005: surface runtime, event
-  architecture, timeline engine, multimodal provider abstraction, streaming/sync protocol).
-- `spec/product/features/F16-cognitive-surface.md` (substrate) and `F09` (experience);
-  `spec/research/cognitive-surface-frontier-research.md` (frontier dossier).
+**Documentation cadence.** `IMPLEMENTATION.md`, `CHANGELOG.md`, and `docs/history/` are written
+**only when a major milestone lands** — never per sub-step. Fine-grained continuity lives in agent
+memory, not these files.
 
-**Design law** — read before any UI, visual, motion, or interface work on any manifestation:
+## 6. Anti-Patterns
 
-- `spec/design/cognitive-design-language-v1.md` — the Cognitive Design Language (CDL), the
-  permanent design system; audit + rationale in `spec/design/proposals/`.
+Never build merely because a model can do it, it sounds futuristic, a diagram suggests it, a
+competitor has it, or it would make the repository look sophisticated. Never: assert a capability
+exists on the strength of a specification · record status outside a capability record · create a new
+document where an existing one should be improved, merged, or deprecated · resolve conflicting
+sources with a "these are complementary" clause instead of a merge · cite research as law or
+reference material as architecture · bypass contracts, governance, or observability for convenience ·
+write state outside a typed mutation · rest durable cognitive state on ephemeral storage · reverse
+the dependency direction or leak a vendor past its adapter.
 
-**Implementation status** — never duplicated in this file:
+**Never let the sophistication of the specification system substitute for the sophistication of the
+actual product.**
 
-- `IMPLEMENTATION.md` — current state, traceability map, active frontier, verification.
-- `CHANGELOG.md` — abstract milestone history.
-- `docs/history/implementation-log.md` — detailed dated build narratives.
-- `spec/implementation-roadmaps/` — phase plans.
+## 7. Resolving Ambiguity
 
-**Retrieval** — `spec/indexes/` is the entry point for finding specs, events, protocols,
-capabilities, dependencies, and features as the spec system grows.
+Identify what the question concerns — vision, research, product, architecture, contract, capability,
+implementation, or status — then consult that owning source (§4). For **what exists**, the code and
+its tests outrank every document. When sources disagree, the more specific and more recent owner
+wins; if the constitution itself is outdated, fix it rather than working around it. If a requirement
+repeatedly needs exceptions to these laws, revisit the laws instead of accumulating exceptions.
 
-## 4. Working Doctrine
-
-**Spec-first, in proportion. Bias to implementation, not paperwork.** Specs are executable law
-where they exist, but ceremony scales with the decision — never write more spec/doc than the change
-warrants:
-
-- **Major / architectural / irreversible** — a new agent or event family, a protocol or
-  dependency-direction change, a new capability domain, a cross-cutting invariant. Update or create
-  the owning spec *first*, then implement, then validate against it. These get one **ADR** under
-  `spec/architecture-decisions/` — and ADRs are **terse**: 2–4 sentences of context, the decision,
-  the rejected alternatives. Never an essay, never per-sub-phase.
-- **Everything else** — additive fields, wiring, renderers, a small unit following an existing
-  pattern, fixes, tests, sub-phases of an already-adopted ADR. **Implement directly.** No new ADR,
-  no new spec file. Touch an owning spec only when you change a contract others depend on, and then
-  a one-line status note at most. The code and its tests are the record.
-
-**Before implementing,** read the owning specs for the area, identify the cognitive primitives, and
-check whether the change touches events, memory mutations, world-state, policies, workflows,
-manifests, or protocols — preserving modularity, observability, governance, replayability, and
-protocol boundaries.
-
-**Documentation cadence.** `IMPLEMENTATION.md`, `CHANGELOG.md`, and
-`docs/history/implementation-log.md` are updated **only when a major milestone lands** (a whole
-phase or capability), never per sub-step. Batch the sub-phases; write status once at the boundary.
-Fine-grained, dated continuity lives in agent memory, not these files.
-
-**Traceability & testing.** Every artifact traces to its area, its contracts where applicable, and
-tests/validation evidence. Foundational work ships with unit/integration/governance/replay/failure
-tests; nothing cognitive exists without observability; every implementation defines its failure
-modes, degradation, and recovery.
-
-**Research evolution.** When evidence reveals a stronger primitive, propose it, check coherence with
-the vision, update the owning spec, then implement. Preserve important research and rejected designs
-in `spec/research/`.
-
-## 5. Orientation
-
-CLAUDE.md is timeless and carries no status. Current state, active frontier, traceability, and run
-commands live in `IMPLEMENTATION.md`; abstract milestone history in `CHANGELOG.md`; dated build
-narratives in `docs/history/implementation-log.md`.
-
-## 6. Build and Verify
+## 8. Build, Verify, and Constitution Governance
 
 ```bash
 pnpm install && pnpm verify   # codegen + typecheck + test + lint + format:check — must stay green
 ```
 
-Monorepo: pnpm + Turborepo, strict TypeScript ESM, Vitest. Details: `IMPLEMENTATION.md`
-(Developer Quickstart) and ADR-0004. If turbo cannot find pnpm on Windows: `npm i -g pnpm@9.15.0`.
+Monorepo: pnpm + Turborepo, strict TypeScript ESM, Vitest (ADR-0004; details in `IMPLEMENTATION.md`).
+Windows: if turbo cannot find pnpm, `npm i -g pnpm@9.15.0`.
 
-## 7. Constitution Governance
+**This section makes drift difficult. Future agents must obey it when editing this file.**
 
-This section exists to make drift difficult. Future agents must obey it when editing this file.
+**May be added:** identity framing, architectural laws, the truth model, working doctrine, governance
+rules, and retrieval *pointers*. That is the complete list.
 
-**May be added to CLAUDE.md:** changes to identity/mission framing, architectural laws, working
-doctrine, governance rules, and retrieval *pointers* (a new spec domain's entry point, a moved
-path). That is the complete list.
-
-**Must never be added:** changelog entries, milestone summaries, phase completion details,
-implementation inventories, package catalogs, component or class descriptions, code
-identifiers, test counts, feature completion lists, roadmap history, dated narratives. If it
-describes *what was built* rather than *how to think and where to look*, it does not belong here.
-
-**Where updates go instead:**
+**Must never be added:** changelog entries, milestone summaries, phase details, implementation
+inventories, package catalogs, component descriptions, code identifiers, test counts, feature lists,
+roadmap history, dated narratives, or **any capability status**. If it describes *what was built*
+rather than *how to think and where to look*, it does not belong here.
 
 | Information | Home |
 |---|---|
 | What shipped (abstract, milestone-level) | `CHANGELOG.md` |
-| Current codebase state, traceability, active frontier | `IMPLEMENTATION.md` (replace, don't append) |
-| Detailed dated build narratives | `docs/history/implementation-log.md` (append) |
-| Phase plans and roadmaps | `spec/implementation-roadmaps/` |
-| Architecture/runtime/product semantics | The owning spec under `spec/` |
-| Feature catalog | `spec/indexes/product-feature-index.md` |
+| Current state, traceability, active frontier | `IMPLEMENTATION.md` (replace, don't append) |
+| Dated build narratives | `docs/history/implementation-log.md` (append) |
+| Capability status and evidence | The capability's own record |
+| Architecture / runtime / product semantics | The owning spec under `spec/` |
 
-The homes in this table are written at **major-milestone** cadence (§4), not per sub-phase; batch
-sub-steps and update once at the boundary. Sub-phase continuity lives in agent memory.
-
-**Size law:** this file stays under ~200 lines. If an edit would push past the cap, compress or
-relocate — never append. When a milestone lands, CLAUDE.md is **not** touched — update
-`IMPLEMENTATION.md` and the other homes in the table above.
+**Size law:** this file stays under **~230 lines**. If an edit would push past the cap, compress or
+relocate — never append. When a milestone lands, CLAUDE.md is **not** touched.

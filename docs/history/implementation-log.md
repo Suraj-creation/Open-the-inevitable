@@ -3122,3 +3122,67 @@ adaptivity recorded; novice keeps scaffolding; floor parity + null; fold reconst
 **R4 = Representation Intelligence COMPLETE — all of Production Goal II delivered** (deterministic +
 model-backed RIA; hierarchy, epistemic roles, derivation/misconception/process/code grammars, image
 rationale, density, expertise-reversal). Next frontier: R5 compounding & breadth.
+
+---
+
+## 2026-08-21 — Cognitive Runtime execution phase: harness foundation + Structured Semantic Explanation
+
+Branch `feat/uci-cognitive-runtime` (base `ff2d098`). Graduation from architecture/spec into **controlled
+implementation**. Three things landed, `pnpm verify` green throughout.
+
+### 1. Persistent-cognition architecture (specs + walking skeleton)
+Corpus **file 10** (master architecture) gained the walking-skeleton methodology (§11.0), the
+four-measurement L2 exit gate (§11.5: longitudinal · transfer · replay · ablation), the locked canonical
+figure (§2.1), and the Prime/RLM-is-mechanism-not-ontology boundary (§0.3). Corpus **file 11**
+(Cognitive Harness Runtime — DeepSeek-Harness synthesis, studied from dsh's own source): capability seams
++ protected kernel, durable-vs-live events, the ContextManifest + reconstruction law, the generalized
+action pipeline, transactional formation, the dsh **reference-only** strategy. **ADR-0066** records the
+direction. New package **`@inevitable/cognitive-loop`** — the L2 walking skeleton: Constitution + Adaptive
+Policy (versioned Cognitive Object) + Context Compiler v1 + governed reflect→policy loop + durable causal
+event log + **ContextManifest** (reconstruct-from-log) + **CapabilityRegistry/CognitiveHarness**
+(transactional compose, inspectable `describe()`). 10 tests, all four L2 measurements + governance-is-real
++ reconstruction-law green.
+
+### 2. Audit — the existing canonical authorities (corrects "build a Semantic Visual Language")
+- **Design system is already canonical:** the **Cognitive Design Language** (CDL v1/v2 active, v3
+  proposed) — 8 cognitive states, 7 planes, 7 typography roles, motion/space tokens in
+  `apps/web/src/tokens.css`, governed spec-first under `spec/design/`. **No parallel system built.**
+- **Semantic role vocabulary is already canonical:** `EpistemicRole` (11 roles) in
+  `packages/surface/src/representation.ts`, already rendered token-driven via `data-epistemic-role` on MCCR
+  board elements. The explanation *block* was the one learner-facing surface still unstructured prose.
+- Student/teacher mode: types exist (F13, `ProductMode` defaults `student`) but **not wired to dispatch**.
+  Document intelligence: **CSE-002** 8-layer pipeline is the one canonical document architecture.
+- **Legacy agent audit (23 units):** KEEP (learner-facing + load-bearing: explanation, curriculum,
+  practice, assessment, intent, composer, frameplanner, imageplanner, representation, memory, + the CSE
+  units canonicalizer/meaning/claim/synthesis/frontier/temporal/creation) · GENERALIZE into substrate
+  faculties (revision→memory consolidation, motivation/reflection→surface composition) · CONVERT-TO-SKILL
+  (debate → an `ask_why` deepener). No agent deleted; none converted to a new permanent micro-agent.
+
+### 3. First Student-Mode vertical slice — Structured Semantic Explanation
+Migrated the explanation block from an unstructured prose blob into **typed, role-tagged Semantic
+Sections**, aligned to the existing `EpistemicRole` vocabulary + the CDL (no new roles, no new colours).
+`packages/surface/src/semantic-explanation.ts` (new): `SemanticSection`, a total `explanationSectionRole`,
+a pure `structureExplanation` mapping the F04 seven layers → epistemic roles (intuition→insight,
+visual→structural, definition→definition, math→reasoning, applied→example, extensions→observation,
+frontier→evidence), stamped with `EXPLANATION_ROLE_VOCAB_VERSION` for reproducibility. Enrichment runs at
+the single block-construction chokepoint (`createCognitionBlock`), so every path — contribute, streaming,
+replay-fold — yields identical **durable** sections; legacy `layers` preserved (back-compat); content
+already carrying `sections` left untouched. Renderer (`apps/web/src/blocks.tsx` `ProseBody`) emits each
+section with `data-epistemic-role`; `styles.css` role→hue mapping **generalized to one shared authority**
+(`[data-epistemic-role]` covers board + explanation, no duplicated colour constants) + a token-driven
+`.section` treatment (role-hue border + label; colour never the sole signal). Tests: surface (7) —
+mapping/order/roles ∈ authority, purity, forward-compat, chokepoint enrichment, no-double-enrich,
+non-explanation-untouched; web (2) — token-driven render + legacy fallback.
+
+### Status
+- **IMPLEMENTED (this branch, verify-green):** cognitive-loop harness + ContextManifest + capability
+  registry; structured semantic explanation (producer + durable + token-driven render).
+- **PARTIAL:** the harness is a self-contained seed — not yet driving the live gateway explanation; the
+  structured explanation runs in the real surface path but the *producing* explanation is still the
+  legacy `ModelBackedUnit` (deterministic layer→role mapping, not model-emitted roles).
+- **DEFERRED (recorded, next dependency order):** (1) harness↔gateway integration — the governed process
+  drives real explanation; (2) model emits role-tagged sections directly (beyond the fixed 7 layers);
+  (3) student/teacher mode-aware dispatch (wire F13 into the Supervisor); (4) document-grounded
+  explanation on the surface (CSE); (5) live HookBus + generalized action pipeline (file 11 §12 order).
+- **Next dependency:** harness↔gateway integration — the smallest step that makes the governed cognitive
+  process actually produce the (now structured, token-driven) explanation a learner sees.

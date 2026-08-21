@@ -40,10 +40,9 @@ spec:
     - cognitive-observability
   semantic_tags: [syscall, kernel-mode, user-mode, privilege-ring, trap, panic, admission, interrupt]
   canonical_references:
-    - advanced-agent-architecture#26.1
-    - advanced-agent-architecture#26.2
-    - next-generation-cognitive-operating-system-blueprint#26.1
-    - next-generation-cognitive-operating-system-blueprint#26.2
+    - ../architecture/uci-architecture.md#19-kernel-internals
+    - ../architecture/uci-architecture.md#112-cognitive-threading
+    - ../architecture/uci-architecture.md#19-kernel-internals
 ```
 
 # Cognition Syscalls

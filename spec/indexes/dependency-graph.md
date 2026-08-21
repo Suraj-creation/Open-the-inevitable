@@ -150,10 +150,10 @@ Authored 2026-07 (spec-first; implementation begins CSE-P1). Acyclic; arrows poi
 dependent to dependency.
 
 ```text
-architecture-decisions/ADR-0032          -> next-generation-cognitive-operating-system-blueprint (§25.4),
+architecture-decisions/ADR-0032          -> architecture/uci-architecture (§25.4),
                                           product/features/F15, surface/surface-event-architecture,
                                           architecture-decisions/ADR-0030
-source-environment/CSE-001-foundations   -> next-generation-cognitive-operating-system-blueprint,
+source-environment/CSE-001-foundations   -> architecture/uci-architecture,
                                           product/features/F15, product/features/F16,
                                           architecture/Cognitive-Architecture
 source-environment/CSE-002-canonical-source-representation -> source-environment/CSE-001,

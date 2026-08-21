@@ -24,7 +24,7 @@ spec:
   related_observability_systems: [cognitive-observability]
   semantic_tags: [intent, inference, goal, lease, interpretation, confidence, governed]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#2.5
+    - ../architecture/uci-architecture.md#25-intent-lease
     - architecture-decisions/ADR-0013-intent-inference
 ```
 

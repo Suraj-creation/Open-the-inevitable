@@ -20,7 +20,7 @@ spec:
   related_observability_systems: [cognitive-observability]
   semantic_tags: [capability, grant, revoke, governance, dynamic, immune-system, dispatch]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#2.4
+    - ../architecture/uci-architecture.md#24-cognition-packet
     - architecture-decisions/ADR-0014-capability-registry
 ```
 

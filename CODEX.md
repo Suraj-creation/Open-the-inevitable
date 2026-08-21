@@ -34,7 +34,7 @@ merely ship a feature?
 ## 2. Architectural Laws
 
 These principles are sacred. The ten non-negotiable invariants live in
-`spec/next-generation-cognitive-operating-system-blueprint.md` §25.4; this is their working form:
+`spec/architecture/uci-architecture.md` §25.4; this is their working form:
 
 - Intelligence is modular, composable, observable, governable, persistent, replayable, and evolvable.
 - Agents are cognitive runtime containers, not prompts.
@@ -76,10 +76,10 @@ not this map (unless a path moves).
 **Architecture law** — read before architecture, runtime, protocol, memory, orchestration,
 agent, or infrastructure work:
 
-- `spec/advanced-agent-architecture.md` and
-  `spec/next-generation-cognitive-operating-system-blueprint.md` — complementary foundations,
+- `spec/architecture/uci-architecture.md` and
+  `spec/architecture/uci-architecture.md` — complementary foundations,
   never conflicting; treat differences as additive context.
-- `spec/agents-orchestration-deep-dive.md` — orchestration depth.
+- `spec/reference-repos/multi-agent-framework-analysis.md` — orchestration depth.
 - `spec/spec-folder-ecosystem.md` — the spec domain map.
 - Owning domain specs: `spec/kernel/`, `spec/protocols/`, `spec/events/`, `spec/runtime/`,
   `spec/memory/`, `spec/world-state/`, `spec/execution/`, `spec/orchestration/`, `spec/scheduler/`.

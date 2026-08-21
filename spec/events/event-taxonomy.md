@@ -30,8 +30,7 @@ spec:
     - cognitive-observability
   semantic_tags: [events, taxonomy, families, naming, retention, replay, classification]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#5.2
-    - advanced-agent-architecture#4.3
+    - ../architecture/uci-architecture.md#62-event-taxonomy
 ```
 
 # Event Taxonomy
@@ -82,7 +81,7 @@ Naming grammar: `family.subdomain.action` (e.g. `memory.mutation.committed`). Al
 | `surface.*` | created, block.generated, block.modified, timeline.updated, graph.expanded, graph.entrypoint.changed, agent.contributed, agent.disagreed, proposal.proposed, synthesis.recorded, interaction.received, interaction.applied, memory.attached, reasoning.recorded, narration.segment, focus.changed, presence.updated, session.closed; **research subfamilies:** `surface.research.frontier.detected`, `surface.research.frontier.surfaced`, `surface.research.frontier.deferred`; **motivation subfamily:** `surface.motivation.surfaced`; **evaluation subfamily:** `surface.evaluation.recorded`; **mode subfamily:** `surface.mode.set`; **scene subfamily:** `surface.scene.block.placed` (observational, D5: layout non-canonical); **projection subfamily:** `surface.projection.switched`; **streaming subfamily (S-UCS):** `surface.block.delta` (transient buffer, cleared by `block.generated`; ADR-0028); **agent-observability subfamily (S-UCS):** `surface.agent.reasoning.summary`, `surface.agent.work.timing` (ADR-0029); **source-projection subfamily (proposed, schema 1.6.0, CSE-008):** `surface.source.*`; **Cognitive Theater subfamilies (proposed, ADR-0033):** `surface.director.*`, `surface.affect.observed`, `surface.attention.budgeted` (CSE-011), `surface.scene.*` (CSE-012), `surface.shot.*` (CSE-013) | surface | permanent | replayable |
 | `source.*` | version.registered, layer.constructed, layer.degraded, canonicalization.prioritized, anchor.migrated, enrichment.decided, frontier.updated, claim.recorded, contradiction.detected, transformation.produced, consent.granted, consent.revoked, redaction.cascaded; **fusion subfamily (CSE-015):** `source.fusion.composed`, `source.fusion.concept.reconciled`, `source.fusion.contradiction.surfaced`, `source.fusion.gap.detected`; **creation subfamily (CSE-016):** `source.creation.started`, `source.creation.evolved`, `source.creation.critiqued`, `source.creation.completed`, `source.creation.contributed` (CSE, ADR-0032; acquisition-side `artifact.*` events precede this family per F15 §8) | source-environment | permanent | replayable |
 | `intelligence.*` | distilled, superseded, quarantined, consumed (distillation lifecycle; ADR-0035 — artifacts themselves land via `memory.*`/`world.*`) | intelligence | permanent | replayable |
-| `model.*` | output.recorded, invocation.failed | runtime | permanent | replayable |
+| `model.*` | output.recorded, embedding.recorded, invocation.failed | runtime | permanent | replayable |
 | `gateway.*` | stream.attached, stream.detached | gateway | 1d | recorded-observation |
 | `tool.*` | invoked, completed | tool-runtime | 90d | replayable |
 | `twin.*` | created, branched, exported, terminated | twin-registry | 1y-archive | replayable |

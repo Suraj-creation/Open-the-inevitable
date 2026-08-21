@@ -38,9 +38,9 @@ spec:
     - cognitive-observability
   semantic_tags: [abi, cognitive-unit, plug-in, lifecycle, contract, versioning, interoperability]
   canonical_references:
-    - next-generation-cognitive-operating-system-blueprint#2.1
-    - next-generation-cognitive-operating-system-blueprint#2.2
-    - next-generation-cognitive-operating-system-blueprint#17.2
+    - ../architecture/uci-architecture.md#21-cognitive-unit
+    - ../architecture/uci-architecture.md#22-cognitive-unit-abi
+    - ../architecture/uci-architecture.md
 ```
 
 # Cognitive Unit ABI

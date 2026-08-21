@@ -32,9 +32,7 @@ spec:
     - cognitive-observability
   semantic_tags: [scheduler, priority, fairness, preemption, budget, qos, backpressure, pedagogy-aware]
   canonical_references:
-    - advanced-agent-architecture#22.2
-    - next-generation-cognitive-operating-system-blueprint#4.5
-    - advanced-agent-architecture#26.3
+    - ../architecture/uci-architecture.md#55-cognitive-scheduler
 ```
 
 # Cognitive Scheduler

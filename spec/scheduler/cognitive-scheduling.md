@@ -21,7 +21,7 @@ spec:
   semantic_tags: [scheduler, preemption, fairness, budgets, backpressure, load-shedding, qos, determinism]
   canonical_references:
     - kernel/cognitive-scheduler
-    - next-generation-cognitive-operating-system-blueprint#10
+    - ../architecture/uci-architecture.md#13-cognitive-observability
 ```
 
 # Cognitive Scheduling — Preemption, Fairness, Budgets & Backpressure

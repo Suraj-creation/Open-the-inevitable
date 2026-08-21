@@ -16,7 +16,6 @@ Vision and Philosophy
 
 Primary foundations:
 
-- `spec/advanced-agent-architecture.md`
-- `spec/next-generation-cognitive-operating-system-blueprint.md`
+- `../architecture/uci-architecture.md`
 - `spec/spec-folder-ecosystem.md`
 
