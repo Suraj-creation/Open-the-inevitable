@@ -1,0 +1,29 @@
+{
+  "name": "@inevitable/cognitive-loop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "L2 walking skeleton — the Explainer proof loop: compile → execute → events → state → reflect → govern → next episode (spec/research/living-cognitive-agents/10 §12).",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@inevitable/contracts": "workspace:*",
+    "@inevitable/events": "workspace:*",
+    "@inevitable/protocols": "workspace:*",
+    "@inevitable/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

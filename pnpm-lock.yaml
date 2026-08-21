@@ -236,6 +236,25 @@ importers:
         specifier: workspace:*
         version: link:../source-environment
 
+  packages/cognitive-loop:
+    dependencies:
+      '@inevitable/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@inevitable/events':
+        specifier: workspace:*
+        version: link:../events
+      '@inevitable/protocols':
+        specifier: workspace:*
+        version: link:../protocols
+      '@inevitable/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
+
   packages/context:
     dependencies:
       '@inevitable/contracts':
