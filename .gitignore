@@ -52,3 +52,6 @@ Thumbs.db
 # Codex skill root: a junction onto .claude/skills, derived not authored.
 # Recreate: New-Item -ItemType Junction -Path .agents\skills\build-anything -Target .claude\skills\build-anything
 /.agents/
+
+# Stale editor worktree checkout
+/.kilo/
