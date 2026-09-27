@@ -39,3 +39,16 @@ Thumbs.db
 
 .vercel
 .env*
+
+# Reference architecture repos (external, not project code)
+/Reference-Architecture-Observatory/
+
+# External agent-framework clone (has its own .git)
+/Agents-factory/
+
+# Agent worktrees (disposable)
+/.claude/worktrees/
+
+# Codex skill root: a junction onto .claude/skills, derived not authored.
+# Recreate: New-Item -ItemType Junction -Path .agents\skills\build-anything -Target .claude\skills\build-anything
+/.agents/
