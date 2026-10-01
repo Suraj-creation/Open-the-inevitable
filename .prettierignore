@@ -16,3 +16,6 @@ tmp-events/
 .superpowers/
 Agents-factory/
 .kilo/
+
+# Local, git-ignored Claude Code settings (machine-specific)
+.claude/settings.local.json

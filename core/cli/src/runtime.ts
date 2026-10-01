@@ -30,12 +30,13 @@ export async function openRuntime(
   dataDir: string,
   clock: Clock,
   learner = { misconception: true },
+  acceptanceStreak?: number,
 ): Promise<Runtime> {
   mkdirSync(join(dataDir, "channel"), { recursive: true });
   const store = await SqliteCausalStore.open(join(dataDir, "uci.sqlite"), {
     registry: PROCESS_KINDS,
   });
-  const env = new TutorEnvironment(join(dataDir, "channel"), learner);
+  const env = new TutorEnvironment(join(dataDir, "channel"), learner, acceptanceStreak);
   return { store, env, clock, close: () => store.close() };
 }
 

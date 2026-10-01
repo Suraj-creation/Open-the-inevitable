@@ -60,6 +60,8 @@ export class TutorEnvironment implements EnvironmentPack {
   constructor(
     channelDir: string,
     private readonly learner: LearnerParams = { misconception: true },
+    /** Consecutive held probes required for acceptance. */
+    private readonly acceptanceStreak: number = ACCEPTANCE_STREAK,
   ) {
     this.channel = new DurableChannel(channelDir);
   }
@@ -126,8 +128,8 @@ export class TutorEnvironment implements EnvironmentPack {
   }
 
   acceptanceMet(probeOutcomes: readonly ("held" | "failed" | "indeterminate")[]): boolean {
-    const last = probeOutcomes.slice(-ACCEPTANCE_STREAK);
-    return last.length === ACCEPTANCE_STREAK && last.every((o) => o === "held");
+    const last = probeOutcomes.slice(-this.acceptanceStreak);
+    return last.length === this.acceptanceStreak && last.every((o) => o === "held");
   }
 
   verifierPrivate(): readonly string[] {

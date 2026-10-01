@@ -315,7 +315,8 @@ async function obtainProposal(
   }
 
   // Replay a recorded, not-yet-applied output for this step before ever calling the model again.
-  const key = `model:step-${step}`;
+  // A re-ask after a rejected proposal is a different logical effect, so it carries its own key.
+  const key = `model:step-${step}/ask-${rejections + 1}`;
   const ledger = foldLedger(records);
   const pending = latestUnappliedOutput(records, ledger, key, lastCompleted);
   let output: CausalRecord | undefined = pending;
@@ -444,7 +445,9 @@ async function obtainProposal(
   const validated = validateProposal(text, {
     ws,
     mode,
-    actions: envelope.actions,
+    // Validation checks the action exists; whether it is permitted is governance's decision,
+    // made with a durable record before the effect (never a silent rejection here).
+    actions: env.actions.map((a) => a.name),
     practiceItemIds: env.practiceItems().map((p) => p.itemId),
     acceptanceMet: env.acceptanceMet(ws.probeOutcomes),
     staleness,

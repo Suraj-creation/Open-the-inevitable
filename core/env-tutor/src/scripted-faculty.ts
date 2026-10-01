@@ -41,6 +41,8 @@ interface Seen {
   observations: { id: string; action: string; content: string }[];
   practice: { id: string; a: [number, number]; b: [number, number] }[];
   probes: string[];
+  /** Consecutive held probes the objective's acceptance asks for, read from the working state. */
+  streak: number;
   bridge: boolean;
 }
 
@@ -120,6 +122,7 @@ function parse(prompt: string): Seen {
           ]
         : [];
     }),
+    streak: Number(/Acceptance: (\d+) consecutive/.exec(prompt)?.[1] ?? 3),
     probes: (/oldest first: (.*)\./.exec(prompt)?.[1] ?? "")
       .split(", ")
       .filter((x) => x === "held" || x === "failed" || x === "indeterminate"),
@@ -265,8 +268,8 @@ function decide(s: Seen) {
   let openDecision: object | undefined;
   let resolves: string | undefined;
 
-  const held = s.probes.slice(-3);
-  if (held.length === 3 && held.every((o) => o === "held")) {
+  const held = s.probes.slice(-s.streak);
+  if (held.length === s.streak && held.every((o) => o === "held")) {
     action = { type: "conclude" };
     choice = "conclude: acceptance holds on three consecutive environment-selected probes";
     alternatives = [
