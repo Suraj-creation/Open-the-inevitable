@@ -1,0 +1,17 @@
+{
+  "note": "Gen 1/2 freeze (journal decision-20261001-a80d). Change only in fix: commits; re-baseline with --rebaseline.",
+  "packages": {
+    "packages/kernel": "4147018083236498348528d74b1f7819b7fa876f7079a40c95a62fdb6cd37625",
+    "packages/governance": "2c3e6f185bd61df8265de9da2febeea32610f72709f1b2a997ccc84e902f1cfd",
+    "packages/execution": "84924291a378e1a5390cf4e488144a2e1e6dca5b89ab8cc6cd0f389bd3e65fd1",
+    "packages/events": "afc9963702c419066f2c6a66eb6c2b2f75073c9975f71e340197e906bfe0d8c0",
+    "packages/memory": "b871f340ef654ba05f17b86791060f27fb237be3e9a18f6246839e0b95cf86c3",
+    "packages/world-state": "bef8c7b25b1d296dd0037958ca373d0387af2b3b96fe2f7bbc9f400d5cae4ed2",
+    "packages/context": "ed9a859d1101c1f8cd77d34ccdb4d3377c38925380218a2d54cc643e14b9fc55",
+    "packages/runtime": "77ec0510b1b12f18014b113db87b54fdcd39c74e2335ba05335aa92f49520887",
+    "packages/scheduler": "a1abfdda8a4e83f22d07c760e948316ce74919949d91384e7908e787909e9d8c",
+    "packages/orchestration": "fe3827dbf8a340711647d225c03d12fd8c2c7d9470e80e9e832500b18bfbcc65",
+    "packages/evaluation": "0f56e3fa52a23464ff0dbea0172fc73d63c8bdba01b8c06404b7ea9b13575504",
+    "packages/cognitive-loop": "460224ef59a3b6ccbb097dcf46d321e50b2f52dadebf0cda7b21a582b112e430"
+  }
+}

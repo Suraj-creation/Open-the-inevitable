@@ -221,6 +221,83 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.19)
 
+  core/adapters:
+    dependencies:
+      '@uci/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+    devDependencies:
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
+
+  core/cli:
+    dependencies:
+      '@uci/adapters':
+        specifier: workspace:*
+        version: link:../adapters
+      '@uci/env-tutor':
+        specifier: workspace:*
+        version: link:../env-tutor
+      '@uci/harness':
+        specifier: workspace:*
+        version: link:../harness
+      '@uci/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@uci/substrate':
+        specifier: workspace:*
+        version: link:../substrate
+    devDependencies:
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
+
+  core/env-tutor:
+    dependencies:
+      '@uci/harness':
+        specifier: workspace:*
+        version: link:../harness
+      '@uci/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+    devDependencies:
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
+
+  core/harness:
+    dependencies:
+      '@uci/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@uci/substrate':
+        specifier: workspace:*
+        version: link:../substrate
+    devDependencies:
+      '@uci/adapters':
+        specifier: workspace:*
+        version: link:../adapters
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
+
+  core/kernel:
+    devDependencies:
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
+
+  core/substrate:
+    dependencies:
+      '@uci/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+    devDependencies:
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
+
   packages/adapters:
     dependencies:
       '@inevitable/contracts':
@@ -1912,6 +1989,7 @@ packages:
   eslint@9.39.4:
     resolution: {integrity: sha512-XoMjdBOwe/esVgEvLmNsD3IRHkm7fbKIUGvrleloJXUZgDHig2IPWNniv+GwjyJXzuNqVjlr5+4yVUZjycJwfQ==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'

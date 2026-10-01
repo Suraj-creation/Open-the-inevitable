@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
@@ -32,6 +32,9 @@ jobs:
 
       - name: Validate JSON Schemas against fixtures
         run: pnpm run validate:schemas
+
+      - name: Architecture check
+        run: pnpm run arch:check
 
       - name: Typecheck
         run: pnpm run typecheck

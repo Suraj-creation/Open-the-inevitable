@@ -1,0 +1,34 @@
+{
+  "name": "@uci/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Composition root for UCI Slice 1: wires the SQLite store, the tutoring environment and a faculty into a durable process; run / crash / resume / inspect. Also hosts the reality-test suite, which needs every layer.",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "start": "tsx --disable-warning=ExperimentalWarning src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@uci/adapters": "workspace:*",
+    "@uci/env-tutor": "workspace:*",
+    "@uci/harness": "workspace:*",
+    "@uci/kernel": "workspace:*",
+    "@uci/substrate": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

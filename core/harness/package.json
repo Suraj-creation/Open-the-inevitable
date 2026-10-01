@@ -1,0 +1,31 @@
+{
+  "name": "@uci/harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "UCI harness: the durable cognitive process — stateless step, working-state and context compilation with attention manifests, the proposal contract, governance gate, effect execution through the ledger, verification, and recovery by reconstruction. Holds no cognitive state of its own.",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@uci/kernel": "workspace:*",
+    "@uci/substrate": "workspace:*"
+  },
+  "devDependencies": {
+    "@uci/adapters": "workspace:*",
+    "vitest": "^2.1.8"
+  }
+}

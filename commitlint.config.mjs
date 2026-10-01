@@ -22,6 +22,7 @@ export default {
         "repo",
         "ci",
         "deps",
+        "uci",
       ],
     ],
   },

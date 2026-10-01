@@ -1,0 +1,30 @@
+{
+  "name": "@uci/env-tutor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The tutoring environment pack for UCI Slice 1: an item bank with private answer keys, environment-selected assessment probes, an answer-key verifier, a durable non-idempotent channel outside the process, a deterministic learner fixture, and a scripted rule-based faculty that reads only rendered requests.",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@uci/harness": "workspace:*",
+    "@uci/kernel": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}
