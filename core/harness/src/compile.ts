@@ -296,7 +296,10 @@ it is the typed working state in the request, compiled from durable records. Rul
 Reply with ONE proposal as JSON matching the schema.`;
 
 /** Render the working state for one faculty. Deterministic: the same state always renders the same bytes. */
-export function renderPrompt(ws: WorkingState, mode: Mode): string {
+/** Whether lapsed validity is surfaced to the faculty and enforced by the harness (H-PCS3 arm D turns it off). */
+export type Staleness = "gate" | "off";
+
+export function renderPrompt(ws: WorkingState, mode: Mode, staleness: Staleness = "gate"): string {
   const lines: string[] = [
     `# Working state — process ${ws.processId} (step ${ws.step}), entity ${ws.entityId}`,
   ];
@@ -352,7 +355,8 @@ export function renderPrompt(ws: WorkingState, mode: Mode): string {
       add(
         `- ${c.id} (${d.origin}, ${d.standing}, confidence ${d.confidence}${d.validUntil ? `, valid until ${d.validUntil}` : ""}): "${d.proposition}" Evidence: ${d.evidence.join(", ")}.`,
       );
-      if (c.value.stale) add(`  ⚠ STALE: validity lapsed. Re-validate before relying on ${c.id}.`);
+      if (c.value.stale && staleness === "gate")
+        add(`  ⚠ STALE: validity lapsed. Re-validate before relying on ${c.id}.`);
     }
     if (ws.superseded.length) {
       add("## Superseded claims (do not rely on)");
@@ -418,10 +422,11 @@ export function compileContext(
   ws: WorkingState,
   faculty: { id: string; model: string },
   mode: Mode,
+  staleness: Staleness = "gate",
 ): CompiledContext {
   const request: FacultyRequest = {
     system: SYSTEM_PROMPT,
-    prompt: renderPrompt(ws, mode),
+    prompt: renderPrompt(ws, mode, staleness),
     schema: PROPOSAL_SCHEMA,
     model: faculty.model,
     temperature: 0,

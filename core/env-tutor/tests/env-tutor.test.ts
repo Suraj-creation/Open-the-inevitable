@@ -100,7 +100,11 @@ describe("environment behaviour", () => {
     expect(a.probeItemId).toBe("p-1");
     expect(b.probeItemId).toBe("p-2");
     expect(a.observation).not.toContain("p-1");
-    expect(await env.reconcile("X2-a1")).toEqual({ finding: "delivered", detail: "probe:p-2" });
+    expect(await env.reconcile("X2-a1")).toEqual({
+      finding: "delivered",
+      detail: "probe:p-2",
+      observation: "Delivered the next held-out assessment probe to the learner.",
+    });
     expect(await env.reconcile("X9-a1")).toEqual({ finding: "not_delivered" });
   });
 

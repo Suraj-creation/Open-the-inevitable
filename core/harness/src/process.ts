@@ -116,13 +116,28 @@ export async function resumeProcess(o: ResumeOptions): Promise<Resumed> {
   const reconciled: { effectId: string; finding: string }[] = [];
   for (const entry of unreconciled(foldLedger(await o.store.read(stream)))) {
     const effectId = entry.intended.data.effectId;
-    const { finding, detail } = await o.env.reconcile(effectId);
+    const { finding, detail, observation } = await o.env.reconcile(effectId);
     reconciled.push({ effectId, finding });
     reconciledDrafts.push({
       kind: "effect.reconciled",
       v: 1,
       data: { effectId, finding, method: "channel-outbox", ...(detail ? { detail } : {}) },
     });
+    // Settling is not knowing: record what the world says the effect did, as evidence.
+    if (finding === "delivered" && observation) {
+      const evidenceHash = await o.store.putEvidence("text/plain", observation);
+      reconciledDrafts.push({
+        kind: "evidence.recorded",
+        v: 1,
+        data: {
+          evidenceHash,
+          mediaType: "text/plain",
+          source: "environment",
+          trust: "data",
+          ref: effectId,
+        },
+      });
+    }
   }
   await write(handle, reconciledDrafts);
   if (reconciled.some((r) => r.finding === "unanswerable")) {

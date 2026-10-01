@@ -96,7 +96,9 @@ export interface EnvironmentPack {
   practiceItems(): readonly PracticeItem[];
   perform(request: PerformRequest): Promise<PerformResult>;
   /** Ask the channel whether an effect whose outcome is unknown was actually delivered. */
-  reconcile(effectId: string): Promise<{ finding: ReconcileFinding; detail?: string }>;
+  reconcile(
+    effectId: string,
+  ): Promise<{ finding: ReconcileFinding; detail?: string; observation?: string }>;
   /** Inputs admitted by the channel, in admission order. */
   inbox(): Promise<readonly ChannelInput[]>;
   /** The environment's own verifier for an item answer; the actor can neither read nor edit it. */

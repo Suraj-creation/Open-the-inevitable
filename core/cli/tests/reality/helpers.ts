@@ -40,6 +40,7 @@ export async function rederive(
       ws,
       { id: m.data.faculty, model: m.data.model },
       m.data.mode as Mode,
+      m.data.staleness,
     );
     prompts.push(ctx.request.prompt);
     if (ctx.requestHash !== m.data.requestHash) mismatches.push(m.seq);

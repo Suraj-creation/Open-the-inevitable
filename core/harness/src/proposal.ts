@@ -61,6 +61,8 @@ export interface ValidationContext {
   readonly actions: readonly string[];
   readonly practiceItemIds: readonly string[];
   readonly acceptanceMet: boolean;
+  /** "off" disables the staleness gate (H-PCS3 arm D); default on. */
+  readonly staleness?: "gate" | "off";
 }
 
 /**
@@ -134,7 +136,7 @@ export function validateProposal(
       if (superseded.has(ref)) errors.push(`relies on ${ref}, which is superseded`);
       else if (!current.has(ref))
         errors.push(`relies on ${ref}, which is not a current claim in the working state`);
-      else if (stale.has(ref))
+      else if (stale.has(ref) && vc.staleness !== "off")
         errors.push(`relies on ${ref}, which is STALE: re-validate it first`);
     }
     for (const rev of ws.decisionsInForce.filter((x) => x.value.revised.length)) {

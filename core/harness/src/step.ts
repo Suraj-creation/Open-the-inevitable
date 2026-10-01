@@ -47,6 +47,8 @@ export interface StepDeps {
   readonly faculty: ModelFaculty;
   readonly env: EnvironmentPack;
   readonly mode?: Mode;
+  /** "off" hides lapsed validity from the faculty and disables the gate (H-PCS3 arm D). Default "gate". */
+  readonly staleness?: "gate" | "off";
   /** Test seam: called at each durable boundary; throwing here simulates a crash at that point. */
   readonly crash?: (point: CrashPoint) => void;
 }
@@ -321,8 +323,9 @@ async function obtainProposal(
     ? (await h.store.getEvidence((pending.data as { evidenceHash: string }).evidenceHash))?.content
     : undefined;
 
+  const staleness = deps.staleness ?? "gate";
   if (!output || text === undefined) {
-    const ctx = compileContext(ws, faculty, mode);
+    const ctx = compileContext(ws, faculty, mode, staleness);
     assertNoPrivateLeak(ws, ctx.request.system, env);
     const attempt =
       1 + [...ledger.values()].filter((e) => e.intended.data.idempotencyKey === key).length;
@@ -371,6 +374,7 @@ async function obtainProposal(
           faculty: faculty.id,
           model: faculty.model,
           mode,
+          staleness,
           compiledAt: now,
         },
       },
@@ -443,6 +447,7 @@ async function obtainProposal(
     actions: envelope.actions,
     practiceItemIds: env.practiceItems().map((p) => p.itemId),
     acceptanceMet: env.acceptanceMet(ws.probeOutcomes),
+    staleness,
   });
   if ("errors" in validated) {
     await write(h, [

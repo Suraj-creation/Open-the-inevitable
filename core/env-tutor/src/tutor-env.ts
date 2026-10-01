@@ -8,11 +8,22 @@ import type {
   Verification,
 } from "@uci/harness";
 import type { ReconcileFinding } from "@uci/kernel";
-import { DurableChannel } from "./channel.js";
+import { DurableChannel, type OutboxEntry } from "./channel.js";
 import { findItem, key, parseFraction, PRACTICE, PROBES, prompt } from "./items.js";
 import { type LearnerParams, reply } from "./learner.js";
 
 export const ACCEPTANCE_STREAK = 3;
+
+/** The environment's observation of a delivery; identical whether reported live or by reconciliation. */
+function describe(entry: OutboxEntry): string {
+  const item = entry.params["item_id"] ? findItem(entry.params["item_id"]) : undefined;
+  if (entry.action === "practice" && item)
+    return `Delivered practice item ${item.itemId} (${prompt(item)}) to the learner.`;
+  if (entry.action === "assess")
+    return "Delivered the next held-out assessment probe to the learner.";
+  if (entry.action === "explain") return "Delivered the explanation to the learner.";
+  return "Delivered the question to the learner.";
+}
 
 export const VERIFIER = {
   id: "env-tutor.answer-key",
@@ -77,24 +88,24 @@ export class TutorEnvironment implements EnvironmentPack {
     const answer = reply(this.learner, history, entry);
     if (answer !== undefined)
       this.channel.receive({ from: "learner", content: answer, inReplyTo: request.effectId });
-    const item = request.params["item_id"] ? findItem(request.params["item_id"]) : undefined;
-    const observation =
-      request.action === "practice" && item
-        ? `Delivered practice item ${item.itemId} (${prompt(item)}) to the learner.`
-        : request.action === "assess"
-          ? "Delivered the next held-out assessment probe to the learner."
-          : request.action === "explain"
-            ? "Delivered the explanation to the learner."
-            : "Delivered the question to the learner.";
-    return { delivery: "accepted", observation, ...(probeItemId ? { probeItemId } : {}) };
+    return {
+      delivery: "accepted",
+      observation: describe(entry),
+      ...(probeItemId ? { probeItemId } : {}),
+    };
   }
 
-  async reconcile(effectId: string): Promise<{ finding: ReconcileFinding; detail?: string }> {
+  /** What the channel knows about an effect: whether it was delivered and, if so, what was delivered. */
+  async reconcile(
+    effectId: string,
+  ): Promise<{ finding: ReconcileFinding; detail?: string; observation?: string }> {
     const entry = this.channel.outbox().find((e) => e.effectId === effectId);
     if (!entry) return { finding: "not_delivered" };
-    return entry.probeItemId
-      ? { finding: "delivered", detail: `probe:${entry.probeItemId}` }
-      : { finding: "delivered" };
+    return {
+      finding: "delivered",
+      observation: describe(entry),
+      ...(entry.probeItemId ? { detail: `probe:${entry.probeItemId}` } : {}),
+    };
   }
 
   async inbox(): Promise<readonly ChannelInput[]> {

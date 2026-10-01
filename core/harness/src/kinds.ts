@@ -37,6 +37,8 @@ export interface ManifestRecorded {
   readonly faculty: string;
   readonly model: string;
   readonly mode: "bridge" | "floor-only";
+  /** Whether lapsed validity was surfaced and enforced for this call. */
+  readonly staleness: "gate" | "off";
   /** The world-clock instant the working state was compiled at (staleness and due times depend on it). */
   readonly compiledAt: string;
 }
@@ -109,6 +111,7 @@ export const HARNESS_KINDS = [
       faculty: str,
       model: str,
       mode: oneOf("bridge", "floor-only"),
+      staleness: oneOf("gate", "off"),
       compiledAt: str,
     }),
   ),
