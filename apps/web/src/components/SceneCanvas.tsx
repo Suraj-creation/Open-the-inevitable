@@ -27,23 +27,32 @@ function autoPos(index: number): { x: number; y: number } {
   };
 }
 
-const TYPE_COLORS: Record<string, string> = {
-  explanation: "#6366f1",
-  concept: "#8b5cf6",
-  practice: "#0ea5e9",
-  assessment: "#f59e0b",
-  research: "#10b981",
-  memory: "#ec4899",
-  motivation: "#f97316",
-  routing: "#6b7280",
-  debate: "#ef4444",
-  simulation: "#14b8a6",
-  code: "#84cc16",
-  timeline: "#f472b6",
+/**
+ * Block type to its CDL state hue.
+ *
+ * This was a table of twelve raw hexes (#6366f1, #8b5cf6, #0ea5e9, ...) with no relationship to the
+ * CDL palette at all — a second, invented colour system living inside one component. That is exactly
+ * how a coherent visual language becomes an arbitrary rainbow, and it meant the same kind of
+ * thinking was one colour on the board and a different colour on this canvas. Each type now names
+ * the cognitive state it actually is, and the hue comes from the one palette (CDL v1 §4).
+ */
+const TYPE_STATE: Record<string, string> = {
+  explanation: "--state-learning",
+  concept: "--state-learning",
+  practice: "--state-practice",
+  assessment: "--state-assessment",
+  research: "--state-research",
+  memory: "--state-reflection",
+  motivation: "--state-mastery",
+  routing: "--ink-faint",
+  debate: "--state-confusion",
+  simulation: "--state-practice",
+  code: "--state-research",
+  timeline: "--state-discovery",
 };
 
 function typeColor(blockType: string): string {
-  return TYPE_COLORS[blockType] ?? "#475569";
+  return `var(${TYPE_STATE[blockType] ?? "--ink-faint"})`;
 }
 
 interface BlockDrag {
@@ -180,7 +189,7 @@ export function SceneCanvas({ blocks, focus: _focus, focusedBlockId, onSelect }:
                 dx="0"
                 dy="0"
                 stdDeviation="4"
-                floodColor="#6366f1"
+                floodColor="var(--stage-tint, var(--state-learning))"
                 floodOpacity="0.65"
               />
             </filter>

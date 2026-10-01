@@ -2,19 +2,26 @@
  * SurfaceComposerUnit — teaching content → MCCR + separate narration script + image decision
  * (UCS, ADR-0030). Deterministic: stub models only.
  */
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ModelRuntime } from "@inevitable/contracts";
 import type { CognitionPacket } from "@inevitable/protocols";
 import { SeededIdGenerator } from "@inevitable/shared";
 import { MVP_AGENT_MANIFESTS } from "../src/agent-catalog";
 import {
   SurfaceComposerUnit,
-  deterministicComposition,
+  degradedComposition,
+  repairJsonEnvelope,
   parseComposerOutput,
   type ComposerElement,
 } from "../src/surface-composer-unit";
 
 const composerManifest = MVP_AGENT_MANIFESTS.find((m) => m.id === "agent.composer")!;
+
+// Degraded-path tests opt into production behaviour via COS_ALLOW_DEGRADED_COMPOSITION; restore
+// after each so the strict-mode guard below is never weakened by a neighbouring test's stub.
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function stubModel(text: string, finishReason?: "stop" | "refusal" | "max_tokens"): ModelRuntime {
   return {
@@ -364,19 +371,59 @@ describe("parseComposerOutput", () => {
   });
 });
 
-describe("deterministicComposition", () => {
-  test("is deterministic and yields a minimal, honest board with no media", () => {
-    const a = deterministicComposition(
-      packet({ concept_title: "Eigenvalues", goal: "Linear algebra" }),
-    );
-    const b = deterministicComposition(
-      packet({ concept_title: "Eigenvalues", goal: "Linear algebra" }),
-    );
+describe("degradedComposition", () => {
+  test("asserts only the concept title — never fabricated teaching (CLAUDE.md §3 no fake cognition)", () => {
+    const a = degradedComposition(packet({ concept_title: "Eigenvalues", goal: "Linear algebra" }));
+    const b = degradedComposition(packet({ concept_title: "Eigenvalues", goal: "Linear algebra" }));
     expect(a).toEqual(b);
     expect(a.mccr.core_concept?.content).toEqual({ kind: "text", text: "Eigenvalues" });
-    expect(a.mccr.definition).toBeDefined();
-    expect(a.narration_script.segments).toHaveLength(1);
+    // The regression this guards: a fabricated `definition` and a narration line were shipped to
+    // learners as teaching when cognition had actually failed.
+    expect(a.mccr.definition).toBeUndefined();
+    expect(a.narration_script.segments).toHaveLength(0);
     expect(a.image_plan.helps).toBe(false);
+  });
+
+  test("no degraded board carries invented prose about the subject", () => {
+    const out = degradedComposition(packet({ concept_title: "Entropy", goal: "Thermodynamics" }));
+    const prose = JSON.stringify(out);
+    expect(prose).not.toContain("foundational concept");
+    expect(prose).not.toContain("build an understanding");
+    expect(prose).not.toContain("Thermodynamics");
+  });
+});
+
+describe("repairJsonEnvelope", () => {
+  test("recovers a budget-truncated envelope, keeping the completed anchors", () => {
+    const truncated =
+      '{"mccr":{"core_concept":"Entropy","definition":"A measure of disorder."},"narration_sc';
+    const repaired = repairJsonEnvelope(truncated);
+    expect(repaired).not.toBeNull();
+    const parsed = JSON.parse(repaired!) as { mccr: Record<string, string> };
+    expect(parsed.mccr.core_concept).toBe("Entropy");
+    expect(parsed.mccr.definition).toBe("A measure of disorder.");
+  });
+
+  test("strips prose and fences around an otherwise complete object", () => {
+    const wrapped = [
+      "Here you go:",
+      "```json",
+      '{"mccr":{"core_concept":"Gradient"}}',
+      "```",
+      "Hope that helps!",
+    ].join("\n");
+    const parsed = JSON.parse(repairJsonEnvelope(wrapped)!) as { mccr: Record<string, string> };
+    expect(parsed.mccr.core_concept).toBe("Gradient");
+  });
+
+  test("closes a string cut mid-value rather than discarding the whole composition", () => {
+    const cut = '{"mccr":{"core_concept":"Bayes","definition":"The rule that upd';
+    const parsed = JSON.parse(repairJsonEnvelope(cut)!) as { mccr: Record<string, string> };
+    expect(parsed.mccr.core_concept).toBe("Bayes");
+  });
+
+  test("returns null when there is no object at all", () => {
+    expect(repairJsonEnvelope("I cannot answer that.")).toBeNull();
   });
 });
 
@@ -548,7 +595,8 @@ describe("SurfaceComposerUnit", () => {
     expect(String(captured!["system"])).not.toContain("FUSION MODE");
   });
 
-  test("non-composition output falls back to deterministic composition, visibly degraded", async () => {
+  test("non-composition output degrades honestly, with the truthful cause", async () => {
+    vi.stubEnv("COS_ALLOW_DEGRADED_COMPOSITION", "1");
     const unit = new SurfaceComposerUnit({
       manifest: composerManifest,
       model: stubModel(JSON.stringify({ layers: { layer_0: "x" }, summary: "s" })),
@@ -558,21 +606,75 @@ describe("SurfaceComposerUnit", () => {
       packet({ concept_title: "Backpropagation", goal: "Deep learning" }),
     );
     const content = emissions.packets?.[0]?.content as Record<string, unknown>;
-    expect(content["response_kind"]).toBe("deterministic-composition");
+    expect(content["response_kind"]).toBe("degraded-composition");
     expect(content["fallback_reason"]).toBe("E_MODEL_OUTPUT_MALFORMED");
-    expect(emissions.packets?.[0]?.confidence).toBeLessThanOrEqual(0.5);
+    // Confidence 0, not 0.5: a degraded board holds no cognition to be confident about.
+    expect(emissions.packets?.[0]?.confidence).toBe(0);
+    const degraded = content["degraded"] as Record<string, unknown>;
+    expect(degraded["cause_code"]).toBe("E_MODEL_OUTPUT_MALFORMED");
+    expect(Object.keys(content["mccr"] as Record<string, unknown>)).toEqual(["core_concept"]);
   });
 
-  test("a truncated composition degrades with the truthful E_MODEL_OUTPUT_TRUNCATED reason", async () => {
+  test("strict mode refuses to serve a degraded board (the regression guard)", async () => {
     const unit = new SurfaceComposerUnit({
       manifest: composerManifest,
-      model: stubModel('{"mccr":{"core_concept":"Entro', "max_tokens"),
-      idGenerator: new SeededIdGenerator("comp-trunc"),
+      model: stubModel("not json at all"),
+      idGenerator: new SeededIdGenerator("comp-strict"),
+    });
+    // No COS_ALLOW_DEGRADED_COMPOSITION here: under vitest, strict mode is the default, so a failed
+    // composition must surface as a thrown fault instead of a board that looks like a lesson.
+    await expect(
+      unit.execute(packet({ concept_title: "Entropy", goal: "Physics" })),
+    ).rejects.toThrow();
+  });
+
+  test("an unparseable composition is retried once before conceding", async () => {
+    vi.stubEnv("COS_ALLOW_DEGRADED_COMPOSITION", "1");
+    let calls = 0;
+    const flaky: ModelRuntime = {
+      async generate() {
+        calls += 1;
+        return { text: "not json at all", model: "stub-model", finishReason: "stop" as const };
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const unit = new SurfaceComposerUnit({
+      manifest: composerManifest,
+      model: flaky,
+      idGenerator: new SeededIdGenerator("comp-retry"),
+    });
+    await unit.execute(packet({ concept_title: "Entropy", goal: "Physics" }));
+    expect(calls).toBe(2);
+  });
+
+  test("a truncated composition is REPAIRED into a real board, not degraded", async () => {
+    let calls = 0;
+    const model: ModelRuntime = {
+      async generate() {
+        calls += 1;
+        return {
+          text: '{"mccr":{"core_concept":"Entropy","definition":"A measure of disorder in a system."},"narration_script":{"segments":[{"text":"Entropy measures disorder.","anchor_ref":"definition","intent":"introduce"}]',
+          model: "stub-model",
+          finishReason: "stop" as const,
+        };
+      },
+      async embed() {
+        return [];
+      },
+    };
+    const unit = new SurfaceComposerUnit({
+      manifest: composerManifest,
+      model,
+      idGenerator: new SeededIdGenerator("comp-repaired"),
     });
     const emissions = await unit.execute(packet({ concept_title: "Entropy", goal: "Physics" }));
     const content = emissions.packets?.[0]?.content as Record<string, unknown>;
-    expect(content["response_kind"]).toBe("deterministic-composition");
-    expect(content["fallback_reason"]).toBe("E_MODEL_OUTPUT_TRUNCATED");
+    expect(calls).toBe(1);
+    expect(content["response_kind"]).toBe("model-composition");
+    const mccr = content["mccr"] as Record<string, unknown>;
+    expect(mccr["definition"]).toBeDefined();
   });
 
   test("R2a: source excerpts reach the prompt in SOURCE MODE; goal-mode omits them (ADR-0057)", async () => {

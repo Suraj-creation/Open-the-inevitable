@@ -42,6 +42,119 @@ import { extractCompletedMccrElements, type FrameElementSink } from "./mccr-stre
 
 const SPEC_REF = "protocols/model-invocation-protocol";
 
+/** Attempts allowed for one composition: the first, plus one repair/retry pass. */
+const COMPOSE_ATTEMPTS = 2;
+
+/** Compose failures worth another attempt (malformed/truncated envelope, or a transient provider fault). */
+const RETRYABLE_COMPOSE_CODES: ReadonlySet<string> = new Set([
+  "E_MODEL_OUTPUT_MALFORMED",
+  "E_MODEL_OUTPUT_TRUNCATED",
+  "E_MODEL_QUOTA_EXHAUSTED",
+  "E_MODEL_UNAVAILABLE",
+  "E_MODEL_TIMEOUT",
+]);
+
+function isRetryableComposeFailure(cause: unknown): boolean {
+  if (!(cause instanceof CosError)) return true; // an untyped fault is assumed transient once
+  if (cause.details?.["retryable"] === false) return false;
+  return RETRYABLE_COMPOSE_CODES.has(cause.code);
+}
+
+/**
+ * When true, a failed composition THROWS instead of degrading.
+ *
+ * The reason this exists: a degraded board is structurally similar enough to a taught one that a
+ * green test suite could not tell them apart, so a total cognition outage shipped as a lesson. In
+ * development and test the failure must be loud; in production the learner gets the honest degraded
+ * state instead of a crash. `COS_ALLOW_DEGRADED_COMPOSITION=1` opts a local run back into the
+ * production behaviour (needed by the tests that assert the degraded path itself).
+ */
+function composerStrictMode(): boolean {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+    ?.env;
+  if (!env) return false;
+  if (env["COS_ALLOW_DEGRADED_COMPOSITION"] === "1") return false;
+  return env["NODE_ENV"] === "test" || env["VITEST"] === "true" || env["COS_STRICT_MODEL"] === "1";
+}
+
+/**
+ * Repair a JSON envelope the model did not close cleanly.
+ *
+ * Structured-output calls fail in two mundane ways: the response is wrapped in prose/fences, or it is
+ * cut off at the token budget mid-object. Both leave a valid PREFIX. Slicing to the first `{` and
+ * closing the still-open strings/brackets recovers a parseable object — which usually retains every
+ * completed anchor. Recovering here is strictly better than spending a second model call, and far
+ * better than throwing away a nearly-complete composition.
+ */
+export function repairJsonEnvelope(text: string): string | null {
+  const from = text.indexOf("{");
+  if (from < 0) return null;
+  const body = text.slice(from);
+
+  // Walk once to learn where the envelope actually stands: whether a string is still open, which
+  // brackets remain unclosed, and whether a complete object already ended (trailing prose case).
+  let inString = false;
+  let escaped = false;
+  const open: string[] = [];
+  let firstComplete = -1;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i]!;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      if (inString) escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{" || ch === "[") open.push(ch === "{" ? "}" : "]");
+    else if (ch === "}" || ch === "]") {
+      if (open[open.length - 1] !== ch) return null;
+      open.pop();
+      if (open.length === 0 && firstComplete < 0) firstComplete = i;
+    }
+  }
+
+  // Already-complete object with prose/fences around it: return exactly that object.
+  if (firstComplete >= 0) return parseable(body.slice(0, firstComplete + 1));
+  if (open.length === 0) return null;
+
+  // Truncated. Close any open string, then try progressively more aggressive trims of the incomplete
+  // trailing member. Each candidate is VALIDATED by parsing, so the function never returns a guess:
+  // a truncation can end mid-value, on a key with no value, or on a bare key with no colon yet, and
+  // predicting which by pattern alone is exactly the kind of near-miss that discards a good board.
+  const closed = inString ? `${body}"` : body;
+  const suffix = open.slice().reverse().join("");
+  const candidates = [
+    closed,
+    closed.replace(/,\s*$/, ""),
+    closed.replace(/,?\s*"[^"]*"\s*:\s*$/, ""),
+    closed.replace(/,?\s*"[^"]*"\s*$/, ""),
+    closed.replace(/,?\s*"[^"]*"\s*:\s*"[^"]*"\s*$/, ""),
+  ];
+  for (const candidate of candidates) {
+    const trimmed = candidate.replace(/[,:]\s*$/, "");
+    const result = parseable(trimmed + suffix);
+    if (result !== null) return result;
+  }
+  return null;
+}
+
+/** Return the text when it parses as JSON, else null (the repair validates rather than guesses). */
+function parseable(text: string): string | null {
+  try {
+    JSON.parse(text);
+    return text;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Output contract (plain shapes — the surface package folds these into a CognitiveFrame)
 // ---------------------------------------------------------------------------
@@ -356,36 +469,35 @@ function buildElement(
   };
 }
 
-/** A deterministic, honest MCCR derived from the concept (the fallback composition). */
-export function deterministicComposition(packet: CognitionPacket): ComposerOutput {
+/**
+ * The HONEST degraded composition: what the board holds when cognition could not be produced.
+ *
+ * This function used to fabricate teaching — a `definition` reading "<title> — a foundational concept
+ * on the path to <goal>" and a narration line "Let's build an understanding of <title>." Neither was
+ * grounded in anything; they were sentences shaped like teaching, standing in for cognition that had
+ * failed. That is precisely what CLAUDE.md §3 forbids ("No fake cognition": generated language is not
+ * by itself evidence of cognition). It also hid the failure from the learner, who saw a lesson rather
+ * than an outage.
+ *
+ * So the degraded frame now asserts only what is TRUE: the concept's own title (a fact about the path,
+ * not a claim about the subject) and, in provenance, why cognition is missing and whether retrying can
+ * recover it. It authors NO teaching prose and NO narration voice — an empty script is honest silence,
+ * where an invented sentence was a lie. The surface renders this as a degraded state with a retry
+ * affordance (never as a lesson), and the existing `surface.cognition.degraded` health event still fires.
+ */
+export function degradedComposition(packet: CognitionPacket): ComposerOutput {
   const conceptId = conceptIdOf(packet);
   const title = conceptTitleOf(packet);
-  const goal = goalOf(packet);
-  const mccr: Partial<Record<ComposerSlot, ComposerElement>> = {
-    core_concept: buildElement("core_concept", { kind: "text", text: title }, conceptId),
-    definition: buildElement(
-      "definition",
-      { kind: "text", text: `${title} — a foundational concept on the path to ${goal}.` },
-      conceptId,
-    ),
-  };
   return {
-    mccr,
-    narration_script: {
-      segments: [
-        {
-          text: `Let's build an understanding of ${title}.`,
-          anchor_ref: "core_concept",
-          intent: "introduce",
-          pause_after: false,
-        },
-      ],
+    mccr: {
+      core_concept: buildElement("core_concept", { kind: "text", text: title }, conceptId),
     },
+    narration_script: { segments: [] },
     image_plan: {
       helps: false,
       modality: "none",
       prompt: null,
-      rationale: "deterministic composition does not plan generated media",
+      rationale: "degraded composition does not plan generated media",
     },
   };
 }
@@ -409,9 +521,23 @@ export function parseComposerOutput(
   try {
     raw = JSON.parse(trimmed);
   } catch {
-    throw composerError("E_MODEL_OUTPUT_MALFORMED", "composer output is not valid JSON", {
-      sample: trimmed.slice(0, 200),
-    });
+    // Repair before conceding: a fenced//prose-wrapped or budget-truncated envelope leaves a valid
+    // prefix whose completed anchors are perfectly usable (see `repairJsonEnvelope`).
+    const repaired = repairJsonEnvelope(trimmed);
+    if (repaired === null) {
+      throw composerError("E_MODEL_OUTPUT_MALFORMED", "composer output is not valid JSON", {
+        sample: trimmed.slice(0, 200),
+      });
+    }
+    try {
+      raw = JSON.parse(repaired);
+    } catch {
+      throw composerError(
+        "E_MODEL_OUTPUT_MALFORMED",
+        "composer output is not valid JSON even after repair",
+        { sample: trimmed.slice(0, 200) },
+      );
+    }
   }
   const obj = raw as { mccr?: unknown; narration_script?: unknown; image_plan?: unknown };
   const mccrRaw = (obj.mccr ?? {}) as Record<string, unknown>;
@@ -655,23 +781,55 @@ export class SurfaceComposerUnit implements CognitiveUnit {
   }
 
   async execute(packet: CognitionPacket): Promise<Emissions> {
-    try {
-      return await this.executeWithModel(packet);
-    } catch (cause) {
-      const code = cause instanceof CosError ? cause.code : "E_MODEL_UNAVAILABLE";
-      const composition = deterministicComposition(packet);
-      const response = this.buildResponsePacket(packet, composition, {
-        kind: "deterministic-composition",
-        model: "deterministic",
-        confidence: 0.5,
-        fallbackReason: code,
-      });
-      return { packets: [response], trace: this.buildTrace(packet, composition, "deterministic") };
+    // Repair-then-retry before conceding. A composition is expensive and its two commonest failures
+    // are both recoverable: a malformed/truncated JSON envelope (recovered by repairing the text, or
+    // by one retry with the thinking phase trimmed so the response budget survives) and a transient
+    // provider fault such as a quota window (recovered by simply asking again). Conceding on the
+    // first fault is what made a recoverable hiccup look like a taught lesson.
+    let firstCause: unknown;
+    for (let attempt = 0; attempt < COMPOSE_ATTEMPTS; attempt++) {
+      try {
+        return await this.executeWithModel(packet, attempt);
+      } catch (cause) {
+        if (attempt === 0) firstCause = cause;
+        if (attempt === COMPOSE_ATTEMPTS - 1) break;
+        if (!isRetryableComposeFailure(cause)) break;
+      }
     }
+
+    const cause = firstCause;
+    const code = cause instanceof CosError ? cause.code : "E_MODEL_UNAVAILABLE";
+    // A degradation must never pass unnoticed in development or test: the whole reason this class of
+    // bug shipped is that a green suite could not distinguish a taught frame from a degraded one.
+    if (composerStrictMode()) {
+      throw cause instanceof Error
+        ? cause
+        : composerError(code, "composition failed and strict mode forbids degrading");
+    }
+    const composition = degradedComposition(packet);
+    const detail = cause instanceof CosError ? cause.details : undefined;
+    const retryAfterMs =
+      typeof detail?.["retryAfterMs"] === "number" ? detail["retryAfterMs"] : null;
+    const response = this.buildResponsePacket(packet, composition, {
+      kind: "degraded-composition",
+      model: "degraded",
+      confidence: 0,
+      fallbackReason: code,
+      degraded: {
+        cause_code: code,
+        retryable: detail?.["retryable"] === true,
+        retry_after_ms: retryAfterMs,
+        message: cause instanceof Error ? cause.message.slice(0, 300) : String(cause).slice(0, 300),
+      },
+    });
+    return { packets: [response], trace: this.buildTrace(packet, composition, "degraded") };
   }
 
-  private async executeWithModel(packet: CognitionPacket): Promise<Emissions> {
-    const request = this.buildRequest(packet);
+  private async executeWithModel(packet: CognitionPacket, attempt = 0): Promise<Emissions> {
+    const base = this.buildRequest(packet);
+    // On a retry, spend the whole budget on the response: an uncapped thinking phase eating the
+    // output budget is the documented root cause of truncated composer JSON.
+    const request: ModelGenerationRequest = attempt === 0 ? base : { ...base, thinkingBudget: 0 };
     // ADR-0063 Phase B: when a live sink is attached AND the model can stream, distill the board from
     // the token stream and report each MCCR string anchor the moment it completes. Otherwise the
     // whole-response path runs (the default + deterministic/replay). Either way the assembled `result`
@@ -839,7 +997,19 @@ export class SurfaceComposerUnit implements CognitiveUnit {
   private buildResponsePacket(
     packet: CognitionPacket,
     composition: ComposerOutput,
-    meta: { kind: string; model: string; confidence: number; fallbackReason?: string },
+    meta: {
+      kind: string;
+      model: string;
+      confidence: number;
+      fallbackReason?: string;
+      /** Present only on the degraded path: the truthful reason cognition is missing. */
+      degraded?: {
+        cause_code: string;
+        retryable: boolean;
+        retry_after_ms: number | null;
+        message: string;
+      };
+    },
   ): CognitionPacket {
     return {
       packet_id: newPacketId(this.idGenerator),
@@ -865,6 +1035,7 @@ export class SurfaceComposerUnit implements CognitiveUnit {
         image_plan: composition.image_plan,
         model: meta.model,
         ...(meta.fallbackReason ? { fallback_reason: meta.fallbackReason } : {}),
+        ...(meta.degraded ? { degraded: meta.degraded } : {}),
         prepared_lease_id: this.preparedLeaseId,
       },
       evidence: [

@@ -49,6 +49,7 @@ export type {
   ExpertiseLevel,
   RepresentationAdaptivity,
 } from "./representation";
+export { EPISTEMIC_ROLE_ORDER } from "./representation";
 export { deriveEpisodes, currentEpisode } from "./episodes";
 export type { Episode } from "./episodes";
 export type { SemanticSection } from "./semantic-explanation";

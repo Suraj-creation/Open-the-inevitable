@@ -44,9 +44,187 @@ function modelError(code: string, message: string, details?: Record<string, unkn
   return new CosError(code, message, { specRef: SPEC_REF, details });
 }
 
+/**
+ * Classify a raw provider failure into a TRUTHFUL typed cause (CLAUDE.md §2 truth model).
+ *
+ * Without this every provider failure reached the units as a bare `Error` with no `code`, so they
+ * all collapsed into `E_MODEL_UNAVAILABLE` — a quota exhaustion (transient, the API even tells you
+ * when to retry), a retired model id (permanent, needs an ops change), and a real outage were
+ * reported as the same thing. The degraded frame then named the wrong cause. The distinctions that
+ * matter operationally:
+ *
+ * - `E_MODEL_QUOTA_EXHAUSTED` — 429 / RESOURCE_EXHAUSTED. Transient. Carries `retryAfterMs` parsed
+ *   from the provider's own `RetryInfo`, so the caller can wait exactly as long as asked.
+ * - `E_MODEL_NOT_FOUND` — 404. The pinned/aliased model id was retired. Never retry; it needs
+ *   `GEMINI_MODEL` repointed. Carries the provider's suggested replacement when it offers one.
+ * - `E_MODEL_AUTH` — 401/403. Never retry.
+ * - `E_MODEL_UNAVAILABLE` — everything else (network, 503, overload). Retryable with backoff.
+ */
+export function classifyProviderError(error: unknown): CosError {
+  if (error instanceof CosError) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  const status = /"status"\s*:\s*"([A-Z_]+)"/.exec(message)?.[1] ?? "";
+  const httpCode = Number(/"code"\s*:\s*(\d{3})/.exec(message)?.[1] ?? 0);
+  const retryMatch = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(message);
+  const retryAfterMs = retryMatch ? Math.ceil(Number(retryMatch[1]) * 1000) : undefined;
+  const suggested = /use\s+models\/([\w.-]+)/.exec(message)?.[1];
+
+  if (httpCode === 429 || status === "RESOURCE_EXHAUSTED") {
+    return modelError("E_MODEL_QUOTA_EXHAUSTED", "model quota exhausted", {
+      retryable: true,
+      ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+      provider_message: message.slice(0, 400),
+    });
+  }
+  if (httpCode === 404 || status === "NOT_FOUND") {
+    return modelError("E_MODEL_NOT_FOUND", "model id is not available to this key", {
+      retryable: false,
+      ...(suggested ? { suggested_model: suggested } : {}),
+      provider_message: message.slice(0, 400),
+    });
+  }
+  if (
+    httpCode === 401 ||
+    httpCode === 403 ||
+    status === "PERMISSION_DENIED" ||
+    status === "UNAUTHENTICATED"
+  ) {
+    return modelError("E_MODEL_AUTH", "model credential rejected", {
+      retryable: false,
+      provider_message: message.slice(0, 400),
+    });
+  }
+  return modelError("E_MODEL_UNAVAILABLE", "model provider unavailable", {
+    retryable: true,
+    provider_message: message.slice(0, 400),
+  });
+}
+
+/** True when a typed provider cause is worth another attempt. */
+export function isRetryableModelError(error: CosError): boolean {
+  return error.details?.["retryable"] === true;
+}
+
+/** The provider-requested wait before retrying, when it named one. */
+export function retryAfterMsOf(error: CosError): number | undefined {
+  const value = error.details?.["retryAfterMs"];
+  return typeof value === "number" ? value : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // NullModelRuntime — deterministic reference implementation
 // ---------------------------------------------------------------------------
+
+/** Does this request's declared response schema carry the given top-level property? */
+function schemaDeclares(input: ModelGenerationRequest, property: string): boolean {
+  const schema = input.responseSchema as { properties?: Record<string, unknown> } | undefined;
+  return schema?.properties !== undefined && property in schema.properties;
+}
+
+/**
+ * The deterministic answer for a request, chosen by the CONTRACT the caller declared.
+ *
+ * Previously this runtime only ever produced the F04 `layers` shape. That shape has no `mccr` key, so
+ * every offline run of the frame path failed `parseComposerOutput` and silently landed on the degraded
+ * composition — which meant the hermetic suite was asserting the structure of a DEGRADED board and
+ * could never detect the regression it was meant to guard (CLAUDE.md §2: tests express *verified
+ * behaviour*, so they must exercise the healthy contract). Answering the declared `responseSchema`
+ * keeps this runtime a pure function of the request while making the offline path a real composition.
+ */
+function nullPayloadFor(input: ModelGenerationRequest, subject: string): Record<string, unknown> {
+  const topic = subject.length > 0 ? subject : "the concept";
+
+  // The Surface Composer contract: MCCR board + a separate narration script + an image decision.
+  if (schemaDeclares(input, "mccr")) {
+    return {
+      mccr: {
+        core_concept: topic,
+        definition: `${topic} is the deterministic reference definition used when no model is configured.`,
+        mental_model: `Picture ${topic} as a fixed reference point on the board.`,
+        key_example: `Worked instance: applying ${topic} to a reference input yields the reference result.`,
+        memory_cue: `${topic}: reference in, reference out.`,
+      },
+      narration_script: {
+        segments: [
+          {
+            text: `We start from what ${topic} is.`,
+            anchor_ref: "core_concept",
+            intent: "introduce",
+            pause_after: false,
+          },
+          {
+            text: `Precisely, ${topic} is stated on the board.`,
+            anchor_ref: "definition",
+            intent: "build",
+            pause_after: false,
+          },
+          {
+            text: `Intuitively, hold ${topic} as a fixed reference point.`,
+            anchor_ref: "mental_model",
+            intent: "illustrate",
+            pause_after: false,
+          },
+          {
+            text: `Here it is worked through end to end.`,
+            anchor_ref: "key_example",
+            intent: "illustrate",
+            pause_after: false,
+          },
+          {
+            text: `Keep the cue in mind as we move on.`,
+            anchor_ref: "memory_cue",
+            intent: "reinforce",
+            pause_after: false,
+          },
+        ],
+      },
+      image_plan: { helps: false, prompt: null, rationale: "null-model plans no generated media" },
+    };
+  }
+
+  // The Frame Planner contract: a sequence of frames, look-ahead bets, and pacing.
+  if (schemaDeclares(input, "frames")) {
+    return {
+      frames: [
+        {
+          title: topic,
+          sub_focus: `what ${topic} is`,
+          archetype: "concept-first",
+          slots: ["core_concept", "definition"],
+          intent: "introduce",
+        },
+        {
+          title: `${topic} in use`,
+          sub_focus: `applying ${topic}`,
+          archetype: "example-led",
+          slots: ["core_concept", "key_example"],
+          intent: "illustrate",
+        },
+      ],
+      lookahead: [
+        {
+          title: `after ${topic}`,
+          sub_focus: "the next step on the path",
+          archetype: "concept-first",
+          slots: ["core_concept"],
+          trigger_assumption: "learner masters this concept and advances",
+        },
+      ],
+      pacing: { strategy: "progressive", notes: "null-model deterministic pacing" },
+    };
+  }
+
+  // Default: the F04 layered explanation contract.
+  return {
+    layers: {
+      layer_0: `Intuition: ${subject}`,
+      layer_1: `Visual model: a deterministic diagram of "${subject}"`,
+    },
+    summary: `Deterministic null-model response for: ${subject}`,
+    confidence: 0.9,
+    reasoning: "null-model: derived deterministically from the request prompt",
+  };
+}
 
 /**
  * Deterministic model runtime: output is a pure function of the request. Produces the layered
@@ -56,19 +234,11 @@ export class NullModelRuntime implements ModelRuntime {
   async generate(input: ModelGenerationRequest): Promise<ModelGenerationResult> {
     const subject = (input.prompt.split("\n")[0] ?? "")
       .replace(/^Intent:\s*/i, "")
+      .replace(/^Concept to teach:\s*/i, "")
       .trim()
       .slice(0, 120);
-    const payload = {
-      layers: {
-        layer_0: `Intuition: ${subject}`,
-        layer_1: `Visual model: a deterministic diagram of "${subject}"`,
-      },
-      summary: `Deterministic null-model response for: ${subject}`,
-      confidence: 0.9,
-      reasoning: "null-model: derived deterministically from the request prompt",
-    };
     return {
-      text: JSON.stringify(payload),
+      text: JSON.stringify(nullPayloadFor(input, subject)),
       model: input.model ?? "null-model",
       finishReason: "stop",
       usage: { inputTokens: input.prompt.length, outputTokens: 0 },
@@ -280,6 +450,8 @@ export class GeminiModelRuntime implements ModelRuntime {
     const model = input.model ?? this.defaultModel;
     const RETRY_DELAYS_MS = [1000, 2000, 4000];
     let lastError: unknown;
+    // Longest provider-requested wait we will actually sit through on a learner-facing call.
+    const PROVIDER_RETRY_CAP_MS = 12_000;
     for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
       try {
         const response = await this.client.models.generateContent({
@@ -303,21 +475,22 @@ export class GeminiModelRuntime implements ModelRuntime {
           ...(citations.length > 0 ? { citations } : {}),
         };
       } catch (error) {
-        lastError = error;
-        const msg = error instanceof Error ? error.message : String(error);
-        // Retry only on transient network/overload errors; bail immediately on auth errors.
-        // Quota exhaustion (429 RESOURCE_EXHAUSTED) is NOT retried with long backoff here — under
-        // hard quota the retries only stack multi-second delays onto an already-serialized ask and
-        // still end in a fallback; fail fast so the degraded path is reached quickly and visibly.
-        const isTransient =
-          msg.includes("fetch failed") ||
-          msg.includes("network") ||
-          msg.includes("ECONNRESET") ||
-          msg.includes("503") ||
-          msg.includes("overloaded") ||
-          msg.includes("UNAVAILABLE");
-        if (!isTransient || attempt >= RETRY_DELAYS_MS.length) break;
-        await new Promise((res) => setTimeout(res, RETRY_DELAYS_MS[attempt]));
+        // Classify FIRST so the cause that escapes is truthful (a quota exhaustion, a retired model
+        // id, and an outage are different facts and must not all surface as "model unavailable").
+        const typed = classifyProviderError(error);
+        lastError = typed;
+        if (!isRetryableModelError(typed) || attempt >= RETRY_DELAYS_MS.length) break;
+        // Honour the provider's OWN RetryInfo when it names one (quota replies routinely say
+        // "retry in 8s"): waiting exactly that long recovers the call instead of degrading a
+        // recoverable request into a degraded frame. Capped so a long quota window fails fast
+        // rather than stalling the learner behind a multi-minute sleep.
+        const requested = retryAfterMsOf(typed);
+        const backoff =
+          requested !== undefined
+            ? Math.min(requested + 250, PROVIDER_RETRY_CAP_MS)
+            : (RETRY_DELAYS_MS[attempt] ?? 0);
+        if (requested !== undefined && requested > PROVIDER_RETRY_CAP_MS) break;
+        await new Promise((res) => setTimeout(res, backoff));
       }
     }
     throw lastError;

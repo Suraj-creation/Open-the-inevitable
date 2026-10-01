@@ -204,6 +204,173 @@
      current focal accent. */
   --stage-tint: var(--state-learning);
 
+  /* ==============================================================================================
+     THE SEMANTIC ROLE LAYER - epistemic role to visual treatment (CSE-018 Law 5; CDL v1 4/5/6).
+
+     What this replaces. The role-to-visual mapping existed as ONE variable (--role-hue), defined
+     for 7 of the roles and read by three declarations, all of which coloured a small uppercase
+     label. Meanwhile the real visual differentiation lived in per-MCCR-type rules
+     (.mccr-el--definition, .mccr-el--memory_cue, ...). So the same knowledge kind looked different
+     depending on which producer emitted it, four MCCR types had no treatment at all, and the
+     learner had nothing stable to internalise. This layer makes the ROLE the carrier, once, for
+     every producer.
+
+     Why these five channels, and why so restrained:
+     - HUE is a categorical cue, not decoration. Preattentive vision resolves colour categories in
+       roughly 200ms, before reading - but only across a SMALL set of well-separated hues. So roles
+       reuse the eight CDL v1 --state-* hues rather than inventing new ones, and several roles
+       deliberately SHARE a hue while differing in edge, wash, and face.
+     - Colour is never the sole carrier (CSE-008 5.2, WCAG 1.4.1): every role also carries a spoken
+       label plus its own edge weight, wash, and typeface. That is what keeps it legible under any
+       colour-vision deficiency and in monochrome.
+     - WASH stays at the CDL ambient amplitude (4-8%) and EDGE at its structural amplitude
+       (35-62%). Mayer signalling (d = 0.41) says cue the organisation; the coherence principle
+       (d = 0.86) says extraneous decoration actively costs learning. A tint plus an edge signals a
+       boundary at a fraction of the visual weight of a card - which is why most roles get an edge
+       rather than a container. The surface must not become a stack of cards.
+     - SALIENCE is an explicit 0-3 rank so the renderer can honour "one focal accent at a time"
+       instead of every region shouting.
+     - FACE ties the role to CDL v1 5: Fraunces = knowledge, Space Grotesk = instrument,
+       Space Mono = provenance/data.
+     - TIER names which presentation primitive the role uses, completing the chain the product
+       needs: epistemic role -> semantic token -> presentation primitive -> composition.
+       bare   = no chrome at all (the text IS the board);
+       edge   = prose lit by a 2px edge and a faint directional wash (NOT a card);
+       region = a bounded, quiet container for something you enter and work through.
+       Most roles are bare or edge on purpose. If every role were a region the surface would
+       become a stack of cards, which is the visual noise the coherence principle penalises.
+
+     Contract: every role in EPISTEMIC_ROLE_ORDER defines all five channels. A role missing a
+     channel is a bug, and apps/web/tests/semantic-role-tokens.test.ts fails on it.
+     ============================================================================================== */
+
+  /* canonical - the concept itself. No chrome at all: the concept IS the board (CDL v1 5, Canon). */
+  --role-canonical-hue: var(--state-learning);
+  --role-canonical-edge: transparent;
+  --role-canonical-wash: transparent;
+  --role-canonical-salience: 3;
+  --role-canonical-face: var(--font-serif);
+  --role-canonical-tier: bare;
+
+  /* orientation - where we are and what we are about to build. Quiet, wide, ahead of the content. */
+  --role-orientation-hue: var(--state-discovery);
+  --role-orientation-edge: color-mix(in oklab, var(--state-discovery) 38%, transparent);
+  --role-orientation-wash: color-mix(in oklab, var(--state-discovery) 5%, transparent);
+  --role-orientation-salience: 2;
+  --role-orientation-face: var(--font-serif);
+  --role-orientation-tier: edge;
+
+  /* definition - the precise statement. Prose under a state edge-light, never a card. */
+  --role-definition-hue: var(--state-learning);
+  --role-definition-edge: color-mix(in oklab, var(--state-learning) 55%, transparent);
+  --role-definition-wash: color-mix(in oklab, var(--state-learning) 7%, transparent);
+  --role-definition-salience: 3;
+  --role-definition-face: var(--font-serif);
+  --role-definition-tier: edge;
+
+  /* reasoning - derivation and formal structure. Data face; steps read as constructed, not stacked. */
+  --role-reasoning-hue: var(--state-research);
+  --role-reasoning-edge: color-mix(in oklab, var(--state-research) 42%, transparent);
+  --role-reasoning-wash: color-mix(in oklab, var(--state-research) 5%, transparent);
+  --role-reasoning-salience: 2;
+  --role-reasoning-face: var(--font-mono);
+  --role-reasoning-tier: region;
+
+  /* example - the worked instance. Contained, because a worked example is a bounded thing you enter. */
+  --role-example-hue: var(--state-practice);
+  --role-example-edge: color-mix(in oklab, var(--state-practice) 45%, transparent);
+  --role-example-wash: color-mix(in oklab, var(--state-practice) 5%, transparent);
+  --role-example-salience: 2;
+  --role-example-face: var(--font-ui);
+  --role-example-tier: region;
+
+  /* warning - a real hazard in the material. Ember: redirection, never alarm (CDL v1 4). */
+  --role-warning-hue: var(--state-confusion);
+  --role-warning-edge: color-mix(in oklab, var(--state-confusion) 55%, transparent);
+  --role-warning-wash: color-mix(in oklab, var(--state-confusion) 6%, transparent);
+  --role-warning-salience: 3;
+  --role-warning-face: var(--font-ui);
+  --role-warning-tier: edge;
+
+  /* misconception - the belief that dissolves into the truth. Same ember family as warning, but a
+     heavier edge and the contrastive dissolve treatment distinguish it without a second hue. */
+  --role-misconception-hue: var(--state-confusion);
+  --role-misconception-edge: color-mix(in oklab, var(--state-confusion) 62%, transparent);
+  --role-misconception-wash: color-mix(in oklab, var(--state-confusion) 7%, transparent);
+  --role-misconception-salience: 3;
+  --role-misconception-face: var(--font-serif);
+  --role-misconception-tier: edge;
+
+  /* insight - intuition, analogy, the mental model. Italic serif: a different voice, not a louder one. */
+  --role-insight-hue: var(--state-mastery);
+  --role-insight-edge: color-mix(in oklab, var(--state-mastery) 40%, transparent);
+  --role-insight-wash: color-mix(in oklab, var(--state-mastery) 5%, transparent);
+  --role-insight-salience: 2;
+  --role-insight-face: var(--font-serif);
+  --role-insight-tier: region;
+
+  /* memory-cue - what to carry forward. High salience, small footprint: reflection tint, not gold. */
+  --role-memory-cue-hue: var(--state-reflection);
+  --role-memory-cue-edge: color-mix(in oklab, var(--state-reflection) 48%, transparent);
+  --role-memory-cue-wash: color-mix(in oklab, var(--state-reflection) 6%, transparent);
+  --role-memory-cue-salience: 3;
+  --role-memory-cue-face: var(--font-serif);
+  --role-memory-cue-tier: region;
+
+  /* question - what the learner is being asked. Assessment violet: proving, not testing. */
+  --role-question-hue: var(--state-assessment);
+  --role-question-edge: color-mix(in oklab, var(--state-assessment) 50%, transparent);
+  --role-question-wash: color-mix(in oklab, var(--state-assessment) 6%, transparent);
+  --role-question-salience: 2;
+  --role-question-face: var(--font-serif);
+  --role-question-tier: edge;
+
+  /* transition - the bridge to what comes next. The quietest role in the system, by design: a
+     transition that competes with the content it hands off to has failed. */
+  --role-transition-hue: var(--ink-faint);
+  --role-transition-edge: transparent;
+  --role-transition-wash: transparent;
+  --role-transition-salience: 0;
+  --role-transition-face: var(--font-ui);
+  --role-transition-tier: bare;
+
+  /* observation - a fact, a table, a noted detail. Neutral by intent, so it never competes. */
+  --role-observation-hue: var(--ink-faint);
+  --role-observation-edge: var(--hairline-strong);
+  --role-observation-wash: transparent;
+  --role-observation-salience: 1;
+  --role-observation-face: var(--font-ui);
+  --role-observation-tier: region;
+
+  /* evidence - the source own words. Reads in the SOURCE channel, not ours (CSE-008 7). */
+  --role-evidence-hue: var(--state-discovery);
+  --role-evidence-edge: color-mix(in oklab, var(--state-discovery) 45%, transparent);
+  --role-evidence-wash: color-mix(in oklab, var(--state-discovery) 4%, transparent);
+  --role-evidence-salience: 2;
+  --role-evidence-face: var(--font-reading);
+  --role-evidence-tier: region;
+
+  /* structural - diagrams and relationships: the shape of the idea, carried by the shape itself. */
+  --role-structural-hue: var(--stage-tint);
+  --role-structural-edge: var(--hairline-strong);
+  --role-structural-wash: transparent;
+  --role-structural-salience: 1;
+  --role-structural-face: var(--font-ui);
+  --role-structural-tier: region;
+
+  /* Previously-undeclared tokens that load-bearing rules were already reading. Each fell back to a
+     hardcoded family or colour, silently bypassing the token layer - --font-reading is why the
+     source-reading pane rendered in Georgia instead of Fraunces (CDL v1 5: the source reads in the
+     knowledge face). */
+  --font-reading: var(--font-serif);
+  --font-sans: var(--font-ui);
+  --font-math: "Cambria Math", "STIX Two Math", var(--font-serif);
+  --surface-raised: var(--plane-raised);
+  --state-caution: var(--state-discovery);
+  --radius-md: var(--r-md);
+  --line-soft: var(--hairline-strong);
+  --s-9: 5rem;
+
   color-scheme: dark;
 }
 

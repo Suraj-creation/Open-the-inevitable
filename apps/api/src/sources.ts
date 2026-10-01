@@ -1489,6 +1489,10 @@ export class SourceHub {
         concept_ref: conceptId,
         granularity: created.value.granularity,
         region: view,
+        // Carry the resolution origin forward: this is a POSITIONAL guess (the document's structural
+        // lead for the concept's position), not evidence that this passage is what is being taught.
+        // `planSourceProjection` reads it and keeps such a source peripheral rather than focal.
+        created_by: "viewport-fallback",
       },
     ];
   }
@@ -1873,6 +1877,7 @@ export class SourceHub {
           concept_ref: conceptId,
           granularity: anchor.granularity,
           region,
+          created_by: anchor.created_by,
         });
       }
     }
@@ -1935,6 +1940,7 @@ export class SourceHub {
           concept_ref: conceptId,
           granularity: created.value.granularity,
           region: view,
+          created_by: created.value.created_by,
         });
       }
     }

@@ -138,6 +138,7 @@ export {
   epistemicRoleFor,
   hierarchyFor,
   DENSITY_BUDGET,
+  EPISTEMIC_ROLE_ORDER,
   type EpistemicRole,
   type RepresentationHierarchy,
   type RepresentationElementPlan,

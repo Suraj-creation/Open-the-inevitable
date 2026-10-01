@@ -67,7 +67,8 @@ export type {
 } from "./surface-composer-unit";
 export {
   SurfaceComposerUnit,
-  deterministicComposition,
+  degradedComposition,
+  repairJsonEnvelope,
   parseComposerOutput,
 } from "./surface-composer-unit";
 export {

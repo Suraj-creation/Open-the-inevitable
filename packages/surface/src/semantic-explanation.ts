@@ -9,7 +9,7 @@
  * existing epistemic roles, so the explanation joins the structured, token-styled surface the board
  * already enjoys. Deterministic and pure — the structuring is a fold over the layers, not cognition.
  */
-import type { EpistemicRole } from "./representation";
+import { EPISTEMIC_ROLE_ORDER, type EpistemicRole } from "./representation";
 
 /**
  * The version of the explanation-layer → epistemic-role mapping. Stamped onto every structured
@@ -102,19 +102,7 @@ export function structureExplanation(
 }
 
 /** The canonical EpistemicRole set as a runtime guard for coercion (representation.ts is the type). */
-const EPISTEMIC_ROLES: ReadonlySet<string> = new Set<EpistemicRole>([
-  "canonical",
-  "definition",
-  "reasoning",
-  "example",
-  "warning",
-  "misconception",
-  "insight",
-  "memory-cue",
-  "observation",
-  "evidence",
-  "structural",
-]);
+const EPISTEMIC_ROLES: ReadonlySet<string> = new Set<EpistemicRole>(EPISTEMIC_ROLE_ORDER);
 
 /** Aliases a producing faculty may use → the canonical EpistemicRole (the integration boundary). */
 const ROLE_ALIASES: Readonly<Record<string, EpistemicRole>> = {
@@ -124,13 +112,26 @@ const ROLE_ALIASES: Readonly<Record<string, EpistemicRole>> = {
   derivation: "reasoning",
   math: "reasoning",
   mathematical: "reasoning",
+  proof: "reasoning",
+  "proof-step": "reasoning",
   application: "example",
   applied: "example",
   code: "example",
+  process: "example",
   visual: "structural",
   diagram: "structural",
   summary: "observation",
   frontier: "evidence",
+  // The instructional arc: a producer naming these now lands on a real role instead of `observation`.
+  overview: "orientation",
+  roadmap: "orientation",
+  "where-we-are": "orientation",
+  bridge: "transition",
+  "next-up": "transition",
+  connection: "transition",
+  prompt: "question",
+  check: "question",
+  hypothesis: "question",
 };
 
 /** Coerce an arbitrary role string (from a model faculty) to a valid EpistemicRole. Unknown → observation. */

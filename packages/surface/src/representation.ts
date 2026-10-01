@@ -12,9 +12,22 @@
  * density verdict, adaptivity) layers over this floor in R4d.
  */
 
-/** The kind of knowledge an element carries (CSE-018 §4; the CDL renders each as a visual language). */
+/**
+ * The kind of knowledge an element carries (CSE-018 §4; the CDL renders each as a visual language).
+ *
+ * This is the ONE role authority for the whole system — MCCR board elements, explanation sections,
+ * and any future producer all map into it (`ROLE_BY_TYPE` below, `coerceEpistemicRole` in
+ * semantic-explanation.ts). New roles are added here or nowhere; a parallel vocabulary would break
+ * "one concept, one authority" and split the visual language that makes the roles learnable.
+ *
+ * `orientation`, `transition`, and `question` complete the instructional arc that the seven-layer
+ * explanation model (F04) and CSE-018 §4 already imply: where am I, where is this going, and what
+ * am I being asked. CSE-018 §4 already lists `question`; `orientation` and `transition` were the
+ * two kinds a lesson needs that had nowhere to live, so they were being rendered as ordinary prose.
+ */
 export type EpistemicRole =
   | "canonical"
+  | "orientation"
   | "definition"
   | "reasoning"
   | "example"
@@ -22,9 +35,29 @@ export type EpistemicRole =
   | "misconception"
   | "insight"
   | "memory-cue"
+  | "question"
+  | "transition"
   | "observation"
   | "evidence"
   | "structural";
+
+/** Every role, in canonical order — the exhaustive list the design layer must cover. */
+export const EPISTEMIC_ROLE_ORDER: readonly EpistemicRole[] = [
+  "canonical",
+  "orientation",
+  "definition",
+  "reasoning",
+  "example",
+  "warning",
+  "misconception",
+  "insight",
+  "memory-cue",
+  "question",
+  "transition",
+  "observation",
+  "evidence",
+  "structural",
+];
 
 /** Where an element sits in the frame's representational hierarchy (CSE-018 §4, Law 1/3). */
 export type RepresentationHierarchy = "primary" | "supporting" | "residue";
@@ -79,6 +112,10 @@ const ROLE_BY_TYPE: Record<string, EpistemicRole> = {
   mental_model: "insight",
   table: "observation",
   key_example: "example",
+  // `process` is a procedure to follow and `code` is source to read: both are worked, followable
+  // instances, so they carry `example` rather than falling through to the `observation` default.
+  process: "example",
+  code: "example",
   misconception: "misconception",
   memory_cue: "memory-cue",
   image: "observation",

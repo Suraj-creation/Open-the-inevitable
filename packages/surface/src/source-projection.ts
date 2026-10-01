@@ -38,7 +38,17 @@ export interface SourceEvidenceAnchorView {
   readonly concept_ref: string;
   readonly granularity: string;
   readonly region: SourceRegionView;
+  /**
+   * How this anchor was resolved. `viewport-fallback` marks the ADR-0064 positional lead-region
+   * guess — the document's structural head, used when no lexical or soft match was found. Such an
+   * anchor is NOT evidence that the frame discusses this passage, so it must never claim focal
+   * attention (see `planSourceProjection`). Absent ⇒ a genuine match.
+   */
+  readonly created_by?: string;
 }
+
+/** Anchors resolved positionally rather than by matching — never focal (ADR-0064 confidence law). */
+const POSITIONAL_ANCHOR_ORIGINS: ReadonlySet<string> = new Set(["viewport-fallback"]);
 
 /**
  * The session's source-evidence seam: resolved anchors for a concept across the surface's
@@ -480,13 +490,10 @@ export function planSourceProjection(
   // Ids are allocated planId → viewports → highlights, in this exact order in BOTH paths, so the
   // seeded id stream (and thus replay) is byte-identical to pre-R2d for the legacy positional path.
   const planId = `vpp-${input.hex(8)}`;
-  const viewports: SourceViewport[] = anchors.map((a, i) => ({
-    viewport_id: `vp-${input.hex(8)}`,
-    anchor_ref: a.anchor_id,
-    emphasis: i === 0 ? "focus" : "context",
-    ordinal: i,
-    region: a.region,
-  }));
+  // Ids are allocated in the same sequence as before (plan → one per viewport → one per highlight)
+  // so the seeded stream, and therefore replay, stays byte-identical. Only the OBJECTS built from
+  // them move below, because emphasis now depends on the entailment result computed further down.
+  const viewportIds = anchors.map(() => `vp-${input.hex(8)}`);
   const highlightIds = anchors.map(() => `hl-${input.hex(8)}`);
 
   // R2d (ADR-0057 D4): semantic binding + typed roles + entailment gate when segments are given;
@@ -516,14 +523,46 @@ export function planSourceProjection(
     return (slot && SLOT_ROLE[slot]) || "evidence";
   };
 
+  /**
+   * Does this frame actually ENGAGE the source right now?
+   *
+   * Emphasis used to be purely positional — anchor 0 was always `focus`, which mapped to the
+   * `spotlight` placement, which is why a bound document took the whole surface on every frame
+   * regardless of whether the teaching referred to it. Two facts decide it honestly:
+   *
+   *  - **Entailment.** If no narration segment cleared the entailment gate, the voice never
+   *    discusses this passage. The source may sit in the periphery for orientation, but it has not
+   *    earned attention.
+   *  - **Provenance.** A positional lead-region fallback (ADR-0064) is a guess about *where* the
+   *    concept probably lives, not evidence that this passage is the one being taught. A guess must
+   *    never claim the stage.
+   *
+   * Either way the source still renders — as an `orientation` viewport, which the render decision
+   * places in the periphery and retires when the frame stops citing it (CSE-008 §2.2: the source is
+   * part of the surface, never a viewer over it).
+   */
+  const entailed = semantic !== null && matches.some((m) => m >= 0);
+  const positional = POSITIONAL_ANCHOR_ORIGINS.has(anchors[0]?.created_by ?? "");
+  const engaged = semantic === null ? !positional : entailed && !positional;
+
+  const viewports: SourceViewport[] = anchors.map((a, i) => ({
+    viewport_id: viewportIds[i]!,
+    anchor_ref: a.anchor_id,
+    emphasis: i === 0 ? (engaged ? "focus" : "orientation") : "context",
+    ordinal: i,
+    region: a.region,
+  }));
+
   const highlights = anchors.map((a, i) => ({
     highlight_id: highlightIds[i]!,
     frame_id: input.frameId,
     source_version_id: a.source_version_id,
     anchor_ref: a.anchor_id,
     role: roleFor(i),
-    amplitude: (i === 0 ? "focal" : "whisper") as SourceHighlightAmplitude,
-    lifetime: (i === 0 ? "held" : "persistent-tint") as SourceHighlightLifetime,
+    // One focal highlight at a time (CSE-008 §5.2) — and only when the frame genuinely engages the
+    // passage. An unengaged source whispers; it never paints a focal claim over the document.
+    amplitude: (i === 0 && engaged ? "focal" : "whisper") as SourceHighlightAmplitude,
+    lifetime: (i === 0 && engaged ? "held" : "persistent-tint") as SourceHighlightLifetime,
     provenance_class: "evidence" as SourceProvenanceClass,
     decided_by: semantic ? "semantic-binder" : "viewport-planner",
     region: a.region,
