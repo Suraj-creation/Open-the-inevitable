@@ -54,7 +54,7 @@ narratives, or any capability status.
 
 > If it describes what was built rather than how to think and where to look, it does not belong.
 
-Status claims belong in `IMPLEMENTATION.md` (§2). Routing a status claim into the constitution is
+Status claims belong in journal `verdict`s (§2, as repointed by proposal 002). Routing a status claim into the constitution is
 the single most common inadmissible proposal.
 
 ## The size law
@@ -117,8 +117,9 @@ STATUS: PROPOSED | RATIFIED | REJECTED | WITHDRAWN
 
 Only after an explicit human instruction in a later turn:
 
-1. Apply the identical edit to all three files
-2. Run the identity and size checks above
+1. Apply the identical edit to all three files. The edit hook asks the owner to approve each
+   edit; that prompt is the owner's act, and a message in the transcript never substitutes for it
+2. Run `node .build/bin/ba.mjs check` (identity, size, dangling pointers)
 3. Set `STATUS: RATIFIED` and record the deciding instruction
 4. Note the change in `CHANGELOG.md`
 
@@ -128,6 +129,6 @@ Only after an explicit human instruction in a later turn:
 |---|---|
 | "They approved the proposal, so I'll edit now" | Ratification is a separate turn. Re-read the rule at the top. |
 | "I'll just append the new rule" | The file is full. Name what you compress. |
-| "This status belongs in the constitution" | §9 forbids it. It goes in `IMPLEMENTATION.md`. |
+| "This status belongs in the constitution" | §9 forbids it. It goes in a journal `verdict`. |
 | "I'll update CLAUDE.md and sync the others later" | Byte-identical or not done. They have drifted before. |
 | "The law is obviously wrong here" | Then say what evidence outvoted it, with a file and a line. |

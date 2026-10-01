@@ -59,7 +59,7 @@ prediction that can be checked against held-out data settles the question; an ar
 A finding that lives only in a transcript did not happen. Every drift finding lands in one of:
 
 - **A fix**, with a test that fails without it
-- **A named gap** in `IMPLEMENTATION.md`, if the ceiling is being accepted deliberately
+- **A named gap** in a recorded `verdict` (`gaps`), if the ceiling is being accepted deliberately
 - **A proposal** under `.build/governance/`, if the conclusion is that the law should change
   (see `govern.md`)
 

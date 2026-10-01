@@ -11,7 +11,7 @@
 
 ## Write the acceptance list first
 
-A milestone's acceptance list belongs in `IMPLEMENTATION.md` **when the milestone starts**, not
+A milestone's acceptance list is recorded **when the milestone starts** (`ba record criteria`), not
 when it is being closed. A list written at closing time is a description of what happened, not a
 test it could fail.
 
@@ -79,8 +79,9 @@ To close:  <smallest concrete list>
 ```
 
 PARTIAL is a normal, respectable outcome. A milestone that ships with a **named** ceiling is
-honest; one that ships with an unnamed ceiling is a defect. Record named gaps in
-`IMPLEMENTATION.md`.
+honest; one that ships with an unnamed ceiling is a defect. Record the verdict, with named gaps in
+`gaps`, via `ba record verdict`. The record is stamped with HEAD and the tree state, and a dirty-tree
+verdict is rejected unless a `refs` entry `tree: <what>` says what is uncommitted.
 
 **Every claimed ceiling must come with a concrete input that reaches it.** Trace the path: this
 title, in this book, produces this id, which collides here. If you cannot construct a reachable
