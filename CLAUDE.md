@@ -70,8 +70,8 @@ This repository has previously let specification stand in for implementation. Th
 Statuses, never conflated: **VISION** · **PROTOTYPE** (runs, on no product path) · **PARTIAL** (code +
 tests + a named gap) · **PRODUCTION** (the full path: interface → runtime → cognition → persistence →
 retrieval → response → surface) · **PRODUCTION VERIFIED** (plus observability, durability, recovery,
-runtime evidence). Status is asserted only with evidence, in `IMPLEMENTATION.md` or the capability's
-own tests — nowhere else.
+runtime evidence). Status is asserted only with evidence — a commit-bound verdict in `.build/journal.jsonl`
+or the capability's own tests — nowhere else.
 
 **The reality tests are what "real" means.** A capability is claimed only when it passes the tests
 that apply to it — the _execution_ tests (restart, settle, containment, long horizon) prove persistent
@@ -150,7 +150,7 @@ Code that violates these laws is invalid, even if it works.
 | Where are we going?            | The two vision documents in `archit/`; hypotheses, experiments, and evidence in the rest of `archit/`   |
 | What exists?                   | The code and its tests — `packages/`, `apps/`, `services/`, `supabase/migrations/`                     |
 | What are the contracts?        | Versioned schemas in code — `packages/protocols/schemas/`, `packages/contracts/`                       |
-| Current state and milestones   | `IMPLEMENTATION.md` · `CHANGELOG.md` · `docs/history/`                                                  |
+| Current state and milestones   | `.build/journal.jsonl` (rendered by `node .build/bin/ba.mjs view`) · `CHANGELOG.md` · `docs/history/` |
 | Inspiration                    | `Reference-Architecture-Observatory/` — local checkouts of leading harnesses and their `archaeology/`; extract mechanisms, never ontologies |
 
 `spec/` is a paused, prior-era corpus: do not read it for direction, do not cite it, do not extend
@@ -178,7 +178,7 @@ disagree about **direction**, the vision documents win.
   asserts a rule.
 - **Documentation serves the next build, nothing more.** The vision documents change only when the
   direction changes; the `archit/` corpus changes when evidence does. No spec files, no decision-record
-  ceremony; `IMPLEMENTATION.md`, `CHANGELOG.md`, `docs/history/` only when a major milestone lands.
+  ceremony; verdicts and decisions as one-line journal records; `CHANGELOG.md`, `docs/history/` at milestones.
 
 ## 6. Anti-patterns
 
@@ -187,10 +187,8 @@ a competitor has it, or because it would make the repository look sophisticated.
 capability on the strength of a document · let a specification grow more elaborate than its evidence
 · keep durable cognitive state in process memory or ad-hoc snapshots · let the context window become
 the record · summarize away raw evidence · overwrite history · let an embedding match create a fact
-or a link · run the largest model on every event · bypass governance, the causal record, or
-verification for convenience · leak a vendor past its adapter · let scaffolding harden into structure
-· mistake reflection for learning · resume the steps while losing the reasons · build ten half-loops
-instead of one closed loop.
+or a link · run the largest model on every event · leak a vendor past its adapter · let scaffolding
+harden into structure · build ten half-loops instead of one closed loop.
 
 **Never let the sophistication of the documentation substitute for the sophistication of the
 product.**
@@ -209,13 +207,9 @@ built on UCI.
 
 ## 8. Build and verify
 
-```bash
-pnpm install && pnpm verify   # codegen + typecheck + test + lint + format:check — must stay green
-```
-
-Monorepo: pnpm + Turborepo, strict TypeScript ESM, Vitest. Windows: if turbo cannot find pnpm,
-`npm i -g pnpm@9.15.0`. Commits follow the conventional format enforced by commitlint (lowercase
-subject, scope from the configured enum).
+`pnpm install && pnpm verify` (codegen + typecheck + test + lint + format:check) must stay green.
+Monorepo: pnpm + Turborepo, strict TypeScript ESM, Vitest. If turbo cannot find pnpm on Windows,
+`npm i -g pnpm@9.15.0`. Commits: conventional, lowercase subject, scope from the commitlint enum.
 
 ## 9. Governance of this file
 
@@ -224,6 +218,12 @@ retrieval pointers. **Must never be added:** changelog entries, milestone summar
 implementation inventories, package catalogs, component descriptions, test counts, feature lists,
 dated narratives, or any capability status. If it describes what was built rather than how to think
 and where to look, it does not belong here.
+
+**Evolution.** Living law, not a frozen file — but §3 holds: an agent **proposes, never applies**.
+When implementation, verification, or research shows a rule obsolete, incomplete, contradictory, or
+too weak, write a proposal: the rule, the evidence (file, line, or commit), the replacement text,
+what it compresses. Only the owner ratifies, in a later turn; no agent message ratifies. A ratified
+change lands in all three files at once, logged in `CHANGELOG.md`: what changed, why, its evidence.
 
 **Size law:** under ~230 lines — compress or relocate, never append. This file summarizes and points
 to the two vision documents; it never forks them. `CLAUDE.md`, `CODEX.md`, and `AGENTS.md` stay

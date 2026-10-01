@@ -1,6 +1,6 @@
 # 001 - Governance evolution: the constitution is living law, changed by proposal
 
-STATUS: PROPOSED
+STATUS: RATIFIED
 
 Requested by the project lead ("I want CLAUDE.md to include this. Add it now, we've discussed it
 enough"). Drafted, not applied: `references/govern.md` — *propose, never apply; proposing and
@@ -100,4 +100,4 @@ loses repetition, not doctrine. **If the owner would rather keep them, the alter
 
 ## Decision
 
-_(left empty until the owner rules)_
+RATIFIED by the owner on 2026-10-01, answering "Ratify both" to the question "How do you rule?" on proposals 001 and 002 (session 50e2b9fb-1024-4a60-bf20-ceea7e3bbe73), in a turn after the proposal was written. Applied identically to CLAUDE.md, CODEX.md and AGENTS.md (230 lines each, identical after CRLF normalisation); `node .build/bin/ba.mjs check` passed. Logged in CHANGELOG.md. Applied as the primary variant: §8 collapsed and the three §6 anti-patterns dropped (the README relocation alternative was not chosen).

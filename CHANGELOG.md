@@ -5,9 +5,22 @@ All notable changes to The Inevitable are documented here. Format follows
 
 Entries are **milestone-level abstractions** — what shipped and why it matters, a short
 paragraph or a few bullets per milestone. Implementation detail lives in the owning specs and
-`docs/history/implementation-log.md`; current codebase state lives in `IMPLEMENTATION.md`.
+`docs/history/implementation-log.md`; current state is recorded in `.build/journal.jsonl` (rendered by `node .build/bin/ba.mjs view`).
 
 ## [Unreleased]
+
+### Changed — Governance: the constitution is amended by proposal, and status lives in the journal
+
+Ratified by the owner on 2026-10-01 (proposals in `.build/governance/`).
+
+- **Amendment procedure (001):** §9 gains an Evolution rule — agents propose, only the owner ratifies, in a
+  later turn; a ratified change lands in all three constitution files at once and is logged here. To stay
+  at 230 lines, §8's build note is collapsed and three §6 anti-patterns that restated §3 are dropped.
+- **Journal ledger (002):** status claims live as commit-bound verdicts in `.build/journal.jsonl`, rendered
+  on demand by `ba view`, replacing the retired hand-kept `IMPLEMENTATION.md`; §2, §4 and §5 repointed.
+  Evidence: the old pointer dangled, and a fresh agent asked about it recommended restoring the retired file.
+- **Build Anything as project control:** a session-start position computed from git, the tree and the
+  journal; an owner prompt on any constitution edit; a typed, append-only journal (`.build/bin/ba.mjs`).
 
 ### Added — CSE: the Representation Intelligence Agent (Production Goal II; audit R4; CSE-018, ADR-0058)
 

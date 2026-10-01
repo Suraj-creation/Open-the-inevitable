@@ -1,6 +1,6 @@
 # 002 - The status ledger is the journal, not a hand-kept file
 
-STATUS: PROPOSED
+STATUS: RATIFIED
 
 Drafted from the owner's decision (`decision-20261001-d0ea` in `.build/journal.jsonl`): deleting
 `IMPLEMENTATION.md` was intentional, and status claims now live as typed journal entries. That
@@ -98,4 +98,4 @@ already compresses §6/§8, and this proposal applies unchanged.
 
 ## Decision
 
-<left empty until the owner rules>
+RATIFIED by the owner on 2026-10-01, answering "Ratify both" to the question "How do you rule?" on proposals 001 and 002 (session 50e2b9fb-1024-4a60-bf20-ceea7e3bbe73), in a turn after the proposal was written. Applied identically to CLAUDE.md, CODEX.md and AGENTS.md (230 lines each, identical after CRLF normalisation); `node .build/bin/ba.mjs check` passed. Logged in CHANGELOG.md. Missed by this proposal and fixed in the same commit: CHANGELOG.md's preamble also said current state lives in IMPLEMENTATION.md; it now points to the journal.
