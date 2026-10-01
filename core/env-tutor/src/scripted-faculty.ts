@@ -33,7 +33,7 @@ interface Seen {
   step: number;
   entity: string;
   objectiveId?: string;
-  decisions: { id: string; choice: string; revised: boolean }[];
+  decisions: { id: string; choice: string; reliesOn: string[]; revised: boolean }[];
   openDecisions: { id: string; question: string }[];
   claims: { ref: string; proposition: string; stale: boolean }[];
   questions: { id: string; text: string }[];
@@ -61,7 +61,10 @@ function parse(prompt: string): Seen {
   const decisions: Seen["decisions"] = [];
   for (const l of section(prompt, "Decisions in force")) {
     const m = /^- (\S+): choice "(.*?)"\./.exec(l);
-    if (m?.[1]) decisions.push({ id: m[1], choice: m[2] ?? "", revised: false });
+    const relied = (/Relied on: (.*?)\. Declared/.exec(l)?.[1] ?? "")
+      .split(", ")
+      .filter((r) => /@v\d+$/.test(r));
+    if (m?.[1]) decisions.push({ id: m[1], choice: m[2] ?? "", reliesOn: relied, revised: false });
     else if (l.includes("PREMISE REVISED") && decisions.length)
       (decisions.at(-1) as { revised: boolean }).revised = true;
   }
@@ -194,7 +197,7 @@ function decide(s: Seen) {
         valid_for_days: 14,
       });
   }
-  if (correction && misconceptionClaim)
+  if (correction && misconceptionClaim) {
     claims.push({
       subject: s.entity,
       proposition:
@@ -203,6 +206,20 @@ function decide(s: Seen) {
       evidence: [correction.id],
       revises: misconceptionClaim.ref,
     });
+    // Revising a premise obliges re-examining every decision that rested on it.
+    for (const d of s.decisions.filter((x) => x.reliesOn.includes(misconceptionClaim.ref)))
+      if (!reexamines.some((r) => r.decision_id === d.id))
+        reexamines.push({
+          decision_id: d.id,
+          verdict: "revise",
+          reason: `its premise ${misconceptionClaim.ref} is contradicted by the learner (${correction.id})`,
+        });
+    for (const q of s.questions.filter((x) => /why/i.test(x.text)))
+      questionsClosed.push({
+        question_id: q.id,
+        reason: `answered by the learner's correction ${correction.id}`,
+      });
+  }
 
   // Questions answered since they were asked are closed with the answer as the reason.
   for (const q of s.questions) {
@@ -281,6 +298,23 @@ function decide(s: Seen) {
         option: "start practice directly",
         probability: 0.4,
         rejected_because: "a missing prerequisite would confound diagnosis",
+      },
+    ];
+  } else if (
+    misconceptionStands &&
+    !explained &&
+    !s.questions.some((q) => /why/i.test(q.text)) &&
+    !s.decisions.some((d) => d.choice.startsWith("ask_person: diagnose"))
+  ) {
+    action = { type: "ask_person", content: "Why do you add the denominators together?" };
+    relies = [...misconceptionRef];
+    choice = "diagnose: ask the learner why they add denominators before remediating";
+    alternatives = [
+      { option: "ask why first", probability: 0.5 },
+      {
+        option: "remediate immediately",
+        probability: 0.5,
+        rejected_because: "the reason shapes the remediation",
       },
     ];
   } else if (misconceptionStands && !explained) {

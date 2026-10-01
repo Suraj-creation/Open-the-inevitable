@@ -127,7 +127,12 @@ async function deliverInputs(deps: StepDeps, records: readonly CausalRecord[]): 
       .filter((r) => r.kind === "input.delivered")
       .map((r) => (r.data as InputDelivered).inputId),
   );
-  const fresh = (await env.inbox()).filter((i) => !delivered.has(i.inputId));
+  // A channel may hold the same input more than once (a resubmission, a retried send): admit it once.
+  const fresh = (await env.inbox()).filter((i) => {
+    if (delivered.has(i.inputId)) return false;
+    delivered.add(i.inputId);
+    return true;
+  });
   const drafts: Draft[] = [];
   for (const input of fresh) {
     const evidenceHash = await h.store.putEvidence("text/plain", input.content);

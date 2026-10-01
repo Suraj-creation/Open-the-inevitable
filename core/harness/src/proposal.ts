@@ -180,6 +180,20 @@ export function validateProposal(
       if (!evidenceIds.has(e)) errors.push(`claim evidence ${e} is not in the working state`);
     if (c.revises !== undefined && c.revises !== "" && !current.has(c.revises))
       errors.push(`claim revises ${c.revises}, which is not a current claim`);
+    // Revision propagates to decisions (H-EP3): changing what a claim says obliges re-examining,
+    // in the same proposal, every decision in force that relied on it. A re-validation that keeps
+    // the proposition does not.
+    if (vc.mode === "bridge" && c.revises && current.has(c.revises)) {
+      const prior = ws.claims.find((x) => x.id === c.revises)?.value.data.proposition;
+      if (prior !== undefined && prior !== c.proposition)
+        for (const dep of ws.decisionsInForce.filter((x) =>
+          x.value.reliesOn.includes(c.revises ?? ""),
+        ))
+          if (!p.reexamines.some((r) => r.decision_id === dep.id))
+            errors.push(
+              `revising ${c.revises} changes a premise of ${dep.id}: re-examine ${dep.id} in the same proposal`,
+            );
+    }
   }
 
   const a = p.action;

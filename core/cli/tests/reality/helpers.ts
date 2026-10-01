@@ -55,7 +55,11 @@ export function stateFingerprint(records: readonly CausalRecord[]): string {
   const s = foldCognitiveState(records);
   return canonicalJson({
     objective: s.objective?.data,
-    questions: [...s.questions.entries()].map(([k, v]) => [k, v.opened.data, v.closed?.data]),
+    questions: [...s.questions.entries()].map(([k, v]) => [
+      k,
+      v.opened.data,
+      v.closed?.data ?? null,
+    ]),
     claims: [...s.claims.entries()].map(([k, v]) => [k, v.map((c) => c.data)]),
     opened: [...s.opened.entries()].map(([k, v]) => [k, v.data]),
     made: [...s.made.entries()].map(([k, v]) => [k, v.data]),

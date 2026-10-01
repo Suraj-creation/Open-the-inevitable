@@ -50,6 +50,16 @@ export async function write(h: ProcessHandle, drafts: readonly Draft[]): Promise
   let working: CausalRecord[] = records;
   for (const draft of drafts) {
     violations.push(...ledgerViolations(foldLedger(working), draft));
+    // Admission is exactly-once: an input id is delivered to the process at most once, ever.
+    if (draft.kind === "input.delivered") {
+      const id = (draft.data as { inputId: string }).inputId;
+      if (
+        working.some(
+          (r) => r.kind === "input.delivered" && (r.data as { inputId: string }).inputId === id,
+        )
+      )
+        violations.push(`input ${id} was already delivered`);
+    }
     working = [...working, pseudo(draft, (working.at(-1)?.seq ?? 0) + 1)];
   }
   violations.push(...substrateViolations(records, drafts));

@@ -40,6 +40,8 @@ export function reply(
   }
   if (entry.action === "ask_person") {
     const q = entry.params["content"] ?? "";
+    // "Why" questions get no immediate reply: the learner thinks it over, so the question stays open.
+    if (/\bwhy\b/i.test(q)) return undefined;
     if (/fraction strips?/i.test(q)) return "No, I've never used fraction strips.";
     if (/multiplication|times tables?/i.test(q)) return "Yes, I know my times tables up to 10.";
     if (/denominator/i.test(q))
