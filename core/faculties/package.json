@@ -1,9 +1,9 @@
 {
-  "name": "@uci/cli",
+  "name": "@uci/faculties",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Composition root for UCI Slice 1: wires the SQLite store, the tutoring environment and a faculty into a durable process; run / crash / resume / inspect. Also hosts the reality-test suite, which needs every layer.",
+  "description": "Model faculties for the UCI harness: Anthropic Claude, OpenAI, Azure OpenAI and Google Gemini behind the harness ModelFaculty port. Vendor SDKs and their types stay inside this package; every faculty makes exactly one provider call per respond() (retries are ledger attempts, never hidden).",
   "engines": {
     "node": ">=24"
   },
@@ -16,18 +16,16 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "start": "tsx --disable-warning=ExperimentalWarning src/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "lint": "eslint ."
   },
   "dependencies": {
-    "@uci/adapters": "workspace:*",
-    "@uci/env-tutor": "workspace:*",
-    "@uci/faculties": "workspace:*",
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@google/genai": "^2.8.0",
     "@uci/harness": "workspace:*",
     "@uci/kernel": "workspace:*",
-    "@uci/substrate": "workspace:*"
+    "openai": "^7.25.0"
   },
   "devDependencies": {
     "vitest": "^2.1.8"

@@ -22,7 +22,7 @@ import {
 } from "./compile.js";
 import type { InputDelivered } from "./kinds.js";
 import { FacultyError, type EnvironmentPack, type ModelFaculty } from "./ports.js";
-import { normalizeSyntax, type Proposal, proposalDrafts, validateProposal } from "./proposal.js";
+import { parseProposal, type Proposal, proposalDrafts, validateProposal } from "./proposal.js";
 import { type ProcessHandle, readProcess, write } from "./writer.js";
 
 /**
@@ -61,6 +61,8 @@ export interface StepOutcome {
 }
 
 const MAX_REJECTIONS_PER_STEP = 3;
+/** Transport attempts per ask (retryable failures and crash-abandoned calls alike) before a person is asked. */
+export const MAX_ATTEMPTS_PER_ASK = 8;
 
 export async function runStep(deps: StepDeps): Promise<StepOutcome> {
   const { handle: h } = deps;
@@ -277,7 +279,7 @@ async function recordedProposal(
       `decision ${(made.data as { decisionId: string }).decisionId} has no recorded model output to replay`,
     );
   // Replayed, never regenerated: this output was validated when its decision was written.
-  return JSON.parse(normalizeSyntax(text)) as Proposal;
+  return parseProposal(text);
 }
 
 async function obtainProposal(
@@ -330,7 +332,15 @@ async function obtainProposal(
     assertNoPrivateLeak(ws, ctx.request.system, env);
     const attempt =
       1 + [...ledger.values()].filter((e) => e.intended.data.idempotencyKey === key).length;
-    const effectId = `M${step}-a${attempt}`;
+    // Unique across asks of the same step: ask K (after K-1 rejections), transport attempt N.
+    const effectId = `M${step}-k${rejections + 1}-a${attempt}`;
+    if (attempt > MAX_ATTEMPTS_PER_ASK) {
+      const reason = `${attempt - 1} model-call attempts failed for step ${step} ask ${rejections + 1}`;
+      await write(h, [
+        { kind: "process.escalated", v: 1, data: { reason, detail: "held for a person" } },
+      ]);
+      return { outcome: { status: "escalated", step, detail: reason } };
+    }
     const verdict = govern(() =>
       envelopePolicy(envelope, ws.modelCallsUsed, {
         action: "model-call",
@@ -403,26 +413,42 @@ async function obtainProposal(
         e instanceof FacultyError
           ? e
           : new FacultyError(e instanceof Error ? e.message : String(e), "ambiguous", true);
-      await write(h, [
-        {
-          kind: "effect.settled",
-          v: 1,
-          data: {
-            effectId,
-            outcome: "failed",
-            delivery: fe.delivery,
-            detail: fe.message.slice(0, 500),
-          },
+      const settled = {
+        kind: "effect.settled",
+        v: 1,
+        data: {
+          effectId,
+          outcome: "failed",
+          delivery: fe.delivery,
+          detail: fe.message.slice(0, 500),
         },
+      } as const;
+      if (fe.retryable) {
+        await write(h, [settled]);
+        return { outcome: { status: "retry", step, detail: fe.message } };
+      }
+      // A definitive answer (a refusal, a rejected request) is not retried into the budget: the
+      // failure and the hand-off to a person commit together.
+      const reason = `faculty ${faculty.id} failed without retry: ${fe.message.slice(0, 200)}`;
+      await write(h, [
+        settled,
+        { kind: "process.escalated", v: 1, data: { reason, detail: "held for a person" } },
       ]);
-      return { outcome: { status: "retry", step, detail: fe.message } };
+      return { outcome: { status: "escalated", step, detail: reason } };
     }
     const evidenceHash = await h.store.putEvidence("application/json", response.text);
     const written = await write(h, [
       {
         kind: "effect.settled",
         v: 1,
-        data: { effectId, outcome: "completed", delivery: "accepted", usage: response.usage },
+        data: {
+          effectId,
+          outcome: "completed",
+          delivery: "accepted",
+          usage: response.usage,
+          // Provenance: which model actually answered (it can differ under provider routing).
+          detail: `served-by:${response.servedBy ?? faculty.model}`,
+        },
       },
       {
         kind: "evidence.recorded",

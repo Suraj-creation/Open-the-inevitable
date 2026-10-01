@@ -26,7 +26,16 @@ const ALLOWED = {
   "@uci/substrate": ["@uci/kernel"],
   "@uci/harness": ["@uci/kernel", "@uci/substrate"],
   "@uci/env-tutor": ["@uci/kernel", "@uci/harness"],
-  "@uci/cli": ["@uci/kernel", "@uci/substrate", "@uci/harness", "@uci/env-tutor", "@uci/adapters"],
+  // Model vendors plug into the harness's ModelFaculty port; vendor SDKs stay inside this package.
+  "@uci/faculties": ["@uci/kernel", "@uci/harness"],
+  "@uci/cli": [
+    "@uci/kernel",
+    "@uci/substrate",
+    "@uci/harness",
+    "@uci/env-tutor",
+    "@uci/adapters",
+    "@uci/faculties",
+  ],
 };
 // Test-only edges (devDependencies and files under tests/) may reach adapters for real storage.
 const TEST_ALLOWED = { "@uci/harness": ["@uci/adapters"] };

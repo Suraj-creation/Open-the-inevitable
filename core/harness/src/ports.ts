@@ -17,6 +17,8 @@ export interface FacultyRequest {
 export interface FacultyResponse {
   readonly text: string;
   readonly usage: Usage;
+  /** The model that actually produced the text, when the provider may route (e.g. refusal fallbacks). */
+  readonly servedBy?: string;
 }
 
 export class FacultyError extends Error {

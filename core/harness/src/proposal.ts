@@ -41,13 +41,34 @@ export interface Proposal {
   readonly questions_closed: readonly { question_id: string; reason: string }[];
 }
 
-/** The only repair allowed: deterministic syntax normalisation, recorded by operator name. */
-export const SYNTAX_OPERATOR = "syntax-normalize@1";
+/**
+ * The only repair allowed: deterministic syntax normalisation, recorded by operator name.
+ * @1 strips a Markdown code fence; @2 also reads `null` as absence (strict structured-output
+ * dialects must emit every field, so an optional field arrives as null). Content is never altered.
+ */
+export const SYNTAX_OPERATOR = "syntax-normalize@2";
 export function normalizeSyntax(raw: string): string {
   let t = raw.trim();
   const fence = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(t);
   if (fence?.[1] !== undefined) t = fence[1].trim();
   return t;
+}
+
+/** Drop object members whose value is null: in proposal@1, null and absent mean the same thing. */
+export function dropNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(dropNulls);
+  if (isRecord(value))
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, v]) => v !== null)
+        .map(([k, v]) => [k, dropNulls(v)]),
+    );
+  return value;
+}
+
+/** Parse a recorded reply exactly as validation does (used to replay a recorded output). */
+export function parseProposal(raw: string): Proposal {
+  return dropNulls(JSON.parse(normalizeSyntax(raw))) as Proposal;
 }
 
 const isStr = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
@@ -76,7 +97,7 @@ export function validateProposal(
 ): { proposal: Proposal } | { errors: string[] } {
   let data: unknown;
   try {
-    data = JSON.parse(normalizeSyntax(raw));
+    data = parseProposal(raw);
   } catch {
     return { errors: ["reply is not valid JSON"] };
   }

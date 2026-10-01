@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { ScriptedTutorFaculty } from "@uci/env-tutor";
 import {
+  FacultyError,
   type FacultyRequest,
   type FacultyResponse,
+  MAX_ATTEMPTS_PER_ASK,
   type ModelFaculty,
   processStream,
   runStep,
@@ -43,6 +45,92 @@ class ObedientFaculty implements ModelFaculty {
     return { text, usage: { inTokens: 1, outTokens: 1 } };
   }
 }
+
+/** Answers malformed JSON first, then behaves: the shape of a model that needs one re-ask. */
+class FlakyFaculty implements ModelFaculty {
+  readonly id = "flaky@1";
+  readonly model = "flaky@1";
+  private calls = 0;
+  private readonly inner = new ScriptedTutorFaculty();
+  async respond(request: FacultyRequest): Promise<FacultyResponse> {
+    this.calls += 1;
+    if (this.calls === 1)
+      return { text: '{"action":{"type":"explain"}}', usage: { inTokens: 1, outTokens: 1 } };
+    return this.inner.respond(request);
+  }
+}
+
+describe("re-asking after a rejected proposal", () => {
+  it("a re-ask is its own effect with its own key, and the step then completes", async () => {
+    const rt = await openRuntime(tempDir(), new ManualClock());
+    const handle = await start(rt, "P1", "w");
+    const faculty = new FlakyFaculty();
+    expect((await runStep({ handle, faculty, env: rt.env })).status).toBe("retry");
+    expect((await runStep({ handle, faculty, env: rt.env })).status).toBe("completed");
+    const records = await rt.store.read(processStream("P1"));
+    const intents = records
+      .filter(
+        (r) =>
+          r.kind === "effect.intended" &&
+          data<{ effectClass: string }>(r).effectClass === "model-call",
+      )
+      .map((r) => data<{ effectId: string; idempotencyKey: string }>(r));
+    expect(intents.map((i) => i.effectId)).toEqual(["M1-k1-a1", "M1-k2-a1"]);
+    expect(new Set(intents.map((i) => i.idempotencyKey)).size).toBe(2);
+    expect(records.filter((r) => r.kind === "proposal.rejected")).toHaveLength(1);
+    await rt.close();
+  });
+});
+
+/** Always fails the same way: a refusal (definitive) or a transport failure (retryable). */
+class FailingFaculty implements ModelFaculty {
+  readonly id = "failing@1";
+  readonly model = "failing@1";
+  calls = 0;
+  constructor(private readonly retryable: boolean) {}
+  async respond(): Promise<FacultyResponse> {
+    this.calls += 1;
+    throw this.retryable
+      ? new FacultyError("failing: 503", "rejected", true)
+      : new FacultyError("failing: refused (policy)", "accepted", false);
+  }
+}
+
+describe("faculty failures", () => {
+  it("a non-retryable failure settles and escalates in one commit, without a second call", async () => {
+    const rt = await openRuntime(tempDir(), new ManualClock());
+    const handle = await start(rt, "P1", "w");
+    const faculty = new FailingFaculty(false);
+    expect((await runStep({ handle, faculty, env: rt.env })).status).toBe("escalated");
+    expect((await runStep({ handle, faculty, env: rt.env })).status).toBe("escalated");
+    expect(faculty.calls).toBe(1);
+    const records = await rt.store.read(processStream("P1"));
+    const settled = records.find((r) => r.kind === "effect.settled");
+    const escalated = records.find((r) => r.kind === "process.escalated");
+    expect(data<{ outcome: string }>(settled as CausalRecord).outcome).toBe("failed");
+    expect(data<{ reason: string }>(escalated as CausalRecord).reason).toMatch(/refused/);
+    expect(escalated?.seq).toBe((settled?.seq ?? 0) + 1);
+    await rt.close();
+  });
+
+  it("retryable failures are re-attempted as new metered effects, then held for a person at the cap", async () => {
+    const rt = await openRuntime(tempDir(), new ManualClock());
+    const handle = await start(rt, "P1", "w");
+    const faculty = new FailingFaculty(true);
+    const statuses: string[] = [];
+    for (let i = 0; i <= MAX_ATTEMPTS_PER_ASK; i++)
+      statuses.push((await runStep({ handle, faculty, env: rt.env })).status);
+    expect(statuses.slice(0, MAX_ATTEMPTS_PER_ASK).every((s) => s === "retry")).toBe(true);
+    expect(statuses.at(-1)).toBe("escalated");
+    expect(faculty.calls).toBe(MAX_ATTEMPTS_PER_ASK);
+    const records = await rt.store.read(processStream("P1"));
+    const ids = records
+      .filter((r) => r.kind === "effect.intended")
+      .map((r) => data<{ effectId: string }>(r).effectId);
+    expect(new Set(ids).size).toBe(MAX_ATTEMPTS_PER_ASK);
+    await rt.close();
+  });
+});
 
 describe("governance and stage containment", () => {
   it("learner text that instructs the tutor cannot cause an early conclude", async () => {
