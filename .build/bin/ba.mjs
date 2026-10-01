@@ -406,6 +406,9 @@ export function renderView(p) {
 // ---------------------------------------------------------------- record
 
 export function record(root, journalFile, kind, fields, now = new Date()) {
+  // Stamps are the tool's testimony (who, when, at which commit): a caller never supplies them.
+  const forged = STAMP.filter((k) => k in fields);
+  if (forged.length) return { errors: [`stamped by record, not supplied: ${forged.join(", ")}`] };
   const prior = readJournal(journalFile);
   const entry = {
     v: SCHEMA_VERSION,
@@ -544,7 +547,16 @@ function main(argv) {
     } catch {
       return (console.error("record needs --json '{...}' with valid JSON"), 2);
     }
-    const { errors, entry } = record(root, journalFile, sub, fields);
+    // The kind is positional (`record decision --json ...`) or a "kind" member of the JSON; flags
+    // were removed from args above, so args[1] is never a flag.
+    const { kind: jsonKind, ...rest } = fields;
+    const kind = args[1] ?? jsonKind;
+    if (!kind || (jsonKind !== undefined && jsonKind !== kind))
+      return (
+        console.error('record needs one kind: `record <kind> --json ...` or a "kind" member'),
+        2
+      );
+    const { errors, entry } = record(root, journalFile, kind, rest);
     if (errors) return (console.error(errors.map((e) => `invalid: ${e}`).join("\n")), 2);
     return (console.log(`recorded ${entry.id}`), 0);
   }

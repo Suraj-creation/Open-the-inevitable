@@ -39,6 +39,30 @@ function repo() {
   return { root, journal: join(root, ".build", "journal.jsonl"), g };
 }
 
+test("record never lets a caller supply stamps", () => {
+  const { root, journal } = repo();
+  const e = record(root, journal, "question", { by: "a", text: "q", id: "x", head: "abc" });
+  assert.match(e.errors[0], /stamped by record, not supplied: id, head/);
+});
+
+test("the CLI takes the kind positionally or from the JSON, never from a flag", () => {
+  const { root, journal } = repo();
+  const run = (...a) =>
+    spawnSync(process.execPath, [BA, "--root", root, "record", ...a], { encoding: "utf8" });
+  const q = JSON.stringify({ by: "a", text: "q" });
+  assert.match(run("question", "--json", q).stdout, /recorded question-\d{8}-[0-9a-f]{4}/);
+  assert.match(
+    run("--json", JSON.stringify({ kind: "question", by: "a", text: "q" })).stdout,
+    /recorded question-/,
+  );
+  assert.equal(run("--json", q).status, 2);
+  assert.equal(
+    run("decision", "--json", JSON.stringify({ kind: "question", by: "a", text: "q" })).status,
+    2,
+  );
+  assert.ok(readJournal(journal).every((e) => /^question-/.test(e.id)));
+});
+
 test("record validates kinds, fields, and unknown keys", () => {
   const { root, journal } = repo();
   assert.ok(
