@@ -16,6 +16,37 @@
 > **Audience.** The implementation team. This document assumes familiarity with `CLAUDE.md` and the rest of
 > `archit/`, and does not re-derive UCI's laws — it applies them to a concrete choice.
 
+> **Addendum, 2026-10-01: verified corrections that change the migration route.** The strategy holds:
+> mechanism transplant, never forking. The route changes, because a premise was wrong when checked
+> against code at `c52e44e`.
+>
+> - **Gen 1 is live, not bypassed.** `apps/api/src/host.ts:39` builds every session through
+>   `apps/cli/src/wiring.ts:566-693`. That path instantiates the in-memory event bus,
+>   `WorldStateGraph`, `TieredMemoryStore`, `GovernanceEngine`, kernel `CapabilityRegistry`,
+>   `ContextAssembler`, `FiberedLearningLoop` (a fresh `ExecutionEngine` per ask) and `DepthScheduler`.
+>   §1's "`host.ts` never imports it" and §7's in-place refactor therefore do not hold.
+> - **`cognitive-loop` persists one latest-only policy row.** `reconstructChain` cannot run on live
+>   data: live events carry no causation ids, and outcomes record `evidence: []`.
+> - **Context authorities are three, not two:** `ContextAssembler`, per-unit prompt building, and
+>   `ContextCompiler`.
+> - **`@inevitable/adapters` depends on Gen 1 `@inevitable/events`.**
+> - **11 of 20 tables have no production writer.** The six source tables from migration 0002 are
+>   among them.
+>
+> **Consequences.** These supersede §6's "refactor kernel/execution/runtime" and "adopt
+> `packages/contracts` as-is", and §11 phases 2–6.
+>
+> - **The durable core is built as a new generation in `core/*` (`@uci/*`) beside a frozen Gen 1/2.**
+> - **Its first proof is one vertical slice** (the Continuity Slice), judged by the cognitive-resume
+>   battery.
+> - **The dual generation is bounded and mechanically checked:**
+>   - zero transitive `@uci → @inevitable` imports;
+>   - a shrink-only baseline on frozen packages;
+>   - product migration, then deletion of Gen 1/2, starts no later than right after the Postgres slice.
+>
+> **Decisions:** journal `decision-20261001-a80d`, `-b260`, `-d67f`, `-d222` in `.build/journal.jsonl`.
+> **Status and acceptance criteria:** `criteria-20261001-3ea6`.
+
 ---
 
 ## 0. The decision, up front
