@@ -1,0 +1,111 @@
+{
+  "battery": "cognitive-resume (forked control)",
+  "head": "b9e37d9",
+  "scorer": "3cc55ef9da552e90",
+  "x": "claude",
+  "y": "azure",
+  "seeds": 5,
+  "cap": 25,
+  "stopped": null,
+  "sampling": {
+    "claude": {
+      "model": "claude-opus-5-5",
+      "effort": "medium",
+      "output": "prompted schema; no temperature (rejected by the model)"
+    },
+    "azure": {
+      "deployment": "gpt-4.1-mini",
+      "temperature": 0,
+      "output": "strict json_schema"
+    }
+  },
+  "rates": {
+    "A_X": {
+      "n": 5,
+      "CR1": 0.8,
+      "CR2": 0.8,
+      "CR3": 0.4,
+      "revised": 0.4,
+      "CR5": 0.8,
+      "CR7": 0.8,
+      "CR8": 0.8,
+      "mastery": 0.4
+    },
+    "A_X2": {
+      "n": 5,
+      "CR1": 0.6,
+      "CR2": 0.6666666666666666,
+      "CR3": 0.6,
+      "revised": 0.6,
+      "CR5": 0.8,
+      "CR7": 0.8,
+      "CR8": 0.8,
+      "mastery": 0.6
+    },
+    "A_Y": {
+      "n": 5,
+      "CR1": 0.8,
+      "CR2": 1,
+      "CR3": 0.25,
+      "revised": 0.25,
+      "CR5": 1,
+      "CR7": 1,
+      "CR8": 1,
+      "mastery": 0.4
+    },
+    "B": {
+      "n": 5,
+      "CR1": 0.8,
+      "CR2": 1,
+      "CR3": 0,
+      "revised": 0.4,
+      "CR5": 1,
+      "CR7": 1,
+      "CR8": 1,
+      "mastery": 0.4
+    },
+    "C": {
+      "n": 5,
+      "CR1": 0.4,
+      "CR2": 1,
+      "CR3": 1,
+      "revised": 0.4,
+      "CR5": 1,
+      "CR7": 0.4,
+      "CR8": 1,
+      "mastery": 0.4
+    },
+    "D": {
+      "n": 5,
+      "CR1": 1,
+      "CR2": 1,
+      "CR3": 0.2,
+      "revised": 0.2,
+      "CR5": 0,
+      "CR7": 1,
+      "CR8": 1,
+      "mastery": 0.6
+    }
+  },
+  "variance": {
+    "CR1": 0.20000000000000007,
+    "CR2": 0.13333333333333341,
+    "CR3": 0.19999999999999996,
+    "CR7": 0,
+    "CR8": 0
+  },
+  "rules": {
+    "H-PCS4": {
+      "CR1": true,
+      "CR2": true,
+      "CR3": false,
+      "CR7": true,
+      "CR8": true
+    },
+    "H-EC1": false,
+    "H-PCS3": true,
+    "zeroDuplicates": true,
+    "sameOutcome": true
+  },
+  "spendUsd": 5.79
+}

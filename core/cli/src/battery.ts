@@ -163,7 +163,9 @@ export async function runArm(o: {
   readonly X: () => ModelFaculty;
   readonly Y: () => ModelFaculty;
   readonly backoffMs?: number;
-}): Promise<ArmResult> {
+  /** Keep the arm's data directory for diagnosis instead of deleting it; its path is returned. */
+  readonly keep?: boolean;
+}): Promise<ArmResult & { readonly dir?: string }> {
   const started = Date.now();
   const backoff = o.backoffMs ?? 1_000;
   const dir = mkdtempSync(join(tmpdir(), `uci-arm-${o.arm}-`));
@@ -233,6 +235,7 @@ export async function runArm(o: {
     seconds: Math.round((Date.now() - started) / 1000),
   };
   await rt.close();
+  if (o.keep) return { ...result, dir };
   rmSync(dir, { recursive: true, force: true });
   return result;
 }
