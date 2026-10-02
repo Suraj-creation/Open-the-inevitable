@@ -129,40 +129,62 @@ export function validateProposal(
   if (errors.length) return { errors };
 
   const ws = vc.ws;
+  // Only what this call was shown can be cited: outside bridge mode no claim, decision or question
+  // is shown, so none is citable (ids glimpsed in a transcript are text, not references).
+  const bridge = vc.mode === "bridge";
   const inForce = new Set(ws.decisionsInForce.map((x) => x.id));
   const open = new Map(ws.openDecisions.map((x) => [x.id, x.value]));
-  const current = new Set(ws.claims.map((c) => c.id));
+  const current = new Set(bridge ? ws.claims.map((c) => c.id) : []);
   const stale = new Set(ws.claims.filter((c) => c.value.stale).map((c) => c.id));
-  const superseded = new Set(ws.superseded.map((s) => s.id));
+  const superseded = new Map(ws.superseded.map((s) => [s.id, s.value.by]));
   const evidenceIds = new Set([
     ...ws.inputs.map((i) => i.id),
     ...ws.observations.map((o) => o.id),
     ...current,
   ]);
   const questions = new Set(ws.questions.map((q) => q.id));
+  const list = (ids: Iterable<string>) => [...ids].join(", ") || "none";
+  const reexamineHint = (id: string) =>
+    `add {"decision_id": "${id}", "verdict": "reaffirm|revise|withdraw", "reason": "..."} to reexamines`;
 
   if (ws.objective && p.restatement.objective_id !== ws.objective.id)
     errors.push(`restatement.objective_id must be ${ws.objective.id}`);
-  if (vc.mode === "bridge") {
+  if (bridge) {
     const rd = p.restatement.rationale_decision_id;
     if (rd !== undefined && rd !== "" && !inForce.has(rd))
-      errors.push(`rationale_decision_id ${rd} is not a decision in force`);
+      errors.push(
+        `rationale_decision_id ${rd} is not a decision in force (in force: ${list(inForce)})`,
+      );
     for (const r of p.reexamines) {
       if (!isRecord(r) || !inForce.has(r.decision_id))
-        errors.push(`reexamines ${String(r?.decision_id)}: not a decision in force`);
+        errors.push(
+          `reexamines ${String(r?.decision_id)}: not a decision in force (in force: ${list(inForce)})`,
+        );
       else if (!["reaffirm", "revise", "withdraw"].includes(r.verdict) || !isStr(r.reason))
-        errors.push(`reexamines ${r.decision_id}: needs a verdict and a reason`);
+        errors.push(
+          `reexamines ${r.decision_id}: needs a verdict (reaffirm|revise|withdraw) and a reason`,
+        );
     }
     for (const ref of d.relies_on) {
-      if (superseded.has(ref)) errors.push(`relies on ${ref}, which is superseded`);
+      const by = superseded.get(ref);
+      if (by)
+        errors.push(
+          `relies on ${ref}, which is superseded by ${by}: rely on ${by} or leave it out`,
+        );
       else if (!current.has(ref))
-        errors.push(`relies on ${ref}, which is not a current claim in the working state`);
+        errors.push(
+          `relies on ${ref}, which is not a current claim: relies_on takes current claim versions only (current: ${list(current)})`,
+        );
       else if (stale.has(ref) && vc.staleness !== "off")
-        errors.push(`relies on ${ref}, which is STALE: re-validate it first`);
+        errors.push(
+          `relies on ${ref}, which is STALE: re-validate it first (a claim with revises "${ref}", citing evidence) or leave it out of relies_on`,
+        );
     }
     for (const rev of ws.decisionsInForce.filter((x) => x.value.revised.length)) {
       if (!p.reexamines.some((r) => r.decision_id === rev.id))
-        errors.push(`decision ${rev.id} has a revised premise and must be re-examined`);
+        errors.push(
+          `decision ${rev.id} has a revised premise (${rev.value.revised.join(", ")}): ${reexamineHint(rev.id)}`,
+        );
     }
     if (d.resolves_open_decision_id) {
       const od = open.get(d.resolves_open_decision_id);
@@ -200,13 +222,19 @@ export function validateProposal(
       continue;
     }
     for (const e of c.evidence)
-      if (!evidenceIds.has(e)) errors.push(`claim evidence ${e} is not in the working state`);
-    if (c.revises !== undefined && c.revises !== "" && !current.has(c.revises))
-      errors.push(`claim revises ${c.revises}, which is not a current claim`);
+      if (!evidenceIds.has(e))
+        errors.push(
+          `claim evidence ${e} is not in the working state: cite ${bridge ? "inputs (I…), observations (X…) or current claims (C…@v…)" : "inputs (I…) or observations (X…)"} shown in it`,
+        );
+    // revises is a bridge field: outside bridge mode it takes no effect, like relies_on.
+    if (bridge && c.revises !== undefined && c.revises !== "" && !current.has(c.revises))
+      errors.push(
+        `claim revises ${c.revises}, which is not a current claim (current: ${list(current)})`,
+      );
     // Revision propagates to decisions (H-EP3): changing what a claim says obliges re-examining,
     // in the same proposal, every decision in force that relied on it. A re-validation that keeps
     // the proposition does not.
-    if (vc.mode === "bridge" && c.revises && current.has(c.revises)) {
+    if (bridge && c.revises && current.has(c.revises)) {
       const prior = ws.claims.find((x) => x.id === c.revises)?.value.data.proposition;
       if (prior !== undefined && prior !== c.proposition)
         for (const dep of ws.decisionsInForce.filter((x) =>
@@ -214,18 +242,20 @@ export function validateProposal(
         ))
           if (!p.reexamines.some((r) => r.decision_id === dep.id))
             errors.push(
-              `revising ${c.revises} changes a premise of ${dep.id}: re-examine ${dep.id} in the same proposal`,
+              `revising ${c.revises} changes a premise of ${dep.id}: ${reexamineHint(dep.id)} in this same proposal`,
             );
     }
   }
 
   const a = p.action;
   if (a.type === "practice" && (!a.item_id || !vc.practiceItemIds.includes(a.item_id)))
-    errors.push("practice needs an item_id from the practice items");
+    errors.push(`practice needs an item_id from the practice items (${list(vc.practiceItemIds)})`);
   if ((a.type === "explain" || a.type === "ask_person") && !isStr(a.content))
     errors.push(`${a.type} needs content`);
   if (a.type === "conclude" && !vc.acceptanceMet)
-    errors.push("conclude refused: acceptance does not hold on environment-selected probes");
+    errors.push(
+      "conclude refused: acceptance does not hold on environment-selected probes (the acceptance verdict is not MET)",
+    );
   if (
     (a.type === "practice" || a.type === "assess") &&
     (!isRecord(p.expectation) ||
@@ -357,7 +387,8 @@ export function proposalDrafts(p: Proposal, dc: DraftContext): Draft[] {
     drafts.push({ kind: "claim.asserted", v: 1, data });
   }
   p.claims.forEach((c, i) => {
-    const prior = c.revises ? ws.claims.find((x) => x.id === c.revises)?.value.data : undefined;
+    const prior =
+      bridge && c.revises ? ws.claims.find((x) => x.id === c.revises)?.value.data : undefined;
     const validUntil = c.valid_for_days
       ? new Date(Date.parse(ws.now) + c.valid_for_days * DAY_MS).toISOString()
       : undefined;

@@ -20,7 +20,7 @@ import {
   RENDERER_VERSION,
   type WorkingState,
 } from "./compile.js";
-import type { InputDelivered } from "./kinds.js";
+import type { AcceptanceEvaluated, InputDelivered } from "./kinds.js";
 import { FacultyError, type EnvironmentPack, type ModelFaculty } from "./ports.js";
 import { parseProposal, type Proposal, proposalDrafts, validateProposal } from "./proposal.js";
 import { type ProcessHandle, readProcess, write } from "./writer.js";
@@ -63,6 +63,12 @@ export interface StepOutcome {
 const MAX_REJECTIONS_PER_STEP = 3;
 /** Transport attempts per ask (retryable failures and crash-abandoned calls alike) before a person is asked. */
 export const MAX_ATTEMPTS_PER_ASK = 8;
+/**
+ * Supervision (reads records, never the process's account of itself): once the environment's
+ * acceptance verdict is MET, a process that completes this many further steps without concluding is
+ * held for a person rather than left to spend its budget.
+ */
+export const MAX_STEPS_AFTER_ACCEPTANCE = 2;
 
 export async function runStep(deps: StepDeps): Promise<StepOutcome> {
   const { handle: h } = deps;
@@ -220,6 +226,35 @@ async function verifyAndExpire(deps: StepDeps, records: readonly CausalRecord[])
       );
     }
   }
+  // The environment's acceptance verdict over every probe resolution, including this batch's,
+  // recorded atomically with them whenever the verdict changes.
+  const probeOutcomes = [
+    ...[...cog.claims.values()]
+      .map((v) => v.at(-1))
+      .filter(
+        (c): c is CausalRecord<ClaimAsserted> =>
+          c?.data.claimKind === "resolution" && c.data.method === "answer-key:probe",
+      )
+      .sort((a, b) => a.seq - b.seq)
+      .map((c) => c.data.outcome),
+    ...drafts
+      .map((d) => d.data as ClaimAsserted)
+      .filter((c) => c.method === "answer-key:probe")
+      .map((c) => c.outcome),
+  ].map((o) => (o === "held" || o === "failed" ? o : "indeterminate"));
+  if (probeOutcomes.length) {
+    const met = env.acceptanceMet(probeOutcomes);
+    const last = records.findLast((r) => r.kind === "acceptance.evaluated") as
+      | CausalRecord<AcceptanceEvaluated>
+      | undefined;
+    // Only a change of verdict is a new fact; supervision counts steps from the record of a change.
+    if (!last || last.data.met !== met)
+      drafts.push({
+        kind: "acceptance.evaluated",
+        v: 1,
+        data: { met, probes: probeOutcomes.length, evaluator: `${env.id}@${env.version}` },
+      });
+  }
   await write(h, drafts);
 }
 
@@ -298,6 +333,19 @@ async function obtainProposal(
       | undefined
   )?.data.envelope;
   if (!envelope) throw new Error("process has no authority envelope");
+  const verdict = records.findLast((r) => r.kind === "acceptance.evaluated") as
+    | CausalRecord<AcceptanceEvaluated>
+    | undefined;
+  if (verdict?.data.met) {
+    const since = records.filter((r) => r.kind === "step.completed" && r.seq > verdict.seq).length;
+    if (since >= MAX_STEPS_AFTER_ACCEPTANCE) {
+      const reason = `supervision: acceptance verdict MET (record ${verdict.seq}) and ${since} further steps without conclude`;
+      await write(h, [
+        { kind: "process.escalated", v: 1, data: { reason, detail: "held for a person" } },
+      ]);
+      return { outcome: { status: "escalated", step, detail: reason } };
+    }
+  }
   const lastCompleted = records.filter((r) => r.kind === "step.completed").at(-1)?.seq ?? 0;
   const rejections = records.filter(
     (r) => r.kind === "proposal.rejected" && r.seq > lastCompleted,
@@ -375,7 +423,7 @@ async function obtainProposal(
     await write(h, [
       {
         kind: "manifest.recorded",
-        v: 1,
+        v: 2,
         data: {
           step,
           items: ctx.items,
@@ -475,7 +523,8 @@ async function obtainProposal(
     // made with a durable record before the effect (never a silent rejection here).
     actions: env.actions.map((a) => a.name),
     practiceItemIds: env.practiceItems().map((p) => p.itemId),
-    acceptanceMet: env.acceptanceMet(ws.probeOutcomes),
+    // One authority: the environment's recorded verdict, the same one the faculty was shown.
+    acceptanceMet: ws.acceptance?.value.met === true,
     staleness,
   });
   if ("errors" in validated) {

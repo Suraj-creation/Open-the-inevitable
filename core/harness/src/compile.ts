@@ -21,6 +21,7 @@ import {
   staleClaims,
 } from "@uci/substrate";
 import type {
+  AcceptanceEvaluated,
   ContinuityNotice,
   InputDelivered,
   ManifestExclusion,
@@ -36,7 +37,13 @@ import { PROPOSAL_SCHEMA } from "./proposal-schema.js";
  * faculty, recorded as a manifest before the call. Nothing here reads anything but records.
  */
 
-export type Mode = "bridge" | "floor-only";
+/**
+ * What the faculty is shown. `bridge`: the typed working state (claims, decisions, expectations,
+ * questions). `transcript`: the execution floor plus the verbatim transcript of previous outputs, as
+ * reference harnesses resume. `floor-only`: the execution floor alone (objective, authority, recent
+ * evidence, affordances, acceptance). Bridge fields in a proposal take effect only in bridge mode.
+ */
+export type Mode = "bridge" | "floor-only" | "transcript";
 
 interface Ref<T> {
   readonly id: string;
@@ -79,6 +86,8 @@ export interface WorkingState {
     | Ref<{ actions: readonly ActionSpec[]; practiceItems: readonly PracticeItem[] }>
     | undefined;
   readonly probeOutcomes: readonly ("held" | "failed" | "indeterminate")[];
+  /** The environment's latest recorded acceptance verdict, if any probe has been judged. */
+  readonly acceptance?: Ref<AcceptanceEvaluated>;
   readonly lastRejection?: Ref<ProposalRejected>;
   readonly cognitive: CognitiveState;
 }
@@ -105,6 +114,9 @@ export async function compileWorkingState(
     .reverse()
     .find((r) => r.kind === "continuity.notice" && r.seq > lastCompleted) as
     | CausalRecord<ContinuityNotice>
+    | undefined;
+  const acceptanceRec = [...records].reverse().find((r) => r.kind === "acceptance.evaluated") as
+    | CausalRecord<AcceptanceEvaluated>
     | undefined;
   const rejectionRec = [...records]
     .reverse()
@@ -272,6 +284,15 @@ export async function compileWorkingState(
     olderInputs: delivered.slice(0, -WINDOW).map((r) => r.data.inputId),
     environment,
     probeOutcomes,
+    ...(acceptanceRec
+      ? {
+          acceptance: {
+            id: `A${acceptanceRec.seq}`,
+            record: acceptanceRec.seq,
+            value: acceptanceRec.data,
+          },
+        }
+      : {}),
     lastRejection: rejectionRec
       ? { id: `R${rejectionRec.seq}`, record: rejectionRec.seq, value: rejectionRec.data }
       : undefined,
@@ -290,9 +311,15 @@ it is the typed working state in the request, compiled from durable records. Rul
 - You never verify anything. Only the environment's verifier resolves expectations; mastery is judged on probes the
   environment selects. "conclude" is accepted only when acceptance holds.
 - A decision marked PREMISE REVISED must be re-examined (reexamines) before anything relies on it.
-- A claim marked STALE must not be relied on until it is re-validated.
+- If you revise a claim (claims[].revises) that a decision in force relies on, re-examine that decision
+  (reexamines) in the same proposal.
+- revises updates the same belief (a re-validation or a revision); a different belief is a new claim
+  without revises.
+- A claim marked STALE must not be relied on until it is re-validated: assert it again with revises set
+  to its current version, citing evidence.
 - Open decisions stay open unless you resolve them by choosing one of their listed alternatives.
 - Open questions stay open unless you close them with a reason.
+- When the acceptance verdict says MET, the objective's acceptance holds and conclude is permitted.
 Reply with ONE proposal as JSON matching the schema.`;
 
 /** Render the working state for one faculty. Deterministic: the same state always renders the same bytes. */
@@ -376,7 +403,7 @@ export function renderPrompt(ws: WorkingState, mode: Mode, staleness: Staleness 
     add("## Open questions");
     if (!ws.questions.length) add("- (none)");
     for (const q of ws.questions) add(`- ${q.id} (asked of ${q.value.askedOf}): "${q.value.text}"`);
-  } else {
+  } else if (mode === "transcript") {
     add("## Transcript (your previous outputs, verbatim)");
     if (!ws.transcript.length) add("- (none)");
     for (const t of ws.transcript) add(`- ${t.id}: ${t.value.content}`);
@@ -399,6 +426,9 @@ export function renderPrompt(ws: WorkingState, mode: Mode, staleness: Staleness 
   add(
     "## Acceptance progress",
     `Environment-selected probes, verifier outcomes oldest first: ${ws.probeOutcomes.join(", ") || "(none yet)"}.`,
+    ws.acceptance
+      ? `Acceptance verdict (environment ${ws.acceptance.value.evaluator}): ${ws.acceptance.value.met ? "MET. The objective's acceptance holds; conclude is now permitted." : "not met."}`
+      : "Acceptance verdict: not met (no probe judged yet).",
   );
   if (ws.lastRejection) {
     add("## Your last proposal was rejected");
@@ -478,17 +508,30 @@ export function compileContext(
   for (const [prefix, refs, role, reason] of bridge)
     for (const r of refs) {
       if (mode === "bridge") item(`${prefix}:${r.id}`, r.record, role, reason, "data");
-      else exclusions.push({ ref: `${prefix}:${r.id}`, reason: "ablation: floor-only arm" });
+      else exclusions.push({ ref: `${prefix}:${r.id}`, reason: `ablation: ${mode} arm` });
     }
-  if (mode === "floor-only")
-    for (const t of ws.transcript)
+  for (const t of ws.transcript)
+    if (mode === "transcript")
       item(
         `output:${t.id}`,
         t.record,
         "transcript",
-        "previous model output (floor-only arm)",
+        "previous model output (transcript arm)",
         "data",
       );
+    else if (mode === "floor-only")
+      exclusions.push({
+        ref: `output:${t.id}`,
+        reason: "ablation: floor-only arm (no transcript)",
+      });
+  if (ws.acceptance)
+    item(
+      `acceptance:${ws.acceptance.id}`,
+      ws.acceptance.record,
+      "environment-verdict",
+      "latest acceptance verdict of the environment",
+      "data",
+    );
   for (const i of ws.inputs)
     item(`input:${i.id}`, i.record, "evidence", "recent learner input", "data");
   for (const o of ws.observations)

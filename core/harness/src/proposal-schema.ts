@@ -37,7 +37,7 @@ export const PROPOSAL_SCHEMA: Record<string, unknown> = {
     reexamines: {
       type: "array",
       description:
-        "Decisions in force (D...) you re-examine now. Required for every decision marked PREMISE REVISED.",
+        "Decisions in force (D...) you re-examine now. Required for every decision marked PREMISE REVISED, and for every decision in force that relies on a claim you revise in this proposal.",
       items: {
         type: "object",
         properties: {
@@ -118,7 +118,9 @@ export const PROPOSAL_SCHEMA: Record<string, unknown> = {
           valid_for_days: num(
             "How long this belief stays valid without re-checking, if it can go stale.",
           ),
-          revises: str("A current claim (C...@v...) this one replaces."),
+          revises: str(
+            "The current version (C...@v...) of the same belief this updates (a re-validation or a revision). A different belief is a new claim: leave revises out.",
+          ),
         },
         required: ["subject", "proposition", "confidence", "evidence"],
       },

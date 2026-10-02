@@ -36,7 +36,13 @@ export interface ManifestRecorded {
   readonly requestHash: string;
   readonly faculty: string;
   readonly model: string;
-  readonly mode: "bridge" | "floor-only";
+  /**
+   * What the faculty was shown. `bridge`: typed working state. `transcript`: the execution floor plus
+   * the verbatim transcript of previous outputs (the reference harnesses' resume). `floor-only`: the
+   * execution floor alone. Written as v2; v1 records (bridge | floor-only, where floor-only showed the
+   * transcript) stay readable.
+   */
+  readonly mode: "bridge" | "floor-only" | "transcript";
   /** Whether lapsed validity was surfaced and enforced for this call. */
   readonly staleness: "gate" | "off";
   /** The world-clock instant the working state was compiled at (staleness and due times depend on it). */
@@ -70,6 +76,19 @@ export interface ContinuityNotice {
   readonly faculty: string;
 }
 
+/**
+ * The environment's acceptance predicate evaluated over the recorded probe resolutions, written
+ * whenever its verdict changes. The single authority for "acceptance holds": the renderer shows it
+ * and conclude is validated against it (stages never collapse: the verdict is the environment's).
+ */
+export interface AcceptanceEvaluated {
+  readonly met: boolean;
+  /** How many probe resolutions the verdict was computed over when it changed. */
+  readonly probes: number;
+  /** The environment that judged, as id@version. */
+  readonly evaluator: string;
+}
+
 export interface ProcessConcluded {
   readonly outcome: "mastery-verified" | "escalated" | "abandoned";
   readonly evidence: readonly string[];
@@ -89,6 +108,19 @@ const exclusion: Check = (v, p) =>
   isRecord(v)
     ? [...str(v["ref"], `${p}.ref`), ...str(v["reason"], `${p}.reason`)]
     : [`${p} must be an object`];
+const bool: Check = (v, p) => (typeof v === "boolean" ? [] : [`${p} must be a boolean`]);
+const manifestFields = (modes: readonly string[]) => ({
+  step: int,
+  items: arrayOf(manifestItem),
+  exclusions: arrayOf(exclusion),
+  rendererVersion: str,
+  requestHash: str,
+  faculty: str,
+  model: str,
+  mode: oneOf(...modes),
+  staleness: oneOf("gate", "off"),
+  compiledAt: str,
+});
 const settledEntry: Check = (v, p) =>
   isRecord(v)
     ? [...str(v["effectId"], `${p}.effectId`), ...str(v["outcome"], `${p}.outcome`)]
@@ -99,22 +131,8 @@ const reconciledEntry: Check = (v, p) =>
     : [`${p} must be an object`];
 
 export const HARNESS_KINDS = [
-  defineKind(
-    "manifest.recorded",
-    1,
-    shape({
-      step: int,
-      items: arrayOf(manifestItem),
-      exclusions: arrayOf(exclusion),
-      rendererVersion: str,
-      requestHash: str,
-      faculty: str,
-      model: str,
-      mode: oneOf("bridge", "floor-only"),
-      staleness: oneOf("gate", "off"),
-      compiledAt: str,
-    }),
-  ),
+  defineKind("manifest.recorded", 1, shape(manifestFields(["bridge", "floor-only"]))),
+  defineKind("manifest.recorded", 2, shape(manifestFields(["bridge", "floor-only", "transcript"]))),
   defineKind(
     "input.delivered",
     1,
@@ -148,4 +166,5 @@ export const HARNESS_KINDS = [
     shape({ outcome: oneOf("mastery-verified", "escalated", "abandoned"), evidence: arrayOf(str) }),
   ),
   defineKind("process.escalated", 1, shape({ reason: str, detail: optStr })),
+  defineKind("acceptance.evaluated", 1, shape({ met: bool, probes: int, evaluator: str })),
 ];
