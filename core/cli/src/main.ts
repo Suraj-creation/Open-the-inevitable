@@ -6,15 +6,30 @@
  *   uci resume  --faculty <name> --dir D [--steps N] [--process P]
  *   uci inspect --dir D [--process P]
  *   uci spike   --faculty <name> [--steps N]       one complete live run in a temp dir; JSON summary
+ *   uci battery --x <name> --y <name> [--seeds N] [--cap USD] [--out DIR]
+ *               the forked cognitive-resume battery (Tier R when X/Y are live); X and Y alternate
+ *               by seed; results and the pre-registered rule outcomes are written to --out
  *
  * Credentials come from the repository's git-ignored .env; nothing here prints a secret.
  */
-import { mkdtempSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { processStream, runStep, type StepOutcome } from "@uci/harness";
 import { systemClock } from "@uci/kernel";
-import { FACULTY_NAMES, type FacultyName, makeFaculty } from "./faculty-config.js";
+import {
+  ARMS,
+  type ArmName,
+  type ArmResult,
+  evaluate,
+  runArm,
+  scorerHash,
+  SEEDS,
+  setupFork,
+} from "./battery.js";
+import { FACULTY_NAMES, type FacultyName, loadEnv, makeFaculty } from "./faculty-config.js";
 import { rederive, summarize } from "./inspect.js";
 import { openRuntime, resume, start } from "./runtime.js";
 
@@ -43,8 +58,112 @@ async function drive(
   return last;
 }
 
+function repoRoot(): string {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  while (!existsSync(join(dir, "pnpm-workspace.yaml")) && dirname(dir) !== dir) dir = dirname(dir);
+  return dir;
+}
+
+/**
+ * Run the battery. Seeds alternate which provider authors the fork (X) and which resumes (Y).
+ * Spend is metered from recorded usage; after each seed the remaining spend is projected from the
+ * costliest seed so far, and A_X2 (the variance baseline) is dropped first if the cap would be
+ * exceeded, then the run stops (pre-registered abort rule).
+ */
+async function battery(): Promise<void> {
+  const x = arg("x", "claude") as FacultyName;
+  const y = arg("y", "azure") as FacultyName;
+  for (const f of [x, y])
+    if (!FACULTY_NAMES.includes(f))
+      throw new Error(`--x/--y must be one of ${FACULTY_NAMES.join("|")}`);
+  const nSeeds = Math.min(Number(arg("seeds", String(SEEDS.length))), SEEDS.length);
+  const cap = Number(arg("cap", "25"));
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const out = arg("out") ?? join(repoRoot(), ".build", "evidence", `battery-${stamp}`);
+  mkdirSync(out, { recursive: true });
+  const env = loadEnv();
+  const head = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: repoRoot() })
+    .toString()
+    .trim();
+  const { dir, at } = await setupFork();
+  const results: ArmResult[] = [];
+  let arms: ArmName[] = [...ARMS];
+  let maxSeedCost = 0;
+  let stopped: string | undefined;
+  for (const [i, seed] of SEEDS.slice(0, nSeeds).entries()) {
+    const [X, Y] = seed.seed % 2 === 0 ? [x, y] : [y, x];
+    const batch = await Promise.all(
+      arms.map((arm) =>
+        runArm({
+          src: dir,
+          at,
+          arm,
+          seed,
+          X: () => makeFaculty(X, env),
+          Y: () => makeFaculty(Y, env),
+        }),
+      ),
+    );
+    for (const r of batch) {
+      results.push(r);
+      appendFileSync(
+        join(out, "runs.jsonl"),
+        `${JSON.stringify(r)}
+`,
+      );
+      console.error(
+        `seed ${seed.seed} ${r.arm.padEnd(4)} ${r.x.split("/")[0]}->${r.y.split("/")[0]} ` +
+          `${r.score.outcome} CR1=${r.score.CR1} CR3=${r.score.CR3} rev=${r.score.revised} ` +
+          `CR5=${r.score.CR5} CR7=${r.score.CR7} $${r.costUsd} ${r.seconds}s`,
+      );
+    }
+    const spent = results.reduce((s, r) => s + r.costUsd, 0);
+    const seedCost = batch.reduce((s, r) => s + r.costUsd, 0);
+    maxSeedCost = Math.max(maxSeedCost, seedCost / batch.length);
+    const remaining = nSeeds - (i + 1);
+    const project = (n: number) => spent + maxSeedCost * n * remaining;
+    if (project(arms.length) > cap && arms.includes("A_X2"))
+      arms = arms.filter((a) => a !== "A_X2");
+    if (remaining && project(arms.length) > cap) {
+      stopped = `projected $${project(arms.length).toFixed(2)} exceeds cap $${cap} after seed ${seed.seed}`;
+      break;
+    }
+  }
+  rmSync(dir, { recursive: true, force: true });
+  const summary = {
+    battery: "cognitive-resume (forked control)",
+    head,
+    scorer: scorerHash(),
+    x,
+    y,
+    seeds: nSeeds,
+    cap,
+    stopped: stopped ?? null,
+    sampling: {
+      claude: {
+        model: env["UCI_CLAUDE_MODEL"] ?? "claude-opus-5-5",
+        effort: env["UCI_CLAUDE_EFFORT"] ?? "medium",
+        output: "prompted schema; no temperature (rejected by the model)",
+      },
+      azure: {
+        deployment: env["AZURE_OPENAI_CHAT_DEPLOYMENT"] ?? "gpt-4.1-mini",
+        temperature: 0,
+        output: "strict json_schema",
+      },
+    },
+    ...evaluate(results),
+  };
+  writeFileSync(
+    join(out, "summary.json"),
+    `${JSON.stringify(summary, null, 2)}
+`,
+  );
+  console.log(JSON.stringify(summary, null, 2));
+}
+
 async function main(): Promise<void> {
   const command = process.argv[2];
+  if (command === "battery") return battery();
   const processId = arg("process", "P1") ?? "P1";
   const maxSteps = Number(arg("steps", "40"));
   const facultyName = arg("faculty", "scripted") as FacultyName;
