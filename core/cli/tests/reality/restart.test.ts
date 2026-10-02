@@ -200,12 +200,16 @@ describe("recovery policy", () => {
     await runStep({ handle, faculty, env: rt.env });
     await rt.close();
     const rt2 = await openRuntime(dir, clock);
-    rt2.env.channel.receive({ inputId: "I-dup", from: "learner", content: "hello" });
-    rt2.env.channel.receive({ inputId: "I-dup", from: "learner", content: "hello" });
+    // The same submission sent twice while the process is down (a client retry) is one admission.
+    const first = await rt2.say("P1", "hello", "client-retry-1");
+    const again = await rt2.say("P1", "hello", "client-retry-1");
+    expect(first.duplicate).toBe(false);
+    expect(again).toEqual({ inputId: first.inputId, duplicate: true });
     const resumed = await resume(rt2, "P1", "w1", faculty);
     await runStep({ handle: resumed.handle, faculty, env: rt2.env });
     const delivered = (await rt2.store.read(processStream("P1"))).filter(
-      (r) => r.kind === "input.delivered" && (r.data as { inputId: string }).inputId === "I-dup",
+      (r) =>
+        r.kind === "input.delivered" && (r.data as { inputId: string }).inputId === first.inputId,
     );
     expect(delivered).toHaveLength(1);
     await rt2.close();

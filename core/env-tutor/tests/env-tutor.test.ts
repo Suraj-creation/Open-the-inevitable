@@ -64,21 +64,22 @@ describe("durable channel", () => {
   it("ignores a torn final line and records duplicates instead of hiding them", () => {
     const dir = temp();
     const ch = new DurableChannel(dir);
-    ch.deliver({
+    const entry = {
+      processId: "P1",
       effectId: "X1-a1",
       idempotencyKey: "action:step-1",
       action: "explain",
       params: {},
-    });
-    ch.deliver({
-      effectId: "X1-a1",
-      idempotencyKey: "action:step-1",
-      action: "explain",
-      params: {},
-    });
+    };
+    ch.deliver(entry);
+    ch.deliver(entry);
+    // Another process's identical effect id is a different delivery.
+    ch.deliver({ ...entry, processId: "P2" });
     appendFileSync(join(dir, "outbox.jsonl"), '{"effectId":"X2-a1","idempo');
-    expect(ch.outbox()).toHaveLength(2);
-    expect(ch.deliveryCounts().get("X1-a1")).toBe(2);
+    expect(ch.outbox()).toHaveLength(3);
+    expect(ch.outbox("P1")).toHaveLength(2);
+    expect(ch.deliveryCounts().get("P1/X1-a1")).toBe(2);
+    expect(ch.deliveryCounts().get("P2/X1-a1")).toBe(1);
   });
 });
 
@@ -86,12 +87,14 @@ describe("environment behaviour", () => {
   it("selects probes itself, never repeating one, and reconciles from its own outbox", async () => {
     const env = new TutorEnvironment(temp(), { misconception: false });
     const a = await env.perform({
+      processId: "P1",
       effectId: "X1-a1",
       idempotencyKey: "k1",
       action: "assess",
       params: {},
     });
     const b = await env.perform({
+      processId: "P1",
       effectId: "X2-a1",
       idempotencyKey: "k2",
       action: "assess",
@@ -100,38 +103,45 @@ describe("environment behaviour", () => {
     expect(a.probeItemId).toBe("p-1");
     expect(b.probeItemId).toBe("p-2");
     expect(a.observation).not.toContain("p-1");
-    expect(await env.reconcile("X2-a1")).toEqual({
+    expect(await env.reconcile("P1", "X2-a1")).toEqual({
       finding: "delivered",
       detail: "probe:p-2",
       observation: "Delivered the next held-out assessment probe to the learner.",
     });
-    expect(await env.reconcile("X9-a1")).toEqual({ finding: "not_delivered" });
+    expect(await env.reconcile("P1", "X9-a1")).toEqual({ finding: "not_delivered" });
+    // Effect ids are unique within a process only: another process never sees P1's delivery.
+    expect(await env.reconcile("P2", "X2-a1")).toEqual({ finding: "not_delivered" });
   });
 
   it("the learner's misconception persists until a common-denominator explanation, as a function of the outbox", async () => {
-    const env = new TutorEnvironment(temp(), { misconception: true });
+    const replies: string[][] = [];
+    const env = new TutorEnvironment(temp(), { misconception: true }, undefined, async (r) => {
+      replies.push([r.processId, r.key, r.inReplyTo ?? "", r.content, r.labels.join(",")]);
+    });
     await env.perform({
+      processId: "P1",
       effectId: "X1-a1",
       idempotencyKey: "k1",
       action: "practice",
       params: { item_id: "i-1" },
     });
     await env.perform({
+      processId: "P1",
       effectId: "X2-a1",
       idempotencyKey: "k2",
       action: "explain",
       params: { content: "Use a common denominator first." },
     });
     await env.perform({
+      processId: "P1",
       effectId: "X3-a1",
       idempotencyKey: "k3",
       action: "practice",
       params: { item_id: "i-1" },
     });
-    const replies = (await env.inbox()).map((i) => [i.inReplyTo, i.content]);
     expect(replies).toEqual([
-      ["X1-a1", "I think it's 2/5."],
-      ["X3-a1", "I think it's 5/6."],
+      ["P1", "reply:X1-a1", "X1-a1", "I think it's 2/5.", "consent:learning,source:learner"],
+      ["P1", "reply:X3-a1", "X3-a1", "I think it's 5/6.", "consent:learning,source:learner"],
     ]);
   });
 

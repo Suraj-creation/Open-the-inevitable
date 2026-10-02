@@ -5,10 +5,18 @@ import { arrayOf, defineKind, int, isRecord, oneOf, shape, str, type Check } fro
  * Authority is structural: a process holds an explicit envelope, recorded as its first record, and
  * every effect passes governance before it runs. An absent or broken answer is a denial.
  */
+/** Who may submit input to a process (admission is authority too: nothing is ambient). */
+export interface Admission {
+  readonly principal: string;
+  readonly role: "person" | "environment";
+}
+
 export interface Envelope {
   readonly actions: readonly string[];
   readonly effectClasses: readonly EffectClass[];
   readonly modelCallBudget: number;
+  /** Principals whose input is admitted (authority.granted@2). Absent in v1 envelopes. */
+  readonly admits?: readonly Admission[];
 }
 
 export interface AuthorityGranted {
@@ -26,20 +34,34 @@ export interface GovernanceDecided {
   readonly policyVersion: string;
 }
 
-const envelope: Check = (v, p) =>
+const envelopeFields = (v: Record<string, unknown>, p: string): string[] => [
+  ...arrayOf(str)(v["actions"], `${p}.actions`),
+  ...arrayOf(oneOf("model-call", "external-communication"))(
+    v["effectClasses"],
+    `${p}.effectClasses`,
+  ),
+  ...int(v["modelCallBudget"], `${p}.modelCallBudget`),
+];
+const admission: Check = (v, p) =>
   isRecord(v)
     ? [
-        ...arrayOf(str)(v["actions"], `${p}.actions`),
-        ...arrayOf(oneOf("model-call", "external-communication"))(
-          v["effectClasses"],
-          `${p}.effectClasses`,
-        ),
-        ...int(v["modelCallBudget"], `${p}.modelCallBudget`),
+        ...str(v["principal"], `${p}.principal`),
+        ...oneOf("person", "environment")(v["role"], `${p}.role`),
       ]
+    : [`${p} must be an object`];
+// v1 never carried an admission policy: a v1 record with one would be silently widened, so refuse it.
+const envelopeV1: Check = (v, p) =>
+  isRecord(v)
+    ? [...envelopeFields(v, p), ...("admits" in v ? [`${p}.admits needs authority.granted@2`] : [])]
+    : [`${p} must be an object`];
+const envelopeV2: Check = (v, p) =>
+  isRecord(v)
+    ? [...envelopeFields(v, p), ...arrayOf(admission)(v["admits"], `${p}.admits`)]
     : [`${p} must be an object`];
 
 export const AUTHORITY_KINDS = [
-  defineKind("authority.granted", 1, shape({ envelope, grantedBy: str })),
+  defineKind("authority.granted", 1, shape({ envelope: envelopeV1, grantedBy: str })),
+  defineKind("authority.granted", 2, shape({ envelope: envelopeV2, grantedBy: str })),
   defineKind(
     "governance.decided",
     1,

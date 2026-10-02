@@ -46,7 +46,12 @@ export async function startProcess(o: StartOptions): Promise<ProcessHandle> {
   });
   const descriptionHash = evidenceHash("application/json", description);
   const drafts: Draft[] = [
-    { kind: "authority.granted", v: 1, data: { envelope: o.envelope, grantedBy: o.grantedBy } },
+    // An envelope with an admission policy is authority.granted@2.
+    {
+      kind: "authority.granted",
+      v: o.envelope.admits ? 2 : 1,
+      data: { envelope: o.envelope, grantedBy: o.grantedBy },
+    },
     { kind: "objective.set", v: 1, data: o.objective },
     {
       kind: "evidence.recorded",
@@ -132,7 +137,7 @@ export async function resumeProcess(o: ResumeOptions): Promise<Resumed> {
   const reconciled: { effectId: string; finding: string }[] = [];
   for (const entry of unreconciled(foldLedger(await o.store.read(stream)))) {
     const effectId = entry.intended.data.effectId;
-    const { finding, detail, observation } = await o.env.reconcile(effectId);
+    const { finding, detail, observation } = await o.env.reconcile(meta.processId, effectId);
     reconciled.push({ effectId, finding });
     reconciledDrafts.push({
       kind: "effect.reconciled",

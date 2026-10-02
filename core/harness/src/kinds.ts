@@ -167,6 +167,22 @@ export const HARNESS_KINDS = [
   ),
   defineKind("process.escalated", 1, shape({ reason: str, detail: optStr })),
   defineKind("acceptance.evaluated", 1, shape({ met: bool, probes: int, evaluator: str })),
+  // Admission (in inbox/<processId> streams, written by the channel, never by the process).
+  defineKind(
+    "input.admitted",
+    1,
+    shape({
+      from: oneOf("learner", "person", "environment"),
+      principal: str,
+      evidenceHash: str,
+      inReplyTo: optStr,
+    }),
+  ),
+  defineKind(
+    "input.refused",
+    1,
+    shape({ from: oneOf("learner", "person", "environment"), principal: str, reason: str }),
+  ),
   /** Which environment pack a process runs in, so any host binds the same one on hydration. */
   defineKind("environment.bound", 1, shape({ packId: str, version: str, descriptionHash: str })),
 ];

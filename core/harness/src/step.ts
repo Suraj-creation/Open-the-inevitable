@@ -21,6 +21,7 @@ import {
   RENDERER_VERSION,
   type WorkingState,
 } from "./compile.js";
+import { type InputAdmitted, inboxStream } from "./admit.js";
 import type { AcceptanceEvaluated, InputDelivered } from "./kinds.js";
 import { FacultyError, type EnvironmentPack, type ModelFaculty } from "./ports.js";
 import { parseProposal, type Proposal, proposalDrafts, validateProposal } from "./proposal.js";
@@ -132,43 +133,44 @@ export async function runStep(deps: StepDeps): Promise<StepOutcome> {
 // ---------------------------------------------------------------- A. admission
 
 async function deliverInputs(deps: StepDeps, records: readonly CausalRecord[]): Promise<void> {
-  const { handle: h, env } = deps;
-  const delivered = new Set(
-    records
-      .filter((r) => r.kind === "input.delivered")
-      .map((r) => (r.data as InputDelivered).inputId),
-  );
-  // A channel may hold the same input more than once (a resubmission, a retried send): admit it once.
-  const fresh = (await env.inbox()).filter((i) => {
-    if (delivered.has(i.inputId)) return false;
-    delivered.add(i.inputId);
-    return true;
-  });
+  const { handle: h } = deps;
+  // The delivery cursor: inputs are admitted to inbox/<processId> and delivered in admission order,
+  // each exactly once (the writer refuses a second delivery of an input id).
+  const delivered = records
+    .filter((r) => r.kind === "input.delivered")
+    .map((r) => Number((r.data as InputDelivered).inputId.slice(1)))
+    .filter((n) => Number.isInteger(n));
+  const cursor = delivered.length ? Math.max(...delivered) : 0;
+  const inbox = inboxStream(h.meta.processId);
+  const fresh = (await h.store.read(inbox, cursor + 1)).filter((r) => r.kind === "input.admitted");
   const drafts: Draft[] = [];
-  for (const input of fresh) {
-    const evidenceHash = await h.store.putEvidence(h.meta.entityId, "text/plain", input.content);
-    const labels =
-      input.from === "learner" ? ["consent:learning", "source:learner"] : [`source:${input.from}`];
+  for (const admitted of fresh) {
+    const input = admitted.data as InputAdmitted;
+    const inputId = `I${admitted.seq}`;
+    const causes = [{ stream: inbox, seq: admitted.seq }];
+    // The content is already stored under this entity by admission; the labels travel with it.
     drafts.push({
       kind: "evidence.recorded",
       v: 1,
-      labels,
+      labels: admitted.labels,
+      causes,
       data: {
-        evidenceHash,
+        evidenceHash: input.evidenceHash,
         mediaType: "text/plain",
         source: input.from === "environment" ? "environment" : input.from,
         trust: "data",
-        ref: input.inputId,
+        ref: inputId,
       },
     });
     drafts.push({
       kind: "input.delivered",
       v: 1,
-      labels,
+      labels: admitted.labels,
+      causes,
       data: {
-        inputId: input.inputId,
+        inputId,
         from: input.from,
-        evidenceHash,
+        evidenceHash: input.evidenceHash,
         ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
       },
     });
@@ -695,7 +697,13 @@ async function performAction(
   ]);
   await write(h, [{ kind: "effect.started", v: 1, data: { effectId } }]);
   crash("external-started");
-  const result = await env.perform({ effectId, idempotencyKey: key, action, params });
+  const result = await env.perform({
+    processId: h.meta.processId,
+    effectId,
+    idempotencyKey: key,
+    action,
+    params,
+  });
   crash("external-performed");
   const observationHash = evidenceHash("text/plain", result.observation);
   await write(

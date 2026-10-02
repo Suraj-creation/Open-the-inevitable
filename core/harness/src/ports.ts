@@ -52,6 +52,8 @@ export interface ActionSpec {
 }
 
 export interface PerformRequest {
+  /** The process acting: effect ids are unique within it, and replies are admitted to its inbox. */
+  readonly processId: string;
   readonly effectId: string;
   readonly idempotencyKey: string;
   readonly action: string;
@@ -64,14 +66,6 @@ export interface PerformResult {
   readonly observation: string;
   /** For an assessment probe the environment selected: which item it was (so its answer can be verified). */
   readonly probeItemId?: string;
-}
-
-export interface ChannelInput {
-  readonly inputId: string;
-  readonly from: "learner" | "person" | "environment";
-  readonly content: string;
-  /** The effect this input answers, if any. */
-  readonly inReplyTo?: string;
 }
 
 export interface Verification {
@@ -97,12 +91,14 @@ export interface EnvironmentPack {
   /** Items the actor may choose for practice. Answer keys are never exposed. */
   practiceItems(): readonly PracticeItem[];
   perform(request: PerformRequest): Promise<PerformResult>;
-  /** Ask the channel whether an effect whose outcome is unknown was actually delivered. */
+  /**
+   * Ask the channel whether an effect whose outcome is unknown was actually delivered. Effect ids
+   * are unique within a process only, so the channel is asked per process.
+   */
   reconcile(
+    processId: string,
     effectId: string,
   ): Promise<{ finding: ReconcileFinding; detail?: string; observation?: string }>;
-  /** Inputs admitted by the channel, in admission order. */
-  inbox(): Promise<readonly ChannelInput[]>;
   /** The environment's own verifier for an item answer; the actor can neither read nor edit it. */
   verify(itemId: string, answer: string): Verification;
   /** Acceptance over the verifier's outcomes on environment-selected probes, oldest first. */

@@ -1,10 +1,14 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { SqliteCausalStore } from "@uci/adapters";
 import { TutorEnvironment } from "@uci/env-tutor";
 import {
+  type AdmissionResult,
+  admitInput,
   type ModelFaculty,
   PROCESS_KINDS,
+  processStream,
   type ProcessHandle,
   resumeProcess,
   runStep,
@@ -23,7 +27,20 @@ export interface Runtime {
   readonly store: CausalStore;
   readonly env: TutorEnvironment;
   readonly clock: Clock;
+  /**
+   * The learner sends a message unprompted (e.g. a correction): admitted to the process's inbox
+   * under the learner's principal, delivered at its next step. `key` makes a resubmission the
+   * same admission; omitted, every call is a new message.
+   */
+  say(processId: string, content: string, key?: string): Promise<AdmissionResult>;
   close(): Promise<void>;
+}
+
+/** In this composition the learner is the process's entity: its principal is the entity id. */
+async function learnerOf(store: CausalStore, processId: string): Promise<string> {
+  const head = (await store.read(processStream(processId), 1))[0];
+  if (!head) throw new Error(`process ${processId} does not exist`);
+  return head.entityId;
 }
 
 export async function openRuntime(
@@ -36,14 +53,31 @@ export async function openRuntime(
   const store = await SqliteCausalStore.open(join(dataDir, "uci.sqlite"), {
     registry: PROCESS_KINDS,
   });
-  const env = new TutorEnvironment(join(dataDir, "channel"), learner, acceptanceStreak);
-  return { store, env, clock, close: () => store.close() };
+  const env = new TutorEnvironment(
+    join(dataDir, "channel"),
+    learner,
+    acceptanceStreak,
+    async (reply) =>
+      admitInput(store, clock, { ...reply, principal: await learnerOf(store, reply.processId) }),
+  );
+  const say = async (processId: string, content: string, key?: string) =>
+    admitInput(store, clock, {
+      processId,
+      key: key ?? `say:${randomUUID()}`,
+      from: "learner",
+      principal: await learnerOf(store, processId),
+      content,
+      labels: ["consent:learning", "source:learner"],
+    });
+  return { store, env, clock, say, close: () => store.close() };
 }
 
 export const DEFAULT_ENVELOPE: Envelope = {
   actions: ["explain", "practice", "assess", "ask_person"],
   effectClasses: ["model-call", "external-communication"],
   modelCallBudget: 60,
+  // Only the learner (the process's entity, L1 here) may submit input.
+  admits: [{ principal: "L1", role: "person" }],
 };
 
 export const OBJECTIVE = {

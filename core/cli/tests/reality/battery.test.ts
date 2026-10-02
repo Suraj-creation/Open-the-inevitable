@@ -74,7 +74,7 @@ async function armWarm(src: string, at: string) {
   await runStep({ handle, faculty, env: rt.env }); // the fork step, uninterrupted
   const killSeq = (await rt.store.read(processStream("P1"))).at(-1)?.seq ?? 0;
   clock.advance(ADVANCE);
-  rt.env.learnerSays(CORRECTION);
+  await rt.say("P1", CORRECTION);
   const outcome = await runToEnd(rt, handle, faculty, "bridge");
   return { rt, outcome, killSeq };
 }
@@ -98,7 +98,7 @@ async function armInterrupted(src: string, at: string, mode: Mode, staleness: St
   await rt.close(); // killed mid-effect; nothing in memory survives
   clock.advance(ADVANCE);
   rt = await openRuntime(dir, clock);
-  rt.env.learnerSays(CORRECTION); // arrives while the process is down
+  await rt.say("P1", CORRECTION); // arrives while the process is down
   const swapped = new ScriptedTutorFaculty("scripted-tutor-B@1");
   const resumed = await resume(rt, "P1", "after-kill", swapped);
   const outcome = await runToEnd(rt, resumed.handle, swapped, mode, staleness);

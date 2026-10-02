@@ -192,7 +192,7 @@ export async function runArm(o: {
     await rt.close(); // killed: nothing in memory survives
     clock.advance(ADVANCE_MS);
     rt = await openRuntime(dir, clock);
-    rt.env.learnerSays(o.seed.correction); // arrives while the process is down
+    await rt.say("P1", o.seed.correction); // arrives while the process is down
     const { handle } = await resume(rt, "P1", "after-kill", Y);
     outcome = await runToEnd(
       () => runStep({ handle, faculty: Y, env: rt.env, mode, staleness }),
@@ -200,7 +200,7 @@ export async function runArm(o: {
     );
   } else {
     clock.advance(ADVANCE_MS);
-    rt.env.learnerSays(o.seed.correction);
+    await rt.say("P1", o.seed.correction);
     const next = o.arm === "A_Y" ? Y : X;
     outcome = await runToEnd(
       () => runStep({ handle: fork.handle, faculty: next, env: rt.env }),

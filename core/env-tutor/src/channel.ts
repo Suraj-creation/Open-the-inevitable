@@ -3,11 +3,14 @@ import { join } from "node:path";
 
 /**
  * The environment's own durable channel, outside the process: an outbox of everything delivered to
- * the learner and an inbox of everything the learner sent. Deliberately non-idempotent — delivering
- * the same effect twice writes two outbox lines — so a duplicate send is visible, never hidden.
- * Lines are fsync'd; a torn final line (crash mid-write) is ignored on read.
+ * learners. Deliberately non-idempotent — delivering the same effect twice writes two outbox lines —
+ * so a duplicate send is visible, never hidden. Lines are fsync'd; a torn final line (crash
+ * mid-write) is ignored on read. What learners send back is admitted to each process's durable
+ * inbox (the store), not kept here.
  */
 export interface OutboxEntry {
+  /** Effect ids are unique within a process only. */
+  readonly processId: string;
   readonly effectId: string;
   readonly idempotencyKey: string;
   readonly action: string;
@@ -15,52 +18,40 @@ export interface OutboxEntry {
   readonly probeItemId?: string;
 }
 
-export interface InboxEntry {
-  readonly inputId: string;
-  readonly from: "learner" | "person" | "environment";
-  readonly content: string;
-  readonly inReplyTo?: string;
-}
-
 export class DurableChannel {
   private readonly outboxPath: string;
-  private readonly inboxPath: string;
 
   constructor(readonly dir: string) {
     this.outboxPath = join(dir, "outbox.jsonl");
-    this.inboxPath = join(dir, "inbox.jsonl");
   }
 
-  outbox(): OutboxEntry[] {
-    return readLines<OutboxEntry>(this.outboxPath);
-  }
-
-  inbox(): InboxEntry[] {
-    return readLines<InboxEntry>(this.inboxPath);
+  /** Everything delivered, optionally for one process. */
+  outbox(processId?: string): OutboxEntry[] {
+    const all = readLines<OutboxEntry>(this.outboxPath);
+    return processId === undefined ? all : all.filter((e) => e.processId === processId);
   }
 
   deliver(entry: OutboxEntry): void {
     appendDurably(this.outboxPath, entry);
   }
 
-  receive(entry: Omit<InboxEntry, "inputId"> & { inputId?: string }): InboxEntry {
-    const full: InboxEntry = { ...entry, inputId: entry.inputId ?? `I${this.inbox().length + 1}` };
-    appendDurably(this.inboxPath, full);
-    return full;
-  }
-
   /** How many times each effect id was delivered: any count above 1 is a duplicate send. */
   deliveryCounts(): Map<string, number> {
     const counts = new Map<string, number>();
-    for (const e of this.outbox()) counts.set(e.effectId, (counts.get(e.effectId) ?? 0) + 1);
+    for (const e of this.outbox()) {
+      const id = `${e.processId}/${e.effectId}`;
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
     return counts;
   }
 
   /** Deliveries per idempotency key: a logical effect delivered more than once was resent. */
   keyCounts(): Map<string, number> {
     const counts = new Map<string, number>();
-    for (const e of this.outbox())
-      counts.set(e.idempotencyKey, (counts.get(e.idempotencyKey) ?? 0) + 1);
+    for (const e of this.outbox()) {
+      const key = `${e.processId}/${e.idempotencyKey}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
     return counts;
   }
 }

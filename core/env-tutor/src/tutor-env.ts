@@ -1,7 +1,7 @@
 import type {
   ActionSpec,
-  ChannelInput,
   EnvironmentPack,
+  InputSubmission,
   PerformRequest,
   PerformResult,
   PracticeItem,
@@ -13,6 +13,13 @@ import { findItem, key, parseFraction, PRACTICE, PROBES, prompt } from "./items.
 import { type LearnerParams, reply } from "./learner.js";
 
 export const ACCEPTANCE_STREAK = 3;
+
+/**
+ * Where the simulated learner's replies go: the composition root admits them to the process's
+ * inbox, naming the principal. The environment never writes to the store itself.
+ */
+export type ReplySink = (reply: Omit<InputSubmission, "principal">) => Promise<unknown>;
+const LEARNER_LABELS = ["consent:learning", "source:learner"];
 
 /** The environment's observation of a delivery; identical whether reported live or by reconciliation. */
 function describe(entry: OutboxEntry): string {
@@ -62,6 +69,8 @@ export class TutorEnvironment implements EnvironmentPack {
     private readonly learner: LearnerParams = { misconception: true },
     /** Consecutive held probes required for acceptance. */
     private readonly acceptanceStreak: number = ACCEPTANCE_STREAK,
+    /** Admits the simulated learner's replies; without it the learner stays silent. */
+    private readonly replies?: ReplySink,
   ) {
     this.channel = new DurableChannel(channelDir);
   }
@@ -71,7 +80,7 @@ export class TutorEnvironment implements EnvironmentPack {
   }
 
   async perform(request: PerformRequest): Promise<PerformResult> {
-    const history = this.channel.outbox();
+    const history = this.channel.outbox(request.processId);
     let probeItemId: string | undefined;
     if (request.action === "assess") {
       const used = new Set(history.map((e) => e.probeItemId).filter(Boolean));
@@ -80,6 +89,7 @@ export class TutorEnvironment implements EnvironmentPack {
       )?.itemId;
     }
     const entry = {
+      processId: request.processId,
       effectId: request.effectId,
       idempotencyKey: request.idempotencyKey,
       action: request.action,
@@ -88,8 +98,16 @@ export class TutorEnvironment implements EnvironmentPack {
     };
     this.channel.deliver(entry);
     const answer = reply(this.learner, history, entry);
-    if (answer !== undefined)
-      this.channel.receive({ from: "learner", content: answer, inReplyTo: request.effectId });
+    // One reply per delivered effect: the key makes a retried admission the same admission.
+    if (answer !== undefined && this.replies)
+      await this.replies({
+        processId: request.processId,
+        key: `reply:${request.effectId}`,
+        from: "learner",
+        content: answer,
+        inReplyTo: request.effectId,
+        labels: LEARNER_LABELS,
+      });
     return {
       delivery: "accepted",
       observation: describe(entry),
@@ -99,19 +117,16 @@ export class TutorEnvironment implements EnvironmentPack {
 
   /** What the channel knows about an effect: whether it was delivered and, if so, what was delivered. */
   async reconcile(
+    processId: string,
     effectId: string,
   ): Promise<{ finding: ReconcileFinding; detail?: string; observation?: string }> {
-    const entry = this.channel.outbox().find((e) => e.effectId === effectId);
+    const entry = this.channel.outbox(processId).find((e) => e.effectId === effectId);
     if (!entry) return { finding: "not_delivered" };
     return {
       finding: "delivered",
       observation: describe(entry),
       ...(entry.probeItemId ? { detail: `probe:${entry.probeItemId}` } : {}),
     };
-  }
-
-  async inbox(): Promise<readonly ChannelInput[]> {
-    return this.channel.inbox();
   }
 
   verify(itemId: string, answer: string): Verification {
@@ -134,10 +149,5 @@ export class TutorEnvironment implements EnvironmentPack {
 
   verifierPrivate(): readonly string[] {
     return [...PRACTICE, ...PROBES].map((i) => key(i).join("/"));
-  }
-
-  /** Test and battery seam: the learner sends a message unprompted (e.g. a correction). */
-  learnerSays(content: string): ChannelInput {
-    return this.channel.receive({ from: "learner", content });
   }
 }
