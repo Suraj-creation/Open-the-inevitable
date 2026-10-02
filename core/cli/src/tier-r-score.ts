@@ -99,8 +99,9 @@ async function modelDecisions(
     );
     if (!output) continue;
     const manifest = records.findLast((r) => r.seq < output.seq && r.kind === "manifest.recorded");
-    const text = (await store.getEvidence(data<{ evidenceHash: string }>(output).evidenceHash))
-      ?.content;
+    const text = (
+      await store.getEvidence(d.entityId, data<{ evidenceHash: string }>(output).evidenceHash)
+    )?.content;
     let proposal: Proposal | undefined;
     try {
       proposal = text === undefined ? undefined : parseProposal(text);
@@ -224,8 +225,9 @@ export async function scoreRun(o: {
   )?.value.data;
   let delivery: CausalRecord | undefined;
   for (const r of records.filter((x) => x.seq > killSeq && x.kind === "input.delivered")) {
-    const content = (await store.getEvidence(data<{ evidenceHash: string }>(r).evidenceHash))
-      ?.content;
+    const content = (
+      await store.getEvidence(r.entityId, data<{ evidenceHash: string }>(r).evidenceHash)
+    )?.content;
     if (content === o.correction) {
       delivery = r;
       break;

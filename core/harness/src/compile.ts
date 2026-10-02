@@ -102,8 +102,11 @@ export async function compileWorkingState(
 ): Promise<WorkingState> {
   const cog = foldCognitiveState(records);
   const ledger = foldLedger(records);
-  const content = async (hash: string): Promise<string> =>
-    (await store.getEvidence(hash))?.content ?? "[evidence missing]";
+  const entityId = records[0]?.entityId ?? "";
+  const content = async (hash: string): Promise<string> => {
+    const ev = await store.getEvidence(entityId, hash);
+    return !ev ? "[evidence missing]" : ev.forgotten ? "[forgotten]" : ev.content;
+  };
   const step = records.filter((r) => r.kind === "step.completed").length + 1;
   const lastCompleted = records.filter((r) => r.kind === "step.completed").at(-1)?.seq ?? 0;
 

@@ -46,7 +46,7 @@ for (const r of await rt.store.read(processStream("P1"))) {
       "INPUT   ",
       d["inputId"],
       d["inReplyTo"] ?? "",
-      (await rt.store.getEvidence(d["evidenceHash"] as string))?.content,
+      (await rt.store.getEvidence("L1", d["evidenceHash"] as string))?.content,
     );
   else if (r.kind === "question.opened" || r.kind === "question.closed")
     console.log(r.seq, r.kind.toUpperCase(), JSON.stringify(d));

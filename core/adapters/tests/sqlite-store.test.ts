@@ -10,6 +10,7 @@ import {
   KindRegistry,
   defineKind,
   runCausalStoreConformance,
+  runConcurrencyConformance,
   shape,
   str,
 } from "@uci/kernel";
@@ -29,9 +30,23 @@ afterEach(() => {
 describe("SqliteCausalStore", () => {
   it("satisfies the causal-store conformance suite", async () => {
     const path = tempDb();
-    await runCausalStoreConformance(() =>
-      SqliteCausalStore.open(path, { registry: CONFORMANCE_KINDS }),
+    await runCausalStoreConformance((o) =>
+      SqliteCausalStore.open(path, {
+        registry: o?.registry ?? CONFORMANCE_KINDS,
+        ...(o?.beforeCommit ? { beforeCommit: o.beforeCommit } : {}),
+      }),
     );
+  });
+
+  it("keeps every invariant when two instances race claims, appends and admissions", async () => {
+    const path = tempDb();
+    const report = await runConcurrencyConformance(
+      (o) => SqliteCausalStore.open(path, { registry: o?.registry ?? CONFORMANCE_KINDS }),
+      { operations: 1200, seed: 20261002 },
+    );
+    expect(report.acknowledgedAppends).toBeGreaterThan(100);
+    expect(report.fencedRejections).toBeGreaterThan(0);
+    expect(report.duplicateAdmissions).toBeGreaterThan(0);
   });
 
   it("a kill inside an open write transaction loses nothing committed and leaks nothing uncommitted", async () => {

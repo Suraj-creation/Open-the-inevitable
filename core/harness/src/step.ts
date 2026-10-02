@@ -145,7 +145,7 @@ async function deliverInputs(deps: StepDeps, records: readonly CausalRecord[]): 
   });
   const drafts: Draft[] = [];
   for (const input of fresh) {
-    const evidenceHash = await h.store.putEvidence("text/plain", input.content);
+    const evidenceHash = await h.store.putEvidence(h.meta.entityId, "text/plain", input.content);
     const labels =
       input.from === "learner" ? ["consent:learning", "source:learner"] : [`source:${input.from}`];
     drafts.push({
@@ -196,7 +196,8 @@ async function verifyAndExpire(deps: StepDeps, records: readonly CausalRecord[])
     if (reply && e.condition?.kind === "answer-correct") {
       const itemId = e.condition.itemId === "probe" ? probeItem(effects) : e.condition.itemId;
       if (!itemId) continue;
-      const answer = (await h.store.getEvidence(reply.data.evidenceHash))?.content ?? "";
+      const answer =
+        (await h.store.getEvidence(h.meta.entityId, reply.data.evidenceHash))?.content ?? "";
       const v = env.verify(itemId, answer);
       drafts.push(
         resolution(
@@ -308,7 +309,7 @@ async function recordedProposal(
   const outputSeq = made.causes[0]?.seq;
   const output = records.find((r) => r.seq === outputSeq);
   const hash = (output?.data as { evidenceHash?: string } | undefined)?.evidenceHash;
-  const text = hash ? (await h.store.getEvidence(hash))?.content : undefined;
+  const text = hash ? (await h.store.getEvidence(h.meta.entityId, hash))?.content : undefined;
   if (!text)
     throw new Error(
       `decision ${(made.data as { decisionId: string }).decisionId} has no recorded model output to replay`,
@@ -371,7 +372,12 @@ async function obtainProposal(
   const pending = latestUnappliedOutput(records, ledger, key, lastCompleted);
   let output: CausalRecord | undefined = pending;
   let text = pending
-    ? (await h.store.getEvidence((pending.data as { evidenceHash: string }).evidenceHash))?.content
+    ? (
+        await h.store.getEvidence(
+          h.meta.entityId,
+          (pending.data as { evidenceHash: string }).evidenceHash,
+        )
+      )?.content
     : undefined;
 
   const staleness = deps.staleness ?? "gate";
@@ -484,7 +490,11 @@ async function obtainProposal(
       ]);
       return { outcome: { status: "escalated", step, detail: reason } };
     }
-    const evidenceHash = await h.store.putEvidence("application/json", response.text);
+    const evidenceHash = await h.store.putEvidence(
+      h.meta.entityId,
+      "application/json",
+      response.text,
+    );
     const written = await write(h, [
       {
         kind: "effect.settled",
@@ -684,7 +694,7 @@ async function performAction(
   crash("external-started");
   const result = await env.perform({ effectId, idempotencyKey: key, action, params });
   crash("external-performed");
-  const evidenceHash = await h.store.putEvidence("text/plain", result.observation);
+  const evidenceHash = await h.store.putEvidence(h.meta.entityId, "text/plain", result.observation);
   await write(h, [
     {
       kind: "effect.settled",

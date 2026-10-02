@@ -39,7 +39,7 @@ export async function startProcess(o: StartOptions): Promise<ProcessHandle> {
     actions: o.env.actions,
     practiceItems: o.env.practiceItems(),
   });
-  const evidenceHash = await o.store.putEvidence("application/json", description);
+  const evidenceHash = await o.store.putEvidence(o.entityId, "application/json", description);
   await write(handle, [
     { kind: "authority.granted", v: 1, data: { envelope: o.envelope, grantedBy: o.grantedBy } },
     { kind: "objective.set", v: 1, data: o.objective },
@@ -125,7 +125,7 @@ export async function resumeProcess(o: ResumeOptions): Promise<Resumed> {
     });
     // Settling is not knowing: record what the world says the effect did, as evidence.
     if (finding === "delivered" && observation) {
-      const evidenceHash = await o.store.putEvidence("text/plain", observation);
+      const evidenceHash = await o.store.putEvidence(meta.entityId, "text/plain", observation);
       reconciledDrafts.push({
         kind: "evidence.recorded",
         v: 1,
