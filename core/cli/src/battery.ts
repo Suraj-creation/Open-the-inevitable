@@ -111,7 +111,8 @@ async function runToEnd(
   let retries = 0;
   for (let i = 0; i < MAX_STEPS_AFTER_FORK + 10; i++) {
     const o = await step();
-    if (o.status === "concluded" || o.status === "escalated") return o.status;
+    if (o.status === "concluded" || o.status === "escalated" || o.status === "waiting")
+      return o.status;
     if (o.status === "retry") {
       retries += 1;
       if (backoffMs)

@@ -26,6 +26,7 @@
     "@uci/env-tutor": "workspace:*",
     "@uci/faculties": "workspace:*",
     "@uci/harness": "workspace:*",
+    "@uci/host": "workspace:*",
     "@uci/kernel": "workspace:*",
     "@uci/substrate": "workspace:*"
   },

@@ -56,11 +56,13 @@ export interface StepDeps {
   readonly crash?: (point: CrashPoint) => void;
 }
 
-export type StepStatus = "completed" | "retry" | "concluded" | "escalated" | "denied";
+export type StepStatus = "completed" | "retry" | "concluded" | "escalated" | "denied" | "waiting";
 export interface StepOutcome {
   readonly status: StepStatus;
   readonly step: number;
   readonly detail?: string;
+  /** For `waiting`: when time alone would wake the process (the earliest open expectation's due). */
+  readonly until?: string;
 }
 
 const MAX_REJECTIONS_PER_STEP = 3;
@@ -104,6 +106,8 @@ export async function runStep(deps: StepDeps): Promise<StepOutcome> {
   if (made) {
     proposal = await recordedProposal(h, records, made);
   } else {
+    const waiting = await waitingOn(deps, records, step);
+    if (waiting) return waiting;
     const obtained = await obtainProposal(deps, records, step, mode);
     if (!obtained.proposal) return obtained.outcome;
     proposal = obtained.proposal;
@@ -134,6 +138,63 @@ export async function runStep(deps: StepDeps): Promise<StepOutcome> {
 
   await write(h, [{ kind: "step.completed", v: 1, data: { step, outcome: "completed" } }]);
   return { status: "completed", step };
+}
+
+// ---------------------------------------------------------------- waiting
+
+/**
+ * Waiting is first-class (LCM §31): after an action that asks the world for an answer, the process
+ * decides nothing more until something new arrives (any input, or an expectation that lapsed). It
+ * parks with a single record and holds nothing in memory; `until` is when time alone would wake it.
+ * Only before a step has begun: a recorded manifest means the step is already in flight.
+ */
+async function waitingOn(
+  deps: StepDeps,
+  records: readonly CausalRecord[],
+  step: number,
+): Promise<StepOutcome | undefined> {
+  const { handle: h, env } = deps;
+  if (
+    records.some(
+      (r) => r.kind === "manifest.recorded" && (r.data as { step: number }).step === step,
+    )
+  )
+    return undefined;
+  const asked = records.findLast(
+    (r) =>
+      r.kind === "effect.intended" &&
+      (r.data as EffectIntended).effectClass === "external-communication",
+  ) as CausalRecord<EffectIntended> | undefined;
+  if (!asked || env.actions.find((a) => a.name === asked.data.action)?.awaits !== "reply")
+    return undefined;
+  const since = records.filter((r) => r.seq > asked.seq);
+  if (
+    since.some(
+      (r) =>
+        r.kind === "input.delivered" ||
+        (r.kind === "claim.asserted" && (r.data as ClaimAsserted).method === "expiry"),
+    )
+  )
+    return undefined;
+  const until = openExpectations(foldCognitiveState(records), h.clock.now())
+    .map((e) => e.expectation.data.due)
+    .filter((d): d is string => !!d)
+    .sort()[0];
+  // Already parked on this effect? Look past ownership records: a host waking the process to check
+  // (hydration) must not add a record per wake.
+  const last = records.findLast((r) => r.kind !== "lease.claimed");
+  const parked =
+    last?.kind === "process.waiting" &&
+    (last.data as { effectId: string }).effectId === asked.data.effectId;
+  if (!parked)
+    await write(h, [
+      {
+        kind: "process.waiting",
+        v: 1,
+        data: { on: "input", effectId: asked.data.effectId, ...(until ? { until } : {}) },
+      },
+    ]);
+  return { status: "waiting", step, ...(until ? { until } : {}) };
 }
 
 // ---------------------------------------------------------------- A. admission

@@ -1,0 +1,30 @@
+{
+  "name": "@uci/host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "UCI host: owns many long-lived processes on one store. Boots by hydration or recovery, drives each with a lost-wakeup-free doorbell, parks waiting processes at zero cost, wakes them on admission or on timers derived from records, backs off failed model calls durably, and lets the newest host take over (fencing). Holds no cognitive state: residency is a cache.",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@uci/harness": "workspace:*",
+    "@uci/kernel": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

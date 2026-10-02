@@ -254,6 +254,9 @@ importers:
       '@uci/harness':
         specifier: workspace:*
         version: link:../harness
+      '@uci/host':
+        specifier: workspace:*
+        version: link:../host
       '@uci/kernel':
         specifier: workspace:*
         version: link:../kernel
@@ -312,6 +315,19 @@ importers:
       '@uci/adapters':
         specifier: workspace:*
         version: link:../adapters
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
+
+  core/host:
+    dependencies:
+      '@uci/harness':
+        specifier: workspace:*
+        version: link:../harness
+      '@uci/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+    devDependencies:
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.19)

@@ -19,7 +19,7 @@ export const ACCEPTANCE_STREAK = 3;
  * inbox, naming the principal. The environment never writes to the store itself.
  */
 export type ReplySink = (reply: Omit<InputSubmission, "principal">) => Promise<unknown>;
-const LEARNER_LABELS = ["consent:learning", "source:learner"];
+export const LEARNER_LABELS: readonly string[] = ["consent:learning", "source:learner"];
 
 /** The environment's observation of a delivery; identical whether reported live or by reconciliation. */
 function describe(entry: OutboxEntry): string {
@@ -53,13 +53,17 @@ export class TutorEnvironment implements EnvironmentPack {
       name: "practice",
       params: ["item_id"],
       description: "Give the learner one practice item by id.",
+      awaits: "reply",
     },
     {
       name: "assess",
       params: [],
       description:
         "The environment gives the learner its next held-out assessment probe; you will not see which item.",
+      awaits: "reply",
     },
+    // A question stays open (and is tracked as one) without parking the process: only actions
+    // whose expectation hangs on the reply wait for it, and their due time can wake them.
     { name: "ask_person", params: ["content"], description: "Ask the learner a question." },
   ];
   readonly channel: DurableChannel;

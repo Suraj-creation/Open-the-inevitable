@@ -59,7 +59,8 @@ async function drive(
   for (let i = 0; i < maxSteps; i++) {
     last = await run();
     log(last);
-    if (last.status === "concluded" || last.status === "escalated") return last;
+    if (last.status === "concluded" || last.status === "escalated" || last.status === "waiting")
+      return last;
     if (last.status === "retry") {
       retries += 1;
       await new Promise((r) => setTimeout(r, Math.min(30_000, 1_000 * 2 ** Math.min(retries, 5))));

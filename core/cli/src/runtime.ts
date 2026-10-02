@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { SqliteCausalStore } from "@uci/adapters";
-import { TutorEnvironment } from "@uci/env-tutor";
+import { type ReplySink, SimulatedLearner, TutorEnvironment } from "@uci/env-tutor";
 import {
   type AdmissionResult,
   admitInput,
@@ -33,6 +33,8 @@ export interface Runtime {
    * same admission; omitted, every call is a new message.
    */
   say(processId: string, content: string, key?: string): Promise<AdmissionResult>;
+  /** In `external` reply mode: the learner, who answers deliveries only when asked to. */
+  readonly learner?: SimulatedLearner;
   close(): Promise<void>;
 }
 
@@ -54,15 +56,21 @@ export async function openRuntime(
   learner = { misconception: true },
   acceptanceStreak?: number,
   openStore: StoreFactory = sqliteStore,
+  /**
+   * `immediate`: the environment's learner answers inside the delivery (S1). `external`: the
+   * environment stays silent and `learner`, part of the world, answers when asked to.
+   */
+  replies: "immediate" | "external" = "immediate",
 ): Promise<Runtime> {
   mkdirSync(join(dataDir, "channel"), { recursive: true });
   const store = await openStore(dataDir);
+  const sink: ReplySink = async (reply) =>
+    admitInput(store, clock, { ...reply, principal: await learnerOf(store, reply.processId) });
   const env = new TutorEnvironment(
     join(dataDir, "channel"),
     learner,
     acceptanceStreak,
-    async (reply) =>
-      admitInput(store, clock, { ...reply, principal: await learnerOf(store, reply.processId) }),
+    replies === "immediate" ? sink : undefined,
   );
   const say = async (processId: string, content: string, key?: string) =>
     admitInput(store, clock, {
@@ -73,7 +81,16 @@ export async function openRuntime(
       content,
       labels: ["consent:learning", "source:learner"],
     });
-  return { store, env, clock, say, close: () => store.close() };
+  return {
+    store,
+    env,
+    clock,
+    say,
+    ...(replies === "external"
+      ? { learner: new SimulatedLearner(env.channel, learner, sink) }
+      : {}),
+    close: () => store.close(),
+  };
 }
 
 export const DEFAULT_ENVELOPE: Envelope = {
@@ -116,7 +133,7 @@ export async function resume(rt: Runtime, processId: string, owner: string, facu
   });
 }
 
-/** Run steps until the process concludes, escalates, or `maxSteps` attempts pass. */
+/** Run steps until the process concludes, escalates or waits for input, or `maxSteps` attempts pass. */
 export async function runUntilDone(
   deps: Omit<StepDeps, "handle"> & { handle: ProcessHandle },
   maxSteps = 60,
@@ -126,7 +143,8 @@ export async function runUntilDone(
   for (let i = 0; i < maxSteps; i++) {
     last = await runStep(deps);
     onStep?.(last);
-    if (last.status === "concluded" || last.status === "escalated") return last;
+    if (last.status === "concluded" || last.status === "escalated" || last.status === "waiting")
+      return last;
   }
   return last;
 }

@@ -175,6 +175,11 @@ export const HARNESS_KINDS = [
     shape({ outcome: oneOf("mastery-verified", "escalated", "abandoned"), evidence: arrayOf(str) }),
   ),
   defineKind("process.escalated", 1, shape({ reason: str, detail: optStr })),
+  /**
+   * The process is parked on input: it asked the world (effect `effectId`) and nothing has answered.
+   * Waiting holds nothing in memory; `until` is the earliest moment time alone would wake it.
+   */
+  defineKind("process.waiting", 1, shape({ on: oneOf("input"), effectId: str, until: optStr })),
   defineKind("acceptance.evaluated", 1, shape({ met: bool, probes: int, evaluator: str })),
   // Admission (in inbox/<processId> streams, written by the channel, never by the process).
   defineKind(

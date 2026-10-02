@@ -49,6 +49,12 @@ export interface ActionSpec {
   readonly description: string;
   /** Parameters the model must supply (names only; values are strings). */
   readonly params: readonly string[];
+  /**
+   * The action's expectation hangs on the world's answer (an exercise, a check): after it, the
+   * process waits for input, or for that expectation to fall due, rather than deciding again.
+   * Harness-side only, never rendered to the faculty.
+   */
+  readonly awaits?: "reply";
 }
 
 export interface PerformRequest {

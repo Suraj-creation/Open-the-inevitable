@@ -107,7 +107,8 @@ async function runToEnd(
 ): Promise<string> {
   for (let i = 0; i < 40; i++) {
     const o = await runStep({ handle, faculty, env: rt.env, mode, staleness });
-    if (o.status === "concluded" || o.status === "escalated") return o.status;
+    if (o.status === "concluded" || o.status === "escalated" || o.status === "waiting")
+      return o.status;
   }
   return "unfinished";
 }
