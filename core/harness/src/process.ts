@@ -1,5 +1,6 @@
 import {
   canonicalJson,
+  type CausalRecord,
   type CausalStore,
   type Clock,
   type Draft,
@@ -92,14 +93,48 @@ export interface ResumeOptions {
 export interface Resumed {
   readonly handle: ProcessHandle;
   readonly escalated: boolean;
+  /** Consecutive recoveries without step progress, this one included (0 for a hydration). */
   readonly resumeAttempt: number;
+  /** True when the previous owner died mid-step and this claim recovered the process. */
+  readonly recovered: boolean;
+}
+
+/** Records that mark ownership or a start, not work: a stream ending in them is at a boundary. */
+const BOUNDARY_KINDS = new Set([
+  "lease.claimed",
+  "continuity.notice",
+  "authority.granted",
+  "objective.set",
+  "environment.bound",
+  "process.waiting",
+]);
+
+/**
+ * Whether the previous owner left work in flight: anything recorded after the last completed step
+ * (or after the start, if no step completed) other than ownership and start records. A process at
+ * a step boundary was interrupted by nothing; a process mid-step was.
+ */
+export function interruptedMidStep(records: readonly CausalRecord[]): boolean {
+  const lastStep = records.findLastIndex((r) => r.kind === "step.completed");
+  return records
+    .slice(lastStep + 1)
+    .some(
+      (r) =>
+        !BOUNDARY_KINDS.has(r.kind) &&
+        !(
+          r.kind === "evidence.recorded" &&
+          (r.data as { ref?: string }).ref === "environment-description"
+        ),
+    );
 }
 
 /**
- * Recovery by reconstruction. Re-claims the stream (the claim is the durable resume counter, taken
- * before anything else), settles every effect the crash left open, reconciles unknown external
- * effects against the channel, and records a typed continuity notice the next step will render.
- * Nothing is rebuilt from memory: the next step recompiles working state from records.
+ * Take ownership of an existing process. At a step boundary this is hydration: a claim and nothing
+ * else (residency is a cache; no notice, no budget). Mid-step it is recovery by reconstruction:
+ * settle every effect the crash left open, reconcile unknown external effects against the channel,
+ * and record a typed continuity notice the next step will render. The resume budget counts
+ * consecutive recoveries without step progress. Nothing is rebuilt from memory: the next step
+ * recompiles working state from records.
  */
 export async function resumeProcess(o: ResumeOptions): Promise<Resumed> {
   const stream = processStream(o.processId);
@@ -111,10 +146,15 @@ export async function resumeProcess(o: ResumeOptions): Promise<Resumed> {
   };
   const { fence } = await o.store.claim(stream, o.owner, o.clock.now(), meta);
   const handle: ProcessHandle = { store: o.store, stream, meta, fence, clock: o.clock, seen: [] };
-  const resumeAttempt = before.filter((r) => r.kind === "lease.claimed").length;
-  const budget = o.resumeBudget ?? 10;
   if (before.some((r) => r.kind === "process.concluded" || r.kind === "process.escalated"))
-    return { handle, escalated: false, resumeAttempt };
+    return { handle, escalated: false, resumeAttempt: 0, recovered: false };
+  if (!interruptedMidStep(before))
+    return { handle, escalated: false, resumeAttempt: 0, recovered: false };
+
+  const lastStep = before.findLastIndex((r) => r.kind === "step.completed");
+  const resumeAttempt =
+    before.slice(lastStep + 1).filter((r) => r.kind === "continuity.notice").length + 1;
+  const budget = o.resumeBudget ?? 10;
   if (resumeAttempt > budget) {
     await write(handle, [
       {
@@ -126,7 +166,7 @@ export async function resumeProcess(o: ResumeOptions): Promise<Resumed> {
         },
       },
     ]);
-    return { handle, escalated: true, resumeAttempt };
+    return { handle, escalated: true, resumeAttempt, recovered: true };
   }
 
   const orphans = orphanSettlements(foldLedger(await o.store.read(stream)));
@@ -172,7 +212,7 @@ export async function resumeProcess(o: ResumeOptions): Promise<Resumed> {
         },
       },
     ]);
-    return { handle, escalated: true, resumeAttempt };
+    return { handle, escalated: true, resumeAttempt, recovered: true };
   }
 
   const after = await o.store.read(stream);
@@ -189,5 +229,5 @@ export async function resumeProcess(o: ResumeOptions): Promise<Resumed> {
       },
     },
   ]);
-  return { handle, escalated: false, resumeAttempt };
+  return { handle, escalated: false, resumeAttempt, recovered: true };
 }

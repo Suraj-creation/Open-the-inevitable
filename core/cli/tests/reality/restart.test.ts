@@ -175,19 +175,56 @@ describe("restart: a real OS-level kill mid-effect", () => {
 });
 
 describe("recovery policy", () => {
-  it("escalates to a person when interrupted repeatedly (resume budget)", async () => {
+  it("escalates to a person when a step is interrupted repeatedly without progress (resume budget)", async () => {
     const dir = tempDir();
     const clock = new ManualClock();
     const faculty = new ScriptedTutorFaculty();
     const rt = await openRuntime(dir, clock);
-    await start(rt, "P1", "w0");
+    let handle = await start(rt, "P1", "w0");
     let last;
-    for (let i = 1; i <= 11; i++) last = await resume(rt, "P1", `w${i}`, faculty);
+    for (let i = 1; i <= 11; i++) {
+      // Each owner dies inside the same step, as its external effect starts (the decision is
+      // already recorded, so no model call is spent: only the recoveries accumulate).
+      await expect(
+        runStep({
+          handle,
+          faculty,
+          env: rt.env,
+          crash: (p) => {
+            if (p === "external-started") throw new Crash(p);
+          },
+        }),
+      ).rejects.toBeInstanceOf(Crash);
+      last = await resume(rt, "P1", `w${i}`, faculty);
+      expect(last.recovered).toBe(true);
+      handle = last.handle;
+      if (last.escalated) break;
+    }
     expect(last?.escalated).toBe(true);
+    expect(last?.resumeAttempt).toBe(11);
     const records = await rt.store.read(processStream("P1"));
     expect(records.some((r) => r.kind === "process.escalated")).toBe(true);
     const step = await runStep({ handle: last!.handle, faculty, env: rt.env });
     expect(step.status).toBe("escalated");
+    await rt.close();
+  });
+
+  it("a claim at a step boundary is hydration: no notice, no budget, however often", async () => {
+    const dir = tempDir();
+    const clock = new ManualClock();
+    const faculty = new ScriptedTutorFaculty();
+    const rt = await openRuntime(dir, clock);
+    const handle = await start(rt, "P1", "w0");
+    await runStep({ handle, faculty, env: rt.env });
+    let last;
+    for (let i = 1; i <= 50; i++) last = await resume(rt, "P1", `host-${i}`, faculty);
+    expect(last).toMatchObject({ escalated: false, recovered: false, resumeAttempt: 0 });
+    const records = await rt.store.read(processStream("P1"));
+    expect(records.filter((r) => r.kind === "continuity.notice")).toHaveLength(0);
+    expect(records.filter((r) => r.kind === "lease.claimed")).toHaveLength(51);
+    // The hydrated process simply continues.
+    const done = await runUntilDone({ handle: last!.handle, faculty, env: rt.env });
+    expect(done.status).toBe("concluded");
     await rt.close();
   });
 
