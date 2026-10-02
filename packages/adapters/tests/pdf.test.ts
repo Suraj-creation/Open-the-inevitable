@@ -85,6 +85,6 @@ describe("PdfjsModalityAdapter (gated on edge-provisioned pdfjs-dist)", () => {
     const again = await connected.value.parseBinary(bytes);
     expect(again).toEqual(parsed);
     // pdfjs-dist's dynamic import + PDF build + parse is genuinely slow to cold-start; under a
-    // fully parallel `pnpm verify` it can exceed the 5s default. A generous timeout de-flakes it.
-  }, 30_000);
+    // fully parallel `pnpm verify` (now beside embedded-Postgres suites) it can exceed 30s. A generous timeout de-flakes it.
+  }, 120_000);
 });
