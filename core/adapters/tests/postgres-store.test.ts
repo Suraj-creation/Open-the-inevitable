@@ -16,7 +16,7 @@ import {
   str,
 } from "@uci/kernel";
 import { MIGRATIONS, PostgresCausalStore } from "../src/index.js";
-import { type PgServer, startPg } from "./pg-server.js";
+import { type PgServer, startPg } from "../src/testing.js";
 
 /**
  * The Postgres causal store against the same contract as SQLite (S2 criteria 1 and 2): conformance
@@ -26,7 +26,7 @@ import { type PgServer, startPg } from "./pg-server.js";
 const here = dirname(fileURLToPath(import.meta.url));
 let server: PgServer;
 beforeAll(async () => {
-  server = await startPg();
+  server = await startPg("adapters");
 }, 180_000);
 afterAll(async () => {
   await server?.stop();

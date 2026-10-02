@@ -19,7 +19,7 @@ import {
   StoreContractError,
   type StreamMeta,
 } from "@uci/kernel";
-import { migrate, schemaIdent } from "./postgres-migrations.js";
+import { migrate, type MigrationReport, schemaIdent } from "./postgres-migrations.js";
 
 /**
  * The Postgres causal store. Every write takes the stream's row in `streams` FOR UPDATE inside its
@@ -95,8 +95,60 @@ export class PostgresCausalStore implements CausalStore {
     // reconnects on the next query. Without a listener it would crash the process.
     pool.on("error", () => undefined);
     const store = new PostgresCausalStore(pool, owns, options);
+    // Text is stored faithfully only in a UTF8 database: refuse anything else up front, rather
+    // than fail on the first learner who writes a non-ASCII character.
+    const encoding = (
+      await pool.query<{ e: string }>(
+        "select pg_encoding_to_char(encoding) as e from pg_database where datname = current_database()",
+      )
+    ).rows[0]?.e;
+    if (encoding !== "UTF8") {
+      if (owns) await pool.end();
+      throw new Error(
+        `the causal store needs a UTF8 database (this one is ${encoding ?? "unknown"})`,
+      );
+    }
     if (options.migrate !== false) await migrate(pool, store.s);
     return store;
+  }
+
+  /** Apply pending migrations to a schema without opening a store (the `uci migrate` command). */
+  static async migrateSchema(connectionString: string, schema = "uci"): Promise<MigrationReport> {
+    const pool = new pg.Pool({ connectionString, max: 1 });
+    pool.on("error", () => undefined);
+    try {
+      return await migrate(pool, schemaIdent(schema));
+    } finally {
+      await pool.end();
+    }
+  }
+
+  /**
+   * Copy every table of one schema into a fresh one: a fork of the store's state (forked-control
+   * experiments; later, branchable environments). The target schema is migrated first.
+   */
+  static async cloneSchema(connectionString: string, from: string, to: string): Promise<void> {
+    const f = schemaIdent(from);
+    const t = schemaIdent(to);
+    const pool = new pg.Pool({ connectionString, max: 1 });
+    pool.on("error", () => undefined);
+    try {
+      await migrate(pool, t);
+      const c = await pool.connect();
+      try {
+        await c.query("begin");
+        for (const table of ["streams", "records", "admissions", "evidence"])
+          await c.query(`insert into ${t}.${table} select * from ${f}.${table}`);
+        await c.query("commit");
+      } catch (e) {
+        await c.query("rollback").catch(() => undefined);
+        throw e;
+      } finally {
+        c.release();
+      }
+    } finally {
+      await pool.end();
+    }
   }
 
   async claim(

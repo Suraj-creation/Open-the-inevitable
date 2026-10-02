@@ -248,6 +248,27 @@ export async function runCausalStoreConformance(open: ConformanceOpen): Promise<
   );
   assert((await store.read(stream)).length === 7, "forgetting evidence keeps the records");
 
+  // Text round-trips faithfully, whatever the script: people do not write ASCII.
+  const unicode = '⚠ café · 日本語 · emoji 🙂 · "quoted" \\ backslash';
+  const uniStream = "process/P-unicode";
+  const { fence: uniFence } = await store.claim(uniStream, "o", at, meta);
+  const uniRecords = await store.append({
+    stream: uniStream,
+    meta,
+    expectedSeq: 1,
+    fence: uniFence,
+    at,
+    drafts: [note(unicode)],
+    evidence: [{ mediaType: "text/plain", content: unicode }],
+  });
+  const uniRead = (await store.read(uniStream, uniRecords[0]?.seq))[0];
+  assert((uniRead?.data as { text: string }).text === unicode, "non-ASCII record data round-trips");
+  const uniHash = await store.putEvidence("E-conf", "text/plain", unicode);
+  assert(
+    (await store.getEvidence("E-conf", uniHash))?.content === unicode,
+    "non-ASCII evidence round-trips",
+  );
+
   // Forgetting by label removes only content carrying it.
   const said = await store.putEvidence("E-label", "text/plain", "what the person said", [
     "consent:learning",

@@ -1,10 +1,19 @@
 import { cpSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { PostgresCausalStore } from "@uci/adapters";
+import { type PgServer, startPg } from "@uci/adapters/testing";
 import { ScriptedTutorFaculty } from "@uci/env-tutor";
-import { type Mode, processStream, runStep, type Staleness } from "@uci/harness";
-import { type CausalRecord, DAY_MS, ManualClock } from "@uci/kernel";
-import { openRuntime, resume, type Runtime, start } from "../../src/index.js";
+import { type Mode, PROCESS_KINDS, processStream, runStep, type Staleness } from "@uci/harness";
+import { type CausalRecord, type Clock, DAY_MS, ManualClock } from "@uci/kernel";
+import {
+  openRuntime,
+  resume,
+  type Runtime,
+  sqliteStore,
+  start,
+  type StoreFactory,
+} from "../../src/index.js";
 import { cleanup, tempDir } from "./helpers.js";
 
 /**
@@ -24,6 +33,50 @@ import { cleanup, tempDir } from "./helpers.js";
  */
 afterEach(cleanup);
 
+/**
+ * The battery runs on every engine (S2 criterion 3). An engine opens a data directory's store and
+ * forks one: SQLite copies the file; Postgres clones the store's schema.
+ */
+interface Engine {
+  readonly store: StoreFactory;
+  fork(src: string): Promise<string>;
+}
+const SQLITE: Engine = {
+  store: sqliteStore,
+  async fork(src) {
+    const dst = tempDir();
+    cpSync(src, dst, { recursive: true });
+    return dst;
+  },
+};
+function postgresEngine(url: string): Engine {
+  const schemas = new Map<string, string>();
+  const schemaOf = (dir: string) => {
+    let schema = schemas.get(dir);
+    if (!schema) schemas.set(dir, (schema = `battery_${schemas.size + 1}`));
+    return schema;
+  };
+  return {
+    store: (dir) =>
+      PostgresCausalStore.open({
+        connectionString: url,
+        schema: schemaOf(dir),
+        registry: PROCESS_KINDS,
+        max: 4,
+      }),
+    async fork(src) {
+      const dst = tempDir();
+      cpSync(src, dst, { recursive: true });
+      await PostgresCausalStore.cloneSchema(url, schemaOf(src), schemaOf(dst));
+      return dst;
+    },
+  };
+}
+let engine: Engine = SQLITE;
+const open = (dir: string, clock: Clock) =>
+  openRuntime(dir, clock, undefined, undefined, engine.store);
+const fork = (src: string) => engine.fork(src);
+
 const CORRECTION = "i dont add the bottoms, i just copied the 6 wrong";
 const FORK_AFTER_STEPS = 5;
 const ADVANCE = 4 * DAY_MS; // the prerequisite claim (valid 3 days) lapses; open expectations fall due
@@ -36,19 +89,13 @@ const stepsDone = (records: readonly CausalRecord[]) =>
 async function setup(): Promise<{ dir: string; clock: ManualClock }> {
   const dir = tempDir();
   const clock = new ManualClock();
-  const rt = await openRuntime(dir, clock);
+  const rt = await open(dir, clock);
   const handle = await start(rt, "P1", "setup");
   const faculty = new ScriptedTutorFaculty();
   while (stepsDone(await rt.store.read(processStream("P1"))) < FORK_AFTER_STEPS)
     await runStep({ handle, faculty, env: rt.env });
   await rt.close();
   return { dir, clock };
-}
-
-function fork(src: string): string {
-  const dst = tempDir();
-  cpSync(src, dst, { recursive: true });
-  return dst;
 }
 
 async function runToEnd(
@@ -66,9 +113,9 @@ async function runToEnd(
 }
 
 async function armWarm(src: string, at: string) {
-  const dir = fork(src);
+  const dir = await fork(src);
   const clock = new ManualClock(at);
-  const rt = await openRuntime(dir, clock);
+  const rt = await open(dir, clock);
   const { handle } = await resume(rt, "P1", "warm", new ScriptedTutorFaculty()); // a plain re-claim: nothing to settle
   const faculty = new ScriptedTutorFaculty();
   await runStep({ handle, faculty, env: rt.env }); // the fork step, uninterrupted
@@ -80,9 +127,9 @@ async function armWarm(src: string, at: string) {
 }
 
 async function armInterrupted(src: string, at: string, mode: Mode, staleness: Staleness = "gate") {
-  const dir = fork(src);
+  const dir = await fork(src);
   const clock = new ManualClock(at);
-  let rt = await openRuntime(dir, clock);
+  let rt = await open(dir, clock);
   const { handle } = await resume(rt, "P1", "before-kill", new ScriptedTutorFaculty());
   await expect(
     runStep({
@@ -97,7 +144,7 @@ async function armInterrupted(src: string, at: string, mode: Mode, staleness: St
   const killSeq = (await rt.store.read(processStream("P1"))).at(-1)?.seq ?? 0;
   await rt.close(); // killed mid-effect; nothing in memory survives
   clock.advance(ADVANCE);
-  rt = await openRuntime(dir, clock);
+  rt = await open(dir, clock);
   await rt.say("P1", CORRECTION); // arrives while the process is down
   const swapped = new ScriptedTutorFaculty("scripted-tutor-B@1");
   const resumed = await resume(rt, "P1", "after-kill", swapped);
@@ -278,13 +325,13 @@ function tierS(records: readonly CausalRecord[], killSeq: number, rt: Runtime): 
   return { CR3, CR4, CR5, CR6, manifests: manifestsOk };
 }
 
-describe("cognitive-resume battery, Tier S (forked control)", () => {
-  it("interrupted + swapped equals warm exactly; floor-only fails C-R3; staleness-off fails C-R5", async () => {
+function battery(name: string) {
+  it(`${name}: interrupted + swapped equals warm exactly; floor-only fails C-R3; staleness-off fails C-R5`, async () => {
     const { dir, clock } = await setup();
     const at = clock.now();
 
     // Setup requirements of the protocol, checked on the fork state itself.
-    const probe = await openRuntime(fork(dir), new ManualClock(at));
+    const probe = await open(await fork(dir), new ManualClock(at));
     const forkRecords = await probe.store.read(processStream("P1"));
     await probe.close();
     const kinds = forkRecords.map((r) => [r.kind, r.data] as const);
@@ -358,7 +405,27 @@ describe("cognitive-resume battery, Tier S (forked control)", () => {
     expect(sD.CR6).toBe(true);
 
     for (const arm of [A, B, C, D]) await arm.rt.close();
+  }, 300_000);
+}
+
+describe("cognitive-resume battery, Tier S (forked control), SQLite", () => {
+  beforeAll(() => {
+    engine = SQLITE;
+  });
+  battery("sqlite");
+});
+
+describe("cognitive-resume battery, Tier S (forked control), Postgres", () => {
+  let server: PgServer | undefined;
+  beforeAll(async () => {
+    server = await startPg("cli-battery");
+    engine = postgresEngine(await server.database("battery"));
   }, 180_000);
+  afterAll(async () => {
+    engine = SQLITE;
+    await server?.stop();
+  });
+  battery("postgres");
 });
 
 export { join };

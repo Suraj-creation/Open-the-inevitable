@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Engine and vendor adapters for the UCI core: the SQLite causal store (node:sqlite) and model faculties. Vendor types never cross this package.",
+  "description": "Engine adapters for the UCI core: the SQLite (node:sqlite) and Postgres (pg) causal stores and the Postgres migration runner. Engine types never cross this package.",
   "engines": {
     "node": ">=24"
   },
@@ -11,6 +11,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing.ts",
+      "default": "./src/testing.ts"
     }
   },
   "main": "./src/index.ts",

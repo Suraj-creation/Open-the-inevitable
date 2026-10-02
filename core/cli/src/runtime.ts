@@ -43,16 +43,20 @@ async function learnerOf(store: CausalStore, processId: string): Promise<string>
   return head.entityId;
 }
 
+/** Opens the causal store for a data directory. Default: SQLite at `<dataDir>/uci.sqlite`. */
+export type StoreFactory = (dataDir: string) => Promise<CausalStore>;
+export const sqliteStore: StoreFactory = (dataDir) =>
+  SqliteCausalStore.open(join(dataDir, "uci.sqlite"), { registry: PROCESS_KINDS });
+
 export async function openRuntime(
   dataDir: string,
   clock: Clock,
   learner = { misconception: true },
   acceptanceStreak?: number,
+  openStore: StoreFactory = sqliteStore,
 ): Promise<Runtime> {
   mkdirSync(join(dataDir, "channel"), { recursive: true });
-  const store = await SqliteCausalStore.open(join(dataDir, "uci.sqlite"), {
-    registry: PROCESS_KINDS,
-  });
+  const store = await openStore(dataDir);
   const env = new TutorEnvironment(
     join(dataDir, "channel"),
     learner,

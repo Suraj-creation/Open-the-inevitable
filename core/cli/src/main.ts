@@ -6,6 +6,7 @@
  *   uci resume  --faculty <name> --dir D [--steps N] [--process P]
  *   uci inspect --dir D [--process P]
  *   uci spike   --faculty <name> [--steps N]       one complete live run in a temp dir; JSON summary
+ *   uci migrate [--url postgres://…] [--schema uci]   apply the causal store's Postgres migrations
  *   uci battery --x <name> --y <name> [--seeds N | --seed K] [--arms A,B,..] [--cap USD] [--out DIR]
  *               the forked cognitive-resume battery (Tier R when X/Y are live); X and Y alternate
  *               by seed; results and the pre-registered rule outcomes are written to --out
@@ -25,6 +26,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PostgresCausalStore } from "@uci/adapters";
 import { processStream, runStep, type StepOutcome } from "@uci/harness";
 import { systemClock } from "@uci/kernel";
 import {
@@ -177,6 +179,14 @@ async function battery(): Promise<void> {
 async function main(): Promise<void> {
   const command = process.argv[2];
   if (command === "battery") return battery();
+  if (command === "migrate") {
+    // Postgres schema for the causal store; the URL defaults to the repository .env's SUPABASE_DB_URL.
+    const url = arg("url") ?? loadEnv()["SUPABASE_DB_URL"];
+    if (!url) throw new Error("migrate needs --url (or SUPABASE_DB_URL in .env)");
+    const report = await PostgresCausalStore.migrateSchema(url, arg("schema", "uci"));
+    console.log(JSON.stringify(report));
+    return;
+  }
   const processId = arg("process", "P1") ?? "P1";
   const maxSteps = Number(arg("steps", "40"));
   const facultyName = arg("faculty", "scripted") as FacultyName;
