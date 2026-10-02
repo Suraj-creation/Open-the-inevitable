@@ -13,6 +13,24 @@ jobs:
   verify:
     name: typecheck · test · lint · schemas
     runs-on: ubuntu-latest
+    # The UCI core's Postgres causal store is tested against a real PostgreSQL 17 (locally the
+    # tests start an embedded one instead).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: uci
+          POSTGRES_PASSWORD: uci
+          POSTGRES_DB: uci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U uci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      UCI_PG_URL: postgres://uci:uci@localhost:5432/uci
     steps:
       - uses: actions/checkout@v4
 

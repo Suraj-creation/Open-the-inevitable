@@ -13,6 +13,7 @@
     },
     "test": {
       "dependsOn": ["codegen"],
+      "env": ["UCI_PG_URL"],
       "inputs": ["src/**", "tests/**", "fixtures/**", "schemas/**", "vitest.config.*"],
       "outputs": ["coverage/**"]
     },
