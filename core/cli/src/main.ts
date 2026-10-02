@@ -6,7 +6,7 @@
  *   uci resume  --faculty <name> --dir D [--steps N] [--process P]
  *   uci inspect --dir D [--process P]
  *   uci spike   --faculty <name> [--steps N]       one complete live run in a temp dir; JSON summary
- *   uci battery --x <name> --y <name> [--seeds N] [--cap USD] [--out DIR]
+ *   uci battery --x <name> --y <name> [--seeds N | --seed K] [--arms A,B,..] [--cap USD] [--out DIR]
  *               the forked cognitive-resume battery (Tier R when X/Y are live); X and Y alternate
  *               by seed; results and the pre-registered rule outcomes are written to --out
  *
@@ -85,6 +85,11 @@ async function battery(): Promise<void> {
     if (!FACULTY_NAMES.includes(f))
       throw new Error(`--x/--y must be one of ${FACULTY_NAMES.join("|")}`);
   const nSeeds = Math.min(Number(arg("seeds", String(SEEDS.length))), SEEDS.length);
+  // Smoke runs: one seed and a subset of arms (never used for a pre-registered battery).
+  const only = arg("seed");
+  const seeds =
+    only === undefined ? SEEDS.slice(0, nSeeds) : SEEDS.filter((s) => s.seed === Number(only));
+  const armFilter = arg("arms")?.split(",");
   const cap = Number(arg("cap", "25"));
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const out = arg("out") ?? join(repoRoot(), ".build", "evidence", `battery-${stamp}`);
@@ -95,10 +100,10 @@ async function battery(): Promise<void> {
     .trim();
   const { dir, at } = await setupFork();
   const results: ArmResult[] = [];
-  let arms: ArmName[] = [...ARMS];
+  let arms: ArmName[] = ARMS.filter((a) => !armFilter || armFilter.includes(a));
   let maxSeedCost = 0;
   let stopped: string | undefined;
-  for (const [i, seed] of SEEDS.slice(0, nSeeds).entries()) {
+  for (const [i, seed] of seeds.entries()) {
     const [X, Y] = seed.seed % 2 === 0 ? [x, y] : [y, x];
     const batch = await Promise.all(
       arms.map((arm) =>
@@ -131,7 +136,7 @@ async function battery(): Promise<void> {
     const spent = results.reduce((s, r) => s + r.costUsd, 0);
     const seedCost = batch.reduce((s, r) => s + r.costUsd, 0);
     maxSeedCost = Math.max(maxSeedCost, seedCost / batch.length);
-    const remaining = nSeeds - (i + 1);
+    const remaining = seeds.length - (i + 1);
     const project = (n: number) => spent + maxSeedCost * n * remaining;
     if (project(arms.length) > cap && arms.includes("A_X2"))
       arms = arms.filter((a) => a !== "A_X2");
@@ -147,7 +152,8 @@ async function battery(): Promise<void> {
     scorer: scorerHash(),
     x,
     y,
-    seeds: nSeeds,
+    seeds: seeds.map((s) => s.seed),
+    arms,
     cap,
     stopped: stopped ?? null,
     sampling: {

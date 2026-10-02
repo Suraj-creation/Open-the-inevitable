@@ -59,7 +59,7 @@ export const PROPOSAL_SCHEMA: Record<string, unknown> = {
             "Candidate actions for this step with their probability of being best; include the chosen action.",
         },
         relies_on: strs(
-          "Claim versions this decision relies on: ids like C3-1@v1 ONLY. Never decisions (D...), inputs (I...) or observations (X...). May be empty.",
+          "Claim versions this decision relies on: ids like C3-1@v1 ONLY. Never decisions (D...), inputs (I...) or observations (X...). A claim you revise in this proposal may be cited at its current version; the decision then rests on the revised version. May be empty.",
         ),
         rationale: str(),
         resolves_open_decision_id: str(

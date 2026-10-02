@@ -171,6 +171,60 @@ describe("what a proposal may cite", () => {
     await rt.close();
   });
 
+  it("a decision citing a version the same proposal revises rests on the revised version", async () => {
+    const { rt, clock } = await forkState();
+    clock.advance(4 * DAY_MS);
+    const { ws, vc } = await context(rt, "bridge", clock.now());
+    const stale = ws.claims.find((c) => c.value.stale);
+    const ref = stale?.id ?? "";
+    expect(ref).not.toBe("");
+    const raw = proposal({
+      reexamines: ws.decisionsInForce
+        .filter((d) => d.value.revised.length || d.value.reliesOn.includes(ref))
+        .map((d) => ({ decision_id: d.id, verdict: "reaffirm", reason: "still holds" })),
+      decision: { choice: "practice i-4", alternatives: [], relies_on: [ref], rationale: "r" },
+      claims: [
+        {
+          subject: "L1",
+          proposition: stale?.value.data.proposition,
+          confidence: 0.7,
+          evidence: [ws.inputs.at(-1)?.id ?? ""],
+          valid_for_days: 3,
+          revises: ref,
+        },
+      ],
+    });
+    // Re-validating a stale claim and relying on it in one proposal is allowed.
+    const r = validateProposal(raw, vc);
+    expect("proposal" in r).toBe(true);
+    if (!("proposal" in r)) return;
+    const drafts = proposalDrafts(r.proposal, {
+      ws,
+      mode: "bridge",
+      step: ws.step,
+      stream: "process/P1",
+      model: "t",
+      outputRef: "rec:process/P1#1",
+      actionKey: "action:x",
+      authorityRef: "rec:process/P1#1",
+    });
+    const claimAt = drafts.findIndex(
+      (d) => d.kind === "claim.asserted" && (d.data as { supersedes?: string }).supersedes === ref,
+    );
+    const decisionAt = drafts.findIndex(
+      (d) =>
+        d.kind === "decision.made" &&
+        (d.data as { decisionId: string }).decisionId === `D${ws.step}`,
+    );
+    const [claimId, version] = ref.split("@v");
+    expect(claimAt).toBeGreaterThanOrEqual(0);
+    expect(claimAt).toBeLessThan(decisionAt);
+    expect((drafts[decisionAt]?.data as { reliesOn: string[] }).reliesOn).toEqual([
+      `${claimId}@v${Number(version) + 1}`,
+    ]);
+    await rt.close();
+  });
+
   it("relying on a stale claim names how to re-validate it", async () => {
     const { rt, clock } = await forkState();
     clock.advance(4 * DAY_MS);
@@ -187,7 +241,7 @@ describe("what a proposal may cite", () => {
       vc,
     );
     expect("errors" in r && r.errors.join()).toContain(
-      `relies on ${stale?.id}, which is STALE: re-validate it first (a claim with revises "${stale?.id}", citing evidence) or leave it out of relies_on`,
+      `relies on ${stale?.id}, which is STALE: re-validate it in this proposal (a claim with revises "${stale?.id}", citing evidence) or leave it out of relies_on`,
     );
     await rt.close();
   });

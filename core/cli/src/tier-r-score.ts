@@ -53,15 +53,15 @@ export interface RunScore {
   /** Every open decision stays open or is resolved with a listed alternative; none vanishes. */
   readonly CR2: boolean | null;
   /**
-   * Record-level C-R3 (archit/02): the contradicted belief is revised (new content superseding its
-   * version) within the first two post-correction outputs, and no post-correction output relies on
+   * Record-level C-R3 (archit/02): the contradicted belief is revised (a new version with new
+   * content, or lowered confidence) within the first two post-correction outputs, and no post-correction output relies on
    * the corrected version (read from what the model wrote, in every arm). Outside bridge mode a
    * belief record cannot be revised, so this fails there by construction (declared).
    */
   readonly CR3: boolean | null;
   /** Behavioural C-R3, symmetric across arms: no explanation in the first three post-correction outputs re-teaches the corrected misconception. */
   readonly CR3b: boolean | null;
-  /** The contradicted belief was revised (new content) within two outputs of the correction. */
+  /** The contradicted belief was revised (new content, or confidence lowered by >= 0.1) within two outputs of the correction. */
   readonly revised: boolean | null;
   /** The environment's acceptance verdict was MET at some point. */
   readonly acceptanceMet: boolean;
@@ -110,6 +110,20 @@ async function modelDecisions(
     out.push({ decision: d, outputSeq: output.seq, manifestSeq: manifest?.seq ?? 0, proposal });
   }
   return out;
+}
+
+/**
+ * Revision of a contradicted belief (archit/02: "revised (standing and validity)"): the new version
+ * says something different, or holds the same thing with confidence lowered by at least 0.1.
+ * Restating it as strongly or more strongly is not a revision.
+ */
+export function weakened(
+  before: { proposition: string; confidence: number },
+  after: { proposition: string; confidence: number },
+): boolean {
+  return (
+    after.proposition !== before.proposition || after.confidence <= before.confidence - 0.1 + 1e-9
+  );
 }
 
 export async function scoreRun(o: {
@@ -231,8 +245,14 @@ export async function scoreRun(o: {
     // record, the operative decision and the claims written after them in the same batch.
     const outputs = [...new Set(afterCorrection.map((d) => d.outputSeq))];
     const inWindow = (outputSeq: number, n: number) => outputs.slice(0, n).includes(outputSeq);
-    // What the model wrote, not what the harness kept: outside bridge mode reliance is not recorded.
-    const relies = afterCorrection.some((d) => d.proposal?.decision.relies_on.includes(misRef));
+    // What the model wrote, not what the harness kept (outside bridge mode reliance is not
+    // recorded). Citing the corrected version while revising it in the same output rests on the
+    // revised belief (the harness binds it so), so only reliance without revision counts.
+    const relies = afterCorrection.some(
+      (d) =>
+        d.proposal?.decision.relies_on.includes(misRef) &&
+        !d.proposal.claims.some((c) => c.revises === misRef),
+    );
     const retaught = afterCorrection.some(
       (d) =>
         inWindow(d.outputSeq, 3) &&
@@ -252,8 +272,8 @@ export async function scoreRun(o: {
         r.kind === "claim.asserted" &&
         r.seq > delivery.seq &&
         inWindow(sourceOutput(r.seq), 2) &&
-        data<{ supersedes?: string; proposition: string }>(r).supersedes === misRef &&
-        data<{ proposition: string }>(r).proposition !== misconception.proposition,
+        data<{ supersedes?: string }>(r).supersedes === misRef &&
+        weakened(misconception, data<{ proposition: string; confidence: number }>(r)),
     );
     CR3 = revised && !relies;
   }

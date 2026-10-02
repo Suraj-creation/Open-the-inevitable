@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MISCONCEPTION_TARGET, reteaches } from "../../src/tier-r-score.js";
+import { MISCONCEPTION_TARGET, reteaches, weakened } from "../../src/tier-r-score.js";
 
 /**
  * The behavioural C-R3 detector is a verifier, so its error is measured, not assumed (constitution:
@@ -51,5 +51,24 @@ describe("behavioural C-R3 detector (measured error)", () => {
     const realOutputs = RETEACH.slice(0, 7);
     const v1Hits = realOutputs.filter((t) => MISCONCEPTION_TARGET.test(t)).length;
     expect(v1Hits).toBeLessThan(realOutputs.length / 2);
+  });
+});
+
+describe("revision of a contradicted belief (standing and validity)", () => {
+  const before = { proposition: "The learner adds denominators.", confidence: 0.6 };
+  it("counts new content, or the same content held with confidence lowered by at least 0.1", () => {
+    expect(
+      weakened(before, {
+        proposition: "The learner may no longer add denominators.",
+        confidence: 0.6,
+      }),
+    ).toBe(true);
+    expect(weakened(before, { ...before, confidence: 0.3 })).toBe(true);
+    expect(weakened(before, { ...before, confidence: 0.5 })).toBe(true);
+  });
+  it("does not count a restatement held as strongly or more strongly", () => {
+    expect(weakened(before, { ...before, confidence: 0.55 })).toBe(false);
+    expect(weakened(before, { ...before, confidence: 0.6 })).toBe(false);
+    expect(weakened(before, { ...before, confidence: 0.8 })).toBe(false);
   });
 });

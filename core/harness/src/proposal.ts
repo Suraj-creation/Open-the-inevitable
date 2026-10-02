@@ -165,8 +165,13 @@ export function validateProposal(
           `reexamines ${r.decision_id}: needs a verdict (reaffirm|revise|withdraw) and a reason`,
         );
     }
+    const revisedHere = new Set(
+      p.claims.filter((c) => isRecord(c) && isStr(c.revises)).map((c) => c.revises),
+    );
     for (const ref of d.relies_on) {
       const by = superseded.get(ref);
+      // A version this proposal revises is bound to the revised version (one atomic act).
+      if (revisedHere.has(ref)) continue;
       if (by)
         errors.push(
           `relies on ${ref}, which is superseded by ${by}: rely on ${by} or leave it out`,
@@ -177,7 +182,7 @@ export function validateProposal(
         );
       else if (stale.has(ref) && vc.staleness !== "off")
         errors.push(
-          `relies on ${ref}, which is STALE: re-validate it first (a claim with revises "${ref}", citing evidence) or leave it out of relies_on`,
+          `relies on ${ref}, which is STALE: re-validate it in this proposal (a claim with revises "${ref}", citing evidence) or leave it out of relies_on`,
         );
     }
     for (const rev of ws.decisionsInForce.filter((x) => x.value.revised.length)) {
@@ -194,7 +199,7 @@ export function validateProposal(
         );
       else if (!od.options.some((o) => d.choice.toLowerCase().includes(o.toLowerCase())))
         errors.push(
-          `resolving ${d.resolves_open_decision_id} must choose one of its alternatives: ${od.options.join(" | ")}`,
+          `resolving ${d.resolves_open_decision_id} must choose one of its alternatives: ${od.options.join(" | ")} (put one of them in decision.choice, or leave resolves_open_decision_id out)`,
         );
     }
     if (d.deviates_from_decision_id && !inForce.has(d.deviates_from_decision_id))
@@ -316,6 +321,35 @@ export function proposalDrafts(p: Proposal, dc: DraftContext): Draft[] {
       }),
     );
 
+  // Assertion claims are written before the decision so it can rest on a version revised here.
+  const claimDrafts: Draft[] = [];
+  const boundTo = new Map<string, string>();
+  p.claims.forEach((c, i) => {
+    const prior =
+      bridge && c.revises ? ws.claims.find((x) => x.id === c.revises)?.value.data : undefined;
+    const validUntil = c.valid_for_days
+      ? new Date(Date.parse(ws.now) + c.valid_for_days * DAY_MS).toISOString()
+      : undefined;
+    const data: ClaimAsserted = {
+      claimId: prior ? prior.claimId : `C${step}-${i + 1}`,
+      version: prior ? prior.version + 1 : 1,
+      claimKind: "assertion",
+      subject: c.subject,
+      proposition: c.proposition,
+      origin: "inferred",
+      standing: c.confidence >= 0.7 ? "supported" : "conjectured",
+      confidence: c.confidence,
+      ...(validUntil ? { validUntil } : {}),
+      evidence: [...new Set([...c.evidence.map(recPtr), dc.outputRef])],
+      derivation,
+      ...(prior ? { supersedes: `${prior.claimId}@v${prior.version}` } : {}),
+    };
+    if (prior)
+      boundTo.set(`${prior.claimId}@v${prior.version}`, `${data.claimId}@v${data.version}`);
+    claimDrafts.push({ kind: "claim.asserted", v: 1, data });
+  });
+  drafts.push(...claimDrafts);
+
   const decisionId = `D${step}`;
   // The new operative decision supersedes the previous one, unless a re-examination already retires it.
   const retiring = new Set(
@@ -340,7 +374,7 @@ export function proposalDrafts(p: Proposal, dc: DraftContext): Draft[] {
       decisionId,
       choice: `${p.action.type}${p.action.item_id ? ` ${p.action.item_id}` : ""}: ${p.decision.choice}`,
       alternatives: alts(p.decision.alternatives),
-      reliesOn: bridge ? [...p.decision.relies_on] : [],
+      reliesOn: bridge ? p.decision.relies_on.map((ref) => boundTo.get(ref) ?? ref) : [],
       expectations: expectationId ? [expectationId] : [],
       rationale: p.decision.rationale,
       authority: dc.authorityRef,
@@ -386,28 +420,6 @@ export function proposalDrafts(p: Proposal, dc: DraftContext): Draft[] {
     };
     drafts.push({ kind: "claim.asserted", v: 1, data });
   }
-  p.claims.forEach((c, i) => {
-    const prior =
-      bridge && c.revises ? ws.claims.find((x) => x.id === c.revises)?.value.data : undefined;
-    const validUntil = c.valid_for_days
-      ? new Date(Date.parse(ws.now) + c.valid_for_days * DAY_MS).toISOString()
-      : undefined;
-    const data: ClaimAsserted = {
-      claimId: prior ? prior.claimId : `C${step}-${i + 1}`,
-      version: prior ? prior.version + 1 : 1,
-      claimKind: "assertion",
-      subject: c.subject,
-      proposition: c.proposition,
-      origin: "inferred",
-      standing: c.confidence >= 0.7 ? "supported" : "conjectured",
-      confidence: c.confidence,
-      ...(validUntil ? { validUntil } : {}),
-      evidence: [...new Set([...c.evidence.map(recPtr), dc.outputRef])],
-      derivation,
-      ...(prior ? { supersedes: `${prior.claimId}@v${prior.version}` } : {}),
-    };
-    drafts.push({ kind: "claim.asserted", v: 1, data });
-  });
   if (bridge)
     for (const q of p.questions_closed)
       drafts.push({
