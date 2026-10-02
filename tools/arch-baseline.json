@@ -15,7 +15,7 @@
     "packages/cognitive-loop": "460224ef59a3b6ccbb097dcf46d321e50b2f52dadebf0cda7b21a582b112e430"
   },
   "domainTokens": {
-    "core/kernel": 3,
+    "core/kernel": 0,
     "core/substrate": 6,
     "core/harness": 70
   }

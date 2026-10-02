@@ -208,13 +208,13 @@ export async function runCausalStoreConformance(open: ConformanceOpen): Promise<
   assert(own[0]?.seq === 7, "the new owner appends after its lease record");
 
   // Content-addressed evidence, scoped per entity; forgetting one entity leaves the other intact.
-  const h1 = await store.putEvidence("E-conf", "text/plain", "the learner said hello");
-  const h2 = await store.putEvidence("E-conf", "text/plain", "the learner said hello");
-  const h3 = await store.putEvidence("E-twin", "text/plain", "the learner said hello", ["x"]);
+  const h1 = await store.putEvidence("E-conf", "text/plain", "an input said hello");
+  const h2 = await store.putEvidence("E-conf", "text/plain", "an input said hello");
+  const h3 = await store.putEvidence("E-twin", "text/plain", "an input said hello", ["x"]);
   assert(h1 === h2 && h2 === h3, "evidence is content-addressed");
   const ev = await store.getEvidence("E-conf", h1);
   assert(
-    ev?.content === "the learner said hello" && ev.mediaType === "text/plain" && !ev.forgotten,
+    ev?.content === "an input said hello" && ev.mediaType === "text/plain" && !ev.forgotten,
     "evidence round-trips",
   );
   assert((await store.getEvidence("E-conf", "0".repeat(64))) === undefined, "missing evidence");
@@ -227,7 +227,7 @@ export async function runCausalStoreConformance(open: ConformanceOpen): Promise<
   );
   const twin = await store.getEvidence("E-twin", h3);
   assert(
-    twin?.content === "the learner said hello" && !twin.forgotten,
+    twin?.content === "an input said hello" && !twin.forgotten,
     "another entity's copy survives",
   );
   assert((await store.read(stream)).length === 7, "forgetting evidence keeps the records");
