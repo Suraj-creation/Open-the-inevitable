@@ -59,3 +59,6 @@ Thumbs.db
 # Local tool state: MCP config can hold credentials; brainstorm scratch is personal.
 .mcp.json
 .superpowers/
+
+# Battery arm records: kept locally for diagnosis, too large for git.
+.build/evidence/*/arms/

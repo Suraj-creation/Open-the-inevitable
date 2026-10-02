@@ -5,10 +5,12 @@ import { ScriptedTutorFaculty } from "@uci/env-tutor";
 import { azureFaculty, ClaudeFaculty, GeminiFaculty, openAIFaculty } from "@uci/faculties";
 import type { ModelFaculty } from "@uci/harness";
 
-export type FacultyName = "scripted" | "claude" | "azure" | "gemini" | "openai";
+export type FacultyName = "scripted" | "claude" | "opus" | "sonnet" | "azure" | "gemini" | "openai";
 export const FACULTY_NAMES: readonly FacultyName[] = [
   "scripted",
   "claude",
+  "opus",
+  "sonnet",
   "azure",
   "gemini",
   "openai",
@@ -54,9 +56,16 @@ export function makeFaculty(
     case "scripted":
       return new ScriptedTutorFaculty();
     case "claude":
+    case "opus":
+    case "sonnet":
       return new ClaudeFaculty({
         apiKey: need(env, "ANTHROPIC_API_KEY"),
-        model: env["UCI_CLAUDE_MODEL"] ?? "claude-opus-5-5",
+        model:
+          name === "opus"
+            ? "claude-opus-5-5"
+            : name === "sonnet"
+              ? "claude-sonnet-5-5"
+              : (env["UCI_CLAUDE_MODEL"] ?? "claude-opus-5-5"),
         effort: (env["UCI_CLAUDE_EFFORT"] as "low" | "medium" | "high" | undefined) ?? "medium",
       });
     case "azure":

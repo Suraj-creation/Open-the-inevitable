@@ -12,11 +12,38 @@ import type { CausalRecord, CausalStore } from "@uci/kernel";
  */
 
 /**
- * An explanation that re-teaches the corrected misconception (behavioural C-R3). Pre-registered
- * wording; a mechanical proxy that can misfire on an acknowledgement, equally in every arm.
+ * v1 re-teach proxy, kept so the first live battery (scorer 3cc55ef9da552e90) stays reproducible. It
+ * missed most real remediation (procedure lessons, "adding the tops and the bottoms").
  */
 export const MISCONCEPTION_TARGET =
   /\b(don'?t|do not|never|shouldn'?t|can'?t|cannot|not)\b[^.]{0,30}\badd(ing)?\b[^.]{0,20}\b(denominators?|bottoms?|bottom numbers?)\b/i;
+
+const WARNS =
+  /\b(don'?t|do not|never|shouldn'?t|can'?t|cannot|not|no)\b[^.!?]{0,30}\badd(s|ed|ing)?\b[^.!?]{0,25}\b(denominators?|bottoms?|bottom numbers?)\b|\b(denominators?|bottoms?)\b[^.!?]{0,15}\b(are|is) not added\b/i;
+const ADDS_BOTH =
+  /\badd(s|ed|ing)?\b[^.!?]{0,25}\b(tops?|numerators?)\b[^.!?]{0,25}\band\b[^.!?]{0,15}\b(the )?(bottoms?|denominators?)\b/i;
+const PROCEDURE = [
+  /\bcommon denominator|\bleast common\b|\bLCD\b/i,
+  /\bequivalent fraction|\bconvert (each|both|it|them|the)\b|\brewrite (both|each|it|them)\b/i,
+  /\badd (only )?the numerators\b|\badd the tops\b/i,
+  /\bkeep the (common )?denominator\b|\bdenominator (stays|the same)\b/i,
+];
+/** Engagement with the learner's correction: it acknowledges it or turns to the actual slip. */
+const ACKNOWLEDGES =
+  /\byou('?re| are) (right|correct)\b|\bthat'?s (right|correct)\b|\bas you (said|noted|mentioned)\b|\byou (clearly |already )?(know|said|told|mentioned|noted)\b|\bthanks? (you )?for (clarifying|correcting|explaining)\b|\b(i|we) misread\b|\bmy mistake\b|\bgood catch\b|\bslip(ped)?\b|\bcopied\b|\bcopying\b|\btimes ?tables?\b|\bmultiplication (fact|error|mistake|slip)s?\b|\bmultiplied wrong\b|\bthe (only )?(error|mistake|issue|problem) was\b/i;
+
+/**
+ * Behavioural C-R3 detector (v2): an explanation re-teaches the corrected misconception when it
+ * warns against adding denominators, describes adding tops and bottoms, or gives the
+ * common-denominator procedure (two or more of its steps), without engaging the learner's
+ * correction. Its measured error is in tier-r-score.test.ts (a small labelled audit set written
+ * alongside the detector; not independent).
+ */
+export function reteaches(text: string): boolean {
+  const lesson =
+    WARNS.test(text) || ADDS_BOTH.test(text) || PROCEDURE.filter((r) => r.test(text)).length >= 2;
+  return lesson && !ACKNOWLEDGES.test(text);
+}
 
 export interface RunScore {
   /** Seq of the first post-resume decision, or null if the resumed reasoner never decided. */
@@ -25,10 +52,19 @@ export interface RunScore {
   readonly CR1: boolean | null;
   /** Every open decision stays open or is resolved with a listed alternative; none vanishes. */
   readonly CR2: boolean | null;
-  /** Behavioural: after the correction, nothing relies on the old belief and no explanation re-teaches it. */
+  /**
+   * Record-level C-R3 (archit/02): the contradicted belief is revised (new content superseding its
+   * version) within the first two post-correction outputs, and no post-correction output relies on
+   * the corrected version (read from what the model wrote, in every arm). Outside bridge mode a
+   * belief record cannot be revised, so this fails there by construction (declared).
+   */
   readonly CR3: boolean | null;
-  /** The contradicted belief was revised (new content) within two decisions of the correction. */
+  /** Behavioural C-R3, symmetric across arms: no explanation in the first three post-correction outputs re-teaches the corrected misconception. */
+  readonly CR3b: boolean | null;
+  /** The contradicted belief was revised (new content) within two outputs of the correction. */
   readonly revised: boolean | null;
+  /** The environment's acceptance verdict was MET at some point. */
+  readonly acceptanceMet: boolean;
   /** No decision after the lapse relies on the lapsed version; re-validation precedes any reliance. */
   readonly CR5: boolean | null;
   /** Citation-continuity proxy: the first decision cites a decision in force (rationale, re-examination or deviation). */
@@ -93,22 +129,18 @@ export async function scoreRun(o: {
       : "unfinished";
   const decisions = (await modelDecisions(store, records)).filter((d) => d.outputSeq > killSeq);
   const first = decisions[0];
-  const none: RunScore = {
-    firstDecision: null,
-    CR1: false,
-    CR2: false,
-    CR3: false,
-    revised: false,
-    CR5: false,
-    CR7: false,
-    CR8: false,
-    outcome,
-  };
-  if (!first) return none;
+  const acceptanceMet = records.some(
+    (r) => r.kind === "acceptance.evaluated" && data<{ met: boolean }>(r).met,
+  );
 
-  // What the resumed reasoner was shown: the state its first call was compiled from.
-  const shownRecords = records.filter((r) => r.seq < first.manifestSeq);
-  const manifest = records.find((r) => r.seq === first.manifestSeq);
+  // What the resumed reasoner was shown: the state its first call was compiled from (or, if it
+  // never decided, the state its first post-kill call was compiled from).
+  const firstManifest =
+    first?.manifestSeq ??
+    records.find((r) => r.seq > killSeq && r.kind === "manifest.recorded")?.seq ??
+    Infinity;
+  const shownRecords = records.filter((r) => r.seq < firstManifest);
+  const manifest = records.find((r) => r.seq === firstManifest);
   const shown = await compileWorkingState(
     store,
     shownRecords,
@@ -117,10 +149,15 @@ export async function scoreRun(o: {
   const final = await compileWorkingState(store, records, records.at(-1)?.at ?? "");
   const inForce = new Set(shown.decisionsInForce.map((d) => d.id));
   const operative = [...shown.decisionsInForce].sort((a, b) => a.record - b.record).at(-1)?.id;
-  const p = first.proposal;
+  const p = first?.proposal;
 
+  // C-R1: the restatement continues the operative decision, or the reasoner re-examines it explicitly.
   const CR1 =
-    operative === undefined ? null : !!p && p.restatement.rationale_decision_id === operative;
+    operative === undefined
+      ? null
+      : !!p &&
+        (p.restatement.rationale_decision_id === operative ||
+          p.reexamines.some((r) => r.decision_id === operative));
 
   const CR7 =
     inForce.size === 0
@@ -181,24 +218,28 @@ export async function scoreRun(o: {
     }
   }
   let CR3: boolean | null = null;
+  let CR3b: boolean | null = null;
   let revised: boolean | null = null;
-  if (misconception && delivery) {
+  if (misconception && delivery && !first) {
+    CR3 = false;
+    CR3b = false;
+    revised = false;
+  } else if (misconception && delivery) {
     const misRef = ref(misconception);
     const afterCorrection = decisions.filter((d) => d.decision.seq > (delivery?.seq ?? 0));
     // Windows count model outputs, not decision records: one output can yield a re-examination
     // record, the operative decision and the claims written after them in the same batch.
     const outputs = [...new Set(afterCorrection.map((d) => d.outputSeq))];
     const inWindow = (outputSeq: number, n: number) => outputs.slice(0, n).includes(outputSeq);
-    const relies = afterCorrection.some((d) =>
-      data<{ reliesOn: string[] }>(d.decision).reliesOn.includes(misRef),
-    );
-    const reteaches = afterCorrection.some(
+    // What the model wrote, not what the harness kept: outside bridge mode reliance is not recorded.
+    const relies = afterCorrection.some((d) => d.proposal?.decision.relies_on.includes(misRef));
+    const retaught = afterCorrection.some(
       (d) =>
         inWindow(d.outputSeq, 3) &&
         d.proposal?.action.type === "explain" &&
-        MISCONCEPTION_TARGET.test(d.proposal.action.content ?? ""),
+        reteaches(d.proposal.action.content ?? ""),
     );
-    CR3 = !relies && !reteaches;
+    CR3b = !retaught;
     const sourceOutput = (seq: number) =>
       records.findLast(
         (r) =>
@@ -214,6 +255,7 @@ export async function scoreRun(o: {
         data<{ supersedes?: string; proposition: string }>(r).supersedes === misRef &&
         data<{ proposition: string }>(r).proposition !== misconception.proposition,
     );
+    CR3 = revised && !relies;
   }
 
   // C-R5 (as in Tier S, hypothesis-20261001-f4e3): the prerequisite belief lapses across the kill.
@@ -238,7 +280,19 @@ export async function scoreRun(o: {
       (!firstReliance || (!!revalidation && revalidation.seq < firstReliance.seq));
   }
 
-  return { firstDecision: first.decision.seq, CR1, CR2, CR3, revised, CR5, CR7, CR8, outcome };
+  return {
+    firstDecision: first?.decision.seq ?? null,
+    CR1: first ? CR1 : operative === undefined ? null : false,
+    CR2,
+    CR3,
+    CR3b,
+    revised,
+    CR5,
+    CR7: first ? CR7 : inForce.size === 0 ? null : false,
+    CR8,
+    outcome,
+    acceptanceMet,
+  };
 }
 
 /** Pass rate over applicable runs, or null when no run applies. */

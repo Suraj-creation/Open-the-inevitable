@@ -33,7 +33,15 @@ describe("Tier R runner and scorer on scripted faculties", () => {
     });
     expect(get("A_X")?.score.revised).toBe(true);
     expect(get("B")?.score.revised).toBe(true);
-    expect(get("C")?.score.revised).toBe(false);
+    // Outside bridge mode no belief record can be revised: record-level C-R3 fails by construction.
+    for (const arm of ["T", "C"]) {
+      expect(get(arm)?.killedInsideEffect).toBe(true);
+      expect(get(arm)?.score.revised).toBe(false);
+      expect(get(arm)?.score.CR3).toBe(false);
+    }
+    expect(get("B")?.score.CR3).toBe(true);
+    expect(get("B")?.score.CR3b).toBe(true);
+    expect(results.every((r) => r.score.acceptanceMet && r.escalation === null)).toBe(true);
     expect(get("D")?.score.CR5).toBe(false);
     expect(get("B")?.score.CR5).toBe(true);
     expect(

@@ -25,11 +25,14 @@ import { rate, type RunScore, scoreRun } from "./tier-r-score.js";
  *   A_Y  warm swap: as A_X, but Y continues after the fork step (provider without interruption).
  *   B    interrupted: X's fork step is killed inside its external effect; while down, the clock
  *        advances and the correction arrives; Y resumes in a fresh runtime.
- *   C    as B, floor-only context (no claims, decisions, expectations, questions).
+ *   T    as B, transcript replay: the execution floor plus the verbatim transcript of previous
+ *        outputs (how reference harnesses resume); no typed claims, decisions or questions.
+ *   C    as B, the execution floor alone (no transcript either).
  *   D    as B, staleness hidden and ungated.
  */
-export type ArmName = "A_X" | "A_X2" | "A_Y" | "B" | "C" | "D";
-export const ARMS: readonly ArmName[] = ["A_X", "A_X2", "A_Y", "B", "C", "D"];
+export type ArmName = "A_X" | "A_X2" | "A_Y" | "B" | "T" | "C" | "D";
+export const ARMS: readonly ArmName[] = ["A_X", "A_X2", "A_Y", "B", "T", "C", "D"];
+const INTERRUPTED: ReadonlySet<ArmName> = new Set(["B", "T", "C", "D"]);
 
 export interface Seed {
   readonly seed: number;
@@ -55,10 +58,11 @@ export const FORK_AFTER_STEPS = 5;
 export const ADVANCE_MS = 4 * DAY_MS;
 const MAX_STEPS_AFTER_FORK = 25;
 
-/** USD per million tokens, by faculty id (Anthropic list price 2026-09; Azure gpt-4.1-mini list). */
+/** USD per million tokens, by model (Anthropic list prices 2026-09; Azure gpt-4.1-mini list). */
 export const PRICE: Readonly<Record<string, { in: number; out: number }>> = {
-  "anthropic-claude@1": { in: 4, out: 20 },
-  "azure-openai@1": { in: 0.4, out: 1.6 },
+  "claude-opus-5-5": { in: 4, out: 20 },
+  "claude-sonnet-5-5": { in: 2, out: 10 },
+  "gpt-4.1-mini": { in: 0.4, out: 1.6 },
 };
 
 export interface ArmResult {
@@ -70,6 +74,10 @@ export interface ArmResult {
   readonly score: RunScore;
   readonly modelCalls: number;
   readonly rejections: number;
+  /** Every rejection's errors, so a failure can be diagnosed without the run's records. */
+  readonly rejectionErrors: readonly string[];
+  /** Why the process was held for a person, if it was. */
+  readonly escalation: string | null;
   readonly costUsd: number;
   readonly servedBy: readonly string[];
   readonly duplicateDeliveries: number;
@@ -141,15 +149,15 @@ async function forkStep(rt: Runtime, faculty: ModelFaculty, kill: boolean, backo
 }
 
 function costOf(records: readonly CausalRecord[]): number {
-  let faculty = "";
+  let model = "";
   let usd = 0;
   for (const r of records) {
-    if (r.kind === "manifest.recorded") faculty = data<{ faculty: string }>(r).faculty;
+    if (r.kind === "manifest.recorded") model = data<{ model: string }>(r).model;
     const usage =
       r.kind === "effect.settled"
         ? data<{ usage?: { inTokens: number; outTokens: number } }>(r).usage
         : undefined;
-    const price = PRICE[faculty];
+    const price = PRICE[model];
     if (usage && price) usd += (usage.inTokens * price.in + usage.outTokens * price.out) / 1e6;
   }
   return usd;
@@ -174,11 +182,11 @@ export async function runArm(o: {
   let rt = await openRuntime(dir, clock);
   const X = o.X();
   const Y = o.Y();
-  const interrupted = o.arm === "B" || o.arm === "C" || o.arm === "D";
+  const interrupted = INTERRUPTED.has(o.arm);
   const fork = await forkStep(rt, X, interrupted, backoff);
   const killSeq = (await rt.store.read(processStream("P1"))).at(-1)?.seq ?? 0;
   let outcome: string;
-  const mode: Mode = o.arm === "C" ? "floor-only" : "bridge";
+  const mode: Mode = o.arm === "C" ? "floor-only" : o.arm === "T" ? "transcript" : "bridge";
   const staleness: Staleness = o.arm === "D" ? "off" : "gate";
   if (interrupted) {
     await rt.close(); // killed: nothing in memory survives
@@ -228,6 +236,18 @@ export async function runArm(o: {
         data<{ effectClass: string }>(r).effectClass === "model-call",
     ).length,
     rejections: records.filter((r) => r.kind === "proposal.rejected").length,
+    rejectionErrors: records
+      .filter((r) => r.kind === "proposal.rejected")
+      .map(
+        (r) =>
+          `step ${data<{ step: number }>(r).step}: ${data<{ errors: string[] }>(r).errors.join(" | ").slice(0, 400)}`,
+      ),
+    escalation:
+      records.find((r) => r.kind === "process.escalated") === undefined
+        ? null
+        : data<{ reason: string }>(
+            records.find((r) => r.kind === "process.escalated") as CausalRecord,
+          ).reason.slice(0, 300),
     costUsd: Math.round(costOf(records) * 10_000) / 10_000,
     servedBy: [...servedBy],
     duplicateDeliveries: [...rt.env.channel.keyCounts().values()].filter((n) => n > 1).length,
@@ -247,8 +267,20 @@ export function scorerHash(): string {
 }
 
 const CHECKS = ["CR1", "CR2", "CR3", "CR7", "CR8"] as const;
+const RATED = ["CR1", "CR2", "CR3", "CR3b", "revised", "CR5", "CR7", "CR8"] as const;
+const BRIDGE_ARMS: readonly ArmName[] = ["A_X", "A_X2", "A_Y", "B", "D"];
 
-/** Rates per arm and the pre-registered pass rules (hypotheses e43d/5bc9/f4e3, superseded). */
+/**
+ * Rates per arm and the pre-registered pass rules (v2; journal entries superseding
+ * hypothesis-20261002-83ca, -9c11 and -f97f). Pass rules:
+ *   H-PCS4 (model swap): for C-R1, C-R2, C-R3, C-R7, C-R8, B >= mean(A_X, A_X2) - 0.2.
+ *   H-EC1 structural: B C-R3 >= 0.6 (T and C cannot revise a belief record; declared).
+ *   H-EC1 continuity vs transcript replay: B C-R7 - T C-R7 >= 0.4.
+ *   H-EC1 behaviour (non-inferiority): B C-R3b >= max(T, C) C-R3b - 0.2.
+ *   H-PCS3: B C-R5 = 1 and D C-R5 <= 0.6.
+ *   zero duplicate deliveries; B mastery >= mean A mastery - 0.2;
+ *   termination: bridge-arm runs whose acceptance was met conclude in >= 0.8 of them.
+ */
 export function evaluate(results: readonly ArmResult[]) {
   const by = (arm: ArmName) => results.filter((r) => r.arm === arm).map((r) => r.score);
   const rates = Object.fromEntries(
@@ -256,12 +288,7 @@ export function evaluate(results: readonly ArmResult[]) {
       arm,
       {
         n: by(arm).length,
-        ...Object.fromEntries(
-          (["CR1", "CR2", "CR3", "revised", "CR5", "CR7", "CR8"] as const).map((k) => [
-            k,
-            rate(by(arm), k),
-          ]),
-        ),
+        ...Object.fromEntries(RATED.map((k) => [k, rate(by(arm), k)])),
         mastery:
           by(arm).length === 0
             ? null
@@ -269,43 +296,58 @@ export function evaluate(results: readonly ArmResult[]) {
       },
     ]),
   ) as unknown as Record<ArmName, Record<string, number | null>>;
+  const num = (v: number | null | undefined): v is number => typeof v === "number";
   const meanA = (k: string) => {
-    const a = [rates.A_X[k], rates.A_X2[k]].filter((v): v is number => typeof v === "number");
+    const a = [rates.A_X[k], rates.A_X2[k]].filter(num);
     return a.length ? a.reduce((s, v) => s + v, 0) / a.length : null;
   };
   const pcs4 = Object.fromEntries(
     CHECKS.map((k) => {
       const b = rates.B[k];
       const a = meanA(k);
-      return [k, b === null || b === undefined || a === null ? null : b >= a - 0.2];
+      return [k, num(b) && a !== null ? b >= a - 0.2 : null];
     }),
   );
-  const b3 = rates.B["CR3"];
-  const c3 = rates.C["CR3"];
-  const ec1 = typeof b3 === "number" && typeof c3 === "number" ? b3 - c3 >= 0.4 : null;
-  const b5 = rates.B["CR5"];
-  const d5 = rates.D["CR5"];
-  const pcs3 = typeof b5 === "number" && typeof d5 === "number" ? b5 === 1 && d5 <= 0.6 : null;
+  const g = (arm: ArmName, k: string) => rates[arm][k];
+  const b3 = g("B", "CR3");
+  const structural = num(b3) ? b3 >= 0.6 : null;
+  const b7 = g("B", "CR7");
+  const t7 = g("T", "CR7");
+  const continuity = num(b7) && num(t7) ? b7 - t7 >= 0.4 : null;
+  const b3b = g("B", "CR3b");
+  const others = [g("T", "CR3b"), g("C", "CR3b")].filter(num);
+  const behaviour = num(b3b) && others.length ? b3b >= Math.max(...others) - 0.2 : null;
+  const b5 = g("B", "CR5");
+  const d5 = g("D", "CR5");
+  const pcs3 = num(b5) && num(d5) ? b5 === 1 && d5 <= 0.6 : null;
   const duplicates = results.reduce((s, r) => s + r.duplicateDeliveries, 0);
-  const bm = rates.B["mastery"];
+  const bm = g("B", "mastery");
   const am = meanA("mastery");
-  const outcome = typeof bm === "number" && am !== null ? bm >= am - 0.2 : null;
+  const sameOutcome = num(bm) && am !== null ? bm >= am - 0.2 : null;
+  const met = results.filter((r) => BRIDGE_ARMS.includes(r.arm) && r.score.acceptanceMet);
+  const termination = met.length
+    ? met.filter((r) => r.score.outcome === "mastery-verified").length / met.length >= 0.8
+    : null;
   return {
     rates,
     variance: Object.fromEntries(
       CHECKS.map((k) => {
         const x = rates.A_X[k];
         const y = rates.A_X2[k];
-        return [k, typeof x === "number" && typeof y === "number" ? Math.abs(x - y) : null];
+        return [k, num(x) && num(y) ? Math.abs(x - y) : null];
       }),
     ),
     rules: {
       "H-PCS4": pcs4,
-      "H-EC1": ec1,
+      "H-EC1": { structural, continuityVsTranscript: continuity, behaviourNonInferior: behaviour },
       "H-PCS3": pcs3,
       zeroDuplicates: duplicates === 0,
-      sameOutcome: outcome,
+      sameOutcome,
+      termination,
     },
+    escalations: results
+      .filter((r) => r.escalation)
+      .map((r) => `${r.seed}/${r.arm}: ${r.escalation}`),
     spendUsd: Math.round(results.reduce((s, r) => s + r.costUsd, 0) * 100) / 100,
   };
 }

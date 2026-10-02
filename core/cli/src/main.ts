@@ -2,7 +2,7 @@
 /**
  * uci — run a durable tutoring process with a chosen faculty.
  *
- *   uci run     --faculty <scripted|claude|azure|gemini|openai> [--dir D] [--steps N] [--process P]
+ *   uci run     --faculty <scripted|claude|opus|sonnet|azure|gemini|openai> [--dir D] [--steps N]
  *   uci resume  --faculty <name> --dir D [--steps N] [--process P]
  *   uci inspect --dir D [--process P]
  *   uci spike   --faculty <name> [--steps N]       one complete live run in a temp dir; JSON summary
@@ -13,7 +13,15 @@
  * Credentials come from the repository's git-ignored .env; nothing here prints a secret.
  */
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -101,20 +109,23 @@ async function battery(): Promise<void> {
           seed,
           X: () => makeFaculty(X, env),
           Y: () => makeFaculty(Y, env),
+          keep: true,
         }),
       ),
     );
-    for (const r of batch) {
+    for (const { dir: kept, ...r } of batch) {
+      // Every arm's records are kept beside the results (git-ignored), so any finding can be traced.
+      if (kept) {
+        cpSync(kept, join(out, "arms", `seed-${r.seed}-${r.arm}`), { recursive: true });
+        rmSync(kept, { recursive: true, force: true });
+      }
       results.push(r);
-      appendFileSync(
-        join(out, "runs.jsonl"),
-        `${JSON.stringify(r)}
-`,
-      );
+      appendFileSync(join(out, "runs.jsonl"), `${JSON.stringify(r)}\n`);
       console.error(
-        `seed ${seed.seed} ${r.arm.padEnd(4)} ${r.x.split("/")[0]}->${r.y.split("/")[0]} ` +
-          `${r.score.outcome} CR1=${r.score.CR1} CR3=${r.score.CR3} rev=${r.score.revised} ` +
-          `CR5=${r.score.CR5} CR7=${r.score.CR7} $${r.costUsd} ${r.seconds}s`,
+        `seed ${seed.seed} ${r.arm.padEnd(4)} ${r.x.split("/")[1]}->${r.y.split("/")[1]} ` +
+          `${r.score.outcome} CR1=${r.score.CR1} CR3=${r.score.CR3} CR3b=${r.score.CR3b} ` +
+          `CR5=${r.score.CR5} CR7=${r.score.CR7} rej=${r.rejections} $${r.costUsd} ${r.seconds}s` +
+          (r.escalation ? ` ESC: ${r.escalation.slice(0, 120)}` : ""),
       );
     }
     const spent = results.reduce((s, r) => s + r.costUsd, 0);
@@ -141,9 +152,9 @@ async function battery(): Promise<void> {
     stopped: stopped ?? null,
     sampling: {
       claude: {
-        model: env["UCI_CLAUDE_MODEL"] ?? "claude-opus-5-5",
+        models: "opus = claude-opus-5-5, sonnet = claude-sonnet-5-5, claude = UCI_CLAUDE_MODEL",
         effort: env["UCI_CLAUDE_EFFORT"] ?? "medium",
-        output: "prompted schema; no temperature (rejected by the model)",
+        output: "prompted schema; no temperature (rejected by the model); fallbacks default",
       },
       azure: {
         deployment: env["AZURE_OPENAI_CHAT_DEPLOYMENT"] ?? "gpt-4.1-mini",
@@ -153,11 +164,7 @@ async function battery(): Promise<void> {
     },
     ...evaluate(results),
   };
-  writeFileSync(
-    join(out, "summary.json"),
-    `${JSON.stringify(summary, null, 2)}
-`,
-  );
+  writeFileSync(join(out, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
   console.log(JSON.stringify(summary, null, 2));
 }
 
