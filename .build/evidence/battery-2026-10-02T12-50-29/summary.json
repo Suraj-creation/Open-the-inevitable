@@ -1,0 +1,139 @@
+{
+  "battery": "cognitive-resume (forked control)",
+  "head": "b5118ec",
+  "scorer": "6f5626ae9980d6ea",
+  "x": "opus",
+  "y": "sonnet",
+  "seeds": [0, 1, 2, 3, 4],
+  "arms": ["A_X", "A_X2", "A_Y", "B", "T", "C", "D"],
+  "cap": 16,
+  "stopped": null,
+  "sampling": {
+    "claude": {
+      "models": "opus = claude-opus-5-5, sonnet = claude-sonnet-5-5, claude = UCI_CLAUDE_MODEL",
+      "effort": "medium",
+      "output": "prompted schema; no temperature (rejected by the model); fallbacks default"
+    },
+    "azure": {
+      "deployment": "gpt-4.1-mini",
+      "temperature": 0,
+      "output": "strict json_schema"
+    }
+  },
+  "rates": {
+    "A_X": {
+      "n": 5,
+      "CR1": 1,
+      "CR2": 1,
+      "CR3": 1,
+      "CR3b": 1,
+      "revised": 1,
+      "CR5": 1,
+      "CR7": 1,
+      "CR8": 1,
+      "mastery": 1
+    },
+    "A_X2": {
+      "n": 5,
+      "CR1": 1,
+      "CR2": 1,
+      "CR3": 1,
+      "CR3b": 1,
+      "revised": 1,
+      "CR5": 1,
+      "CR7": 1,
+      "CR8": 1,
+      "mastery": 1
+    },
+    "A_Y": {
+      "n": 5,
+      "CR1": 1,
+      "CR2": 1,
+      "CR3": 1,
+      "CR3b": 1,
+      "revised": 1,
+      "CR5": 1,
+      "CR7": 1,
+      "CR8": 1,
+      "mastery": 1
+    },
+    "B": {
+      "n": 5,
+      "CR1": 1,
+      "CR2": 1,
+      "CR3": 1,
+      "CR3b": 1,
+      "revised": 1,
+      "CR5": 1,
+      "CR7": 1,
+      "CR8": 1,
+      "mastery": 1
+    },
+    "T": {
+      "n": 5,
+      "CR1": 1,
+      "CR2": 1,
+      "CR3": 0,
+      "CR3b": 1,
+      "revised": 0,
+      "CR5": 1,
+      "CR7": 1,
+      "CR8": 1,
+      "mastery": 0.6
+    },
+    "C": {
+      "n": 5,
+      "CR1": 0,
+      "CR2": 1,
+      "CR3": 0,
+      "CR3b": 1,
+      "revised": 0,
+      "CR5": 1,
+      "CR7": 0,
+      "CR8": 1,
+      "mastery": 1
+    },
+    "D": {
+      "n": 5,
+      "CR1": 1,
+      "CR2": 1,
+      "CR3": 1,
+      "CR3b": 1,
+      "revised": 1,
+      "CR5": 0.6,
+      "CR7": 1,
+      "CR8": 1,
+      "mastery": 1
+    }
+  },
+  "variance": {
+    "CR1": 0,
+    "CR2": 0,
+    "CR3": 0,
+    "CR7": 0,
+    "CR8": 0
+  },
+  "rules": {
+    "H-PCS4": {
+      "CR1": true,
+      "CR2": true,
+      "CR3": true,
+      "CR7": true,
+      "CR8": true
+    },
+    "H-EC1": {
+      "structural": true,
+      "continuityVsTranscript": false,
+      "behaviourNonInferior": true
+    },
+    "H-PCS3": true,
+    "zeroDuplicates": true,
+    "sameOutcome": true,
+    "termination": true
+  },
+  "escalations": [
+    "1/T: supervision: acceptance verdict MET (record 184) and 2 further steps without conclude",
+    "4/T: faculty anthropic-claude@1 failed without retry: anthropic: refused (reasoning_extraction)"
+  ],
+  "spendUsd": 5.28
+}
