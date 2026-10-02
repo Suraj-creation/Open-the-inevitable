@@ -205,16 +205,21 @@ export async function compileWorkingState(
   const envRec = evidence.find(
     (e) => e.data.source === "environment" && e.data.ref === "environment-description",
   );
-  const environment = envRec
-    ? {
-        id: "environment",
-        record: envRec.seq,
-        value: JSON.parse(await content(envRec.data.evidenceHash)) as {
-          actions: ActionSpec[];
-          practiceItems: PracticeItem[];
-        },
-      }
+  // Affordances that cannot be read (missing or forgotten) are absent, never a crash.
+  const description = envRec
+    ? await store.getEvidence(entityId, envRec.data.evidenceHash)
     : undefined;
+  const environment =
+    envRec && description && !description.forgotten
+      ? {
+          id: "environment",
+          record: envRec.seq,
+          value: JSON.parse(description.content) as {
+            actions: ActionSpec[];
+            practiceItems: PracticeItem[];
+          },
+        }
+      : undefined;
 
   // Probe outcomes: resolutions of expectations bound to environment-selected probes, oldest first.
   const probeOutcomes = [...cog.claims.values()]

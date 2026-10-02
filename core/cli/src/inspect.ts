@@ -3,44 +3,69 @@ import {
   compileWorkingState,
   type ManifestRecorded,
   type Mode,
+  RENDERER_VERSION,
+  type RequestRecorded,
 } from "@uci/harness";
 import {
   canonicalJson,
   type CausalRecord,
   type CausalStore,
   foldLedger,
+  hashOf,
   modelUsage,
 } from "@uci/kernel";
 import { foldCognitiveState } from "@uci/substrate";
 
 /**
- * Derivability: every recorded manifest's request hash is reproduced by recompiling the working
- * state from the records that preceded it, at the instant it records, and rendering again.
+ * Replay and derivability. Every model call's request is reconstructed: from its stored bytes
+ * (request.recorded), whose hash must equal the manifest's request hash, and, when the call was
+ * rendered by the renderer running now, also by recompiling the working state from the records
+ * that preceded it and rendering again. A call rendered by another renderer version is replayed
+ * from its bytes alone (it cannot be re-rendered, and need not be).
  */
 export async function rederive(
   store: CausalStore,
   records: readonly CausalRecord[],
-): Promise<{ mismatches: number[]; prompts: string[] }> {
+  options: { readonly rendererVersion?: string } = {},
+): Promise<{ mismatches: number[]; prompts: string[]; replayedFromBytes: number }> {
+  const current = options.rendererVersion ?? RENDERER_VERSION;
   const mismatches: number[] = [];
   const prompts: string[] = [];
+  let replayedFromBytes = 0;
   for (const m of records.filter(
     (r) => r.kind === "manifest.recorded",
   ) as CausalRecord<ManifestRecorded>[]) {
-    const prefix = records.filter((r) => r.seq < m.seq);
-    const ws = await compileWorkingState(store, prefix, m.data.compiledAt);
-    const ctx = compileContext(
-      ws,
-      { id: m.data.faculty, model: m.data.model },
-      m.data.mode as Mode,
-      m.data.staleness,
-    );
-    prompts.push(ctx.request.prompt);
-    if (ctx.requestHash !== m.data.requestHash) mismatches.push(m.seq);
+    const stored = records.find(
+      (r) =>
+        r.seq > m.seq &&
+        r.kind === "request.recorded" &&
+        (r.data as RequestRecorded).requestHash === m.data.requestHash,
+    ) as CausalRecord<RequestRecorded> | undefined;
+    const bytes = stored
+      ? await store.getEvidence(m.entityId, stored.data.evidenceHash)
+      : undefined;
+    const fromBytes = bytes ? (JSON.parse(bytes.content) as { prompt: string }) : undefined;
+    if (stored && (!bytes || hashOf(fromBytes) !== m.data.requestHash)) mismatches.push(m.seq);
+    if (m.data.rendererVersion === current) {
+      const prefix = records.filter((r) => r.seq < m.seq);
+      const ws = await compileWorkingState(store, prefix, m.data.compiledAt);
+      const ctx = compileContext(
+        ws,
+        { id: m.data.faculty, model: m.data.model },
+        m.data.mode as Mode,
+        m.data.staleness,
+      );
+      prompts.push(ctx.request.prompt);
+      if (ctx.requestHash !== m.data.requestHash) mismatches.push(m.seq);
+    } else if (fromBytes) {
+      prompts.push(fromBytes.prompt);
+      replayedFromBytes++;
+    } else mismatches.push(m.seq);
     const intent = records.find((r) => r.seq > m.seq && r.kind === "effect.intended");
     if ((intent?.data as { payloadHash?: string } | undefined)?.payloadHash !== m.data.requestHash)
       mismatches.push(m.seq);
   }
-  return { mismatches, prompts };
+  return { mismatches, prompts, replayedFromBytes };
 }
 
 /** A canonical fingerprint of the folded cognitive state (record bodies, not object identity). */

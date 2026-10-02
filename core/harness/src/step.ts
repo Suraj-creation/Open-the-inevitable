@@ -1,5 +1,6 @@
 import {
   type AuthorityGranted,
+  canonicalJson,
   type CausalRecord,
   type Draft,
   envelopePolicy,
@@ -22,7 +23,7 @@ import {
   type WorkingState,
 } from "./compile.js";
 import { type InputAdmitted, inboxStream } from "./admit.js";
-import type { AcceptanceEvaluated, InputDelivered } from "./kinds.js";
+import { type AcceptanceEvaluated, type InputDelivered, REQUEST_MEDIA_TYPE } from "./kinds.js";
 import { FacultyError, type EnvironmentPack, type ModelFaculty } from "./ports.js";
 import { parseProposal, type Proposal, proposalDrafts, validateProposal } from "./proposal.js";
 import { type ProcessHandle, readProcess, write } from "./writer.js";
@@ -113,12 +114,17 @@ export async function runStep(deps: StepDeps): Promise<StepOutcome> {
   if (proposal.action.type === "conclude") {
     records = await readProcess(h);
     const probes = foldCognitiveState(records);
-    const evidence = [...probes.claims.values()]
+    const resolutions = [...probes.claims.values()]
       .map((v) => v.at(-1))
-      .filter((c): c is CausalRecord<ClaimAsserted> => c?.data.method === "answer-key:probe")
-      .map((c) => `rec:${h.stream}#${c.seq}`);
+      .filter((c): c is CausalRecord<ClaimAsserted> => c?.data.method === "answer-key:probe");
+    const evidence = resolutions.map((c) => `rec:${h.stream}#${c.seq}`);
     await write(h, [
-      { kind: "process.concluded", v: 1, data: { outcome: "mastery-verified", evidence } },
+      {
+        kind: "process.concluded",
+        v: 1,
+        causes: resolutions.map((c) => ({ stream: h.stream, seq: c.seq })),
+        data: { outcome: "mastery-verified", evidence },
+      },
       { kind: "step.completed", v: 1, data: { step, outcome: "completed" } },
     ]);
     return { status: "concluded", step };
@@ -208,7 +214,7 @@ async function verifyAndExpire(deps: StepDeps, records: readonly CausalRecord[])
           v.outcome,
           e.condition.itemId === "probe" ? "answer-key:probe" : "answer-key:practice",
           v.verifier,
-          `rec:${h.stream}#${reply.seq}`,
+          { stream: h.stream, seq: reply.seq },
           `answer to ${itemId} judged ${v.outcome}`,
         ),
       );
@@ -224,7 +230,7 @@ async function verifyAndExpire(deps: StepDeps, records: readonly CausalRecord[])
             measuredError: "deterministic clock comparison",
             actorVisible: false,
           },
-          `rec:${h.stream}#${expectation.seq}`,
+          { stream: h.stream, seq: expectation.seq },
           `expectation ${e.claimId} passed its due time unresolved`,
         ),
       );
@@ -280,7 +286,8 @@ function resolution(
   outcome: "held" | "failed" | "indeterminate" | "expired",
   method: string,
   verifier: { id: string; version: string; measuredError: string; actorVisible: boolean },
-  evidence: string,
+  /** The record the resolution rests on (the reply judged, or the expectation that expired). */
+  cause: { readonly stream: string; readonly seq: number },
   proposition: string,
 ): Draft {
   const data: ClaimAsserted = {
@@ -292,14 +299,14 @@ function resolution(
     origin: "verifier",
     standing: "verified",
     confidence: 1,
-    evidence: [evidence],
+    evidence: [`rec:${cause.stream}#${cause.seq}`],
     derivation: { operator: method, operatorVersion: verifier.version },
     resolves: e.claimId,
     outcome,
     method,
     verifier,
   };
-  return { kind: "claim.asserted", v: 1, data };
+  return { kind: "claim.asserted", v: 1, causes: [cause], data };
 }
 
 // ---------------------------------------------------------------- C. proposal
@@ -429,36 +436,65 @@ async function obtainProposal(
       attempt,
       payloadHash: ctx.requestHash,
     };
-    await write(h, [
-      {
-        kind: "manifest.recorded",
-        v: 2,
-        data: {
-          step,
-          items: ctx.items,
-          exclusions: ctx.exclusions,
-          rendererVersion: RENDERER_VERSION,
-          requestHash: ctx.requestHash,
-          faculty: faculty.id,
-          model: faculty.model,
-          mode,
-          staleness,
-          compiledAt: now,
+    // What the call saw carries the labels of everything it saw; its exact bytes are kept as
+    // evidence so the call can be replayed even after the renderer changes.
+    const seenLabels = new Map(records.map((r) => [r.seq, r.labels]));
+    const manifestLabels = [
+      ...new Set(ctx.items.flatMap((i) => seenLabels.get(i.record) ?? [])),
+    ].sort();
+    const requestBytes = canonicalJson({
+      system: ctx.request.system,
+      prompt: ctx.request.prompt,
+      schema: ctx.request.schema,
+      model: ctx.request.model,
+      temperature: ctx.request.temperature,
+    });
+    await write(
+      h,
+      [
+        {
+          kind: "manifest.recorded",
+          v: 2,
+          labels: manifestLabels,
+          data: {
+            step,
+            items: ctx.items,
+            exclusions: ctx.exclusions,
+            rendererVersion: RENDERER_VERSION,
+            requestHash: ctx.requestHash,
+            faculty: faculty.id,
+            model: faculty.model,
+            mode,
+            staleness,
+            compiledAt: now,
+          },
         },
-      },
-      {
-        kind: "governance.decided",
-        v: 1,
-        data: {
-          effectId,
-          action: "model-call",
-          decision: "allow",
-          reason: verdict.reason,
-          policyVersion: POLICY_VERSION,
+        {
+          kind: "request.recorded",
+          v: 1,
+          labels: manifestLabels,
+          data: {
+            effectId,
+            requestHash: ctx.requestHash,
+            evidenceHash: evidenceHash(REQUEST_MEDIA_TYPE, requestBytes),
+          },
         },
-      },
-      { kind: "effect.intended", v: 1, data: intent },
-    ]);
+        {
+          kind: "governance.decided",
+          v: 1,
+          labels: manifestLabels,
+          data: {
+            effectId,
+            action: "model-call",
+            decision: "allow",
+            reason: verdict.reason,
+            policyVersion: POLICY_VERSION,
+          },
+        },
+        { kind: "effect.intended", v: 1, labels: manifestLabels, data: intent },
+      ],
+      [{ mediaType: REQUEST_MEDIA_TYPE, content: requestBytes, labels: manifestLabels }],
+    );
     crash("after-manifest");
     await write(h, [{ kind: "effect.started", v: 1, data: { effectId } }]);
     crash("model-started");
@@ -502,6 +538,7 @@ async function obtainProposal(
         {
           kind: "effect.settled",
           v: 1,
+          labels: manifestLabels,
           data: {
             effectId,
             outcome: "completed",
@@ -514,6 +551,8 @@ async function obtainProposal(
         {
           kind: "evidence.recorded",
           v: 1,
+          // A model's output derived from everything it saw: it carries those labels.
+          labels: manifestLabels,
           data: {
             evidenceHash: outputHash,
             mediaType: "application/json",
@@ -646,6 +685,12 @@ async function performAction(
     records.find((r) => r.kind === "authority.granted") as CausalRecord<AuthorityGranted>
   ).data.envelope;
   const effectId = `X${step}-a${attempts.length + 1}`;
+  // The action derives from this step's decision: its effect records cite it, so labels follow.
+  const decision = records.find(
+    (r) =>
+      r.kind === "decision.made" && (r.data as { decisionId: string }).decisionId === `D${step}`,
+  );
+  const fromDecision = decision ? [{ stream: h.stream, seq: decision.seq }] : [];
   const params: Record<string, string> = {};
   if (proposal.action.item_id) params["item_id"] = proposal.action.item_id;
   if (proposal.action.content) params["content"] = proposal.action.content;
@@ -685,6 +730,7 @@ async function performAction(
     {
       kind: "effect.intended",
       v: 1,
+      causes: fromDecision,
       data: {
         effectId,
         effectClass: "external-communication",
@@ -695,7 +741,11 @@ async function performAction(
       },
     },
   ]);
-  await write(h, [{ kind: "effect.started", v: 1, data: { effectId } }]);
+  const intended = (await readProcess(h)).findLast(
+    (r) => r.kind === "effect.intended" && (r.data as { effectId: string }).effectId === effectId,
+  );
+  const fromIntent = intended ? [{ stream: h.stream, seq: intended.seq }] : [];
+  await write(h, [{ kind: "effect.started", v: 1, causes: fromIntent, data: { effectId } }]);
   crash("external-started");
   const result = await env.perform({
     processId: h.meta.processId,
@@ -712,6 +762,7 @@ async function performAction(
       {
         kind: "effect.settled",
         v: 1,
+        causes: fromIntent,
         data: {
           effectId,
           outcome: result.delivery === "accepted" ? "completed" : "failed",
@@ -722,6 +773,7 @@ async function performAction(
       {
         kind: "evidence.recorded",
         v: 1,
+        causes: fromIntent,
         data: {
           evidenceHash: observationHash,
           mediaType: "text/plain",

@@ -112,8 +112,12 @@ export interface CausalStore {
     labels?: readonly string[],
   ): Promise<string>;
   getEvidence(entityId: string, hash: string): Promise<Evidence | undefined>;
-  /** Tombstone every piece of this entity's evidence content; returns how many were forgotten. */
-  forget(entityId: string): Promise<number>;
+  /**
+   * Tombstone this entity's evidence content: all of it, or only content carrying a label with
+   * `labelPrefix` (e.g. `consent:`: what a person said and, labels propagating, everything derived
+   * from it). Hashes and records remain. Returns how many pieces were forgotten.
+   */
+  forget(entityId: string, labelPrefix?: string): Promise<number>;
   /** Changes under `prefix` until `signal` aborts. A doorbell, not a log: re-read the stream to act. */
   watch(prefix: string, signal: AbortSignal): AsyncIterable<StoreChange>;
   close(): Promise<void>;

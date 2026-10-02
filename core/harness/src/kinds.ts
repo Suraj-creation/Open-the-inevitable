@@ -12,6 +12,15 @@ import {
 
 /** Harness records: the process's own execution facts. Cognitive content lives in substrate records. */
 
+/** Media type of a stored model request: canonical JSON of system, prompt, schema, model, temperature. */
+export const REQUEST_MEDIA_TYPE = "application/vnd.uci.request+json";
+
+export interface RequestRecorded {
+  readonly effectId: string;
+  readonly requestHash: string;
+  readonly evidenceHash: string;
+}
+
 export interface ManifestItem {
   /** The id the model may cite: `objective:O1`, `decision:D3`, `claim:C2@v2`, `input:I1`, … */
   readonly ref: string;
@@ -183,6 +192,11 @@ export const HARNESS_KINDS = [
     1,
     shape({ from: oneOf("learner", "person", "environment"), principal: str, reason: str }),
   ),
+  /**
+   * The exact bytes of a model call's request, kept as evidence beside its manifest: replay never
+   * depends on today's renderer reproducing yesterday's prompt.
+   */
+  defineKind("request.recorded", 1, shape({ effectId: str, requestHash: str, evidenceHash: str })),
   /** Which environment pack a process runs in, so any host binds the same one on hydration. */
   defineKind("environment.bound", 1, shape({ packId: str, version: str, descriptionHash: str })),
 ];

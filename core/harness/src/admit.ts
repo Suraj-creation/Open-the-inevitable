@@ -118,6 +118,19 @@ export async function admitInput(
   return outcome(r.record, r.duplicate);
 }
 
+/** The label every person's input carries, and (labels propagating) everything derived from it. */
+export const CONSENT_PREFIX = "consent:";
+
+/**
+ * The person is sovereign over their cognitive state: forgetting removes what they said and every
+ * piece of content derived from it (inputs, model outputs and requests that saw it, observations of
+ * actions decided from it) from every rendering. Records and hashes remain, so the causal history
+ * stays whole and says that something was forgotten.
+ */
+export function forgetPerson(store: CausalStore, entityId: string): Promise<number> {
+  return store.forget(entityId, CONSENT_PREFIX);
+}
+
 function outcome(record: CausalRecord, duplicate: boolean): AdmissionResult {
   return record.kind === "input.refused"
     ? { refused: (record.data as InputRefused).reason, duplicate }

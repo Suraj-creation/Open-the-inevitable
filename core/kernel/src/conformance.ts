@@ -248,6 +248,21 @@ export async function runCausalStoreConformance(open: ConformanceOpen): Promise<
   );
   assert((await store.read(stream)).length === 7, "forgetting evidence keeps the records");
 
+  // Forgetting by label removes only content carrying it.
+  const said = await store.putEvidence("E-label", "text/plain", "what the person said", [
+    "consent:learning",
+  ]);
+  const described = await store.putEvidence("E-label", "application/json", '{"actions":[]}');
+  assert((await store.forget("E-label", "consent:")) === 1, "forget by label prefix");
+  assert(
+    (await store.getEvidence("E-label", said))?.forgotten === true,
+    "labelled content forgotten",
+  );
+  assert(
+    (await store.getEvidence("E-label", described))?.forgotten === false,
+    "unlabelled content kept",
+  );
+
   // Admission: unfenced, idempotent by key, only on inbox/ streams; an inbox is never claimed.
   const inbox = "inbox/P-conf";
   const admit = (key: string, text: string) =>

@@ -253,16 +253,22 @@ export class SqliteCausalStore implements CausalStore {
       : undefined;
   }
 
-  async forget(entityId: string): Promise<number> {
-    return this.inWrite(() =>
-      Number(
-        this.db
-          .prepare(
-            "UPDATE evidence SET content = NULL, forgotten = 1 WHERE entity_id = ? AND forgotten = 0",
-          )
-          .run(entityId).changes,
-      ),
-    );
+  async forget(entityId: string, labelPrefix?: string): Promise<number> {
+    return this.inWrite(() => {
+      const rows = this.db
+        .prepare("SELECT hash, labels FROM evidence WHERE entity_id = ? AND forgotten = 0")
+        .all(entityId) as { hash: string; labels: string }[];
+      const chosen = rows.filter(
+        (r) =>
+          labelPrefix === undefined ||
+          (JSON.parse(r.labels) as string[]).some((l) => l.startsWith(labelPrefix)),
+      );
+      const tombstone = this.db.prepare(
+        "UPDATE evidence SET content = NULL, forgotten = 1 WHERE entity_id = ? AND hash = ?",
+      );
+      for (const r of chosen) tombstone.run(entityId, r.hash);
+      return chosen.length;
+    });
   }
 
   async *watch(prefix: string, signal: AbortSignal): AsyncIterable<StoreChange> {

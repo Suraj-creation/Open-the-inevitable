@@ -4,6 +4,7 @@ import {
   type Clock,
   type Draft,
   type EvidenceDraft,
+  evidenceHash,
   type FenceToken,
   foldLedger,
   InvalidRecordError,
@@ -79,17 +80,59 @@ export async function write(
   }
   violations.push(...substrateViolations(records, drafts));
   if (violations.length) throw new InvalidRecordError(violations);
+  const labelled = await propagateLabels(h, records, drafts, evidence);
   const appended = await h.store.append({
     stream: h.stream,
     meta: h.meta,
     expectedSeq: records.at(-1)?.seq ?? 0,
     fence: h.fence,
     at: h.clock.now(),
-    drafts,
-    evidence,
+    drafts: labelled.drafts,
+    evidence: labelled.evidence,
   });
   if (h.seen && (h.seen.at(-1)?.seq ?? 0) === (records.at(-1)?.seq ?? 0)) h.seen.push(...appended);
   return appended;
+}
+
+/**
+ * Consent labels propagate through every derivation (CLAUDE.md §3): a record carries the union of
+ * its own labels and those of every record it names as a cause (in this stream, earlier in the
+ * batch, or in another stream such as the inbox), and evidence carries the labels of the record that
+ * cites it. Propagation is mechanical at write, so a derived record can never shed a label.
+ */
+async function propagateLabels(
+  h: ProcessHandle,
+  records: readonly CausalRecord[],
+  drafts: readonly Draft[],
+  evidence: readonly EvidenceDraft[],
+): Promise<{ drafts: Draft[]; evidence: EvidenceDraft[] }> {
+  const local = new Map<number, readonly string[]>(records.map((r) => [r.seq, r.labels]));
+  const remote = new Map<string, readonly string[]>();
+  for (const c of drafts.flatMap((d) => d.causes ?? [])) {
+    const key = `${c.stream}#${c.seq}`;
+    if (c.stream === h.stream || remote.has(key)) continue;
+    const cause = (await h.store.read(c.stream, c.seq))[0];
+    remote.set(key, cause?.seq === c.seq ? cause.labels : []);
+  }
+  const base = records.at(-1)?.seq ?? 0;
+  const out = drafts.map((d, i) => {
+    const inherited = (d.causes ?? []).flatMap((c) =>
+      c.stream === h.stream ? (local.get(c.seq) ?? []) : (remote.get(`${c.stream}#${c.seq}`) ?? []),
+    );
+    const labels = [...new Set([...(d.labels ?? []), ...inherited])].sort();
+    local.set(base + i + 1, labels);
+    return labels.length || d.labels ? { ...d, labels } : d;
+  });
+  const citing = new Map<string, readonly string[]>();
+  for (const d of out)
+    if (d.kind === "evidence.recorded")
+      citing.set((d.data as { evidenceHash: string }).evidenceHash, d.labels ?? []);
+  const labelledEvidence = evidence.map((e) => {
+    const cited = citing.get(evidenceHash(e.mediaType, e.content)) ?? [];
+    const labels = [...new Set([...(e.labels ?? []), ...cited])].sort();
+    return labels.length ? { ...e, labels } : e;
+  });
+  return { drafts: out, evidence: labelledEvidence };
 }
 
 /** Validation the writer applies, for records written by a claim (which bypasses `write`). */
