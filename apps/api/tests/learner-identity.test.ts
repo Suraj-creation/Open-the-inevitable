@@ -1,7 +1,8 @@
 /**
  * Durable learner identity & resume-by-learner (P2.2, DPS-003 / ADR-0010): learners are first-class,
- * durable, and own surfaces over time — replacing the hardcoded demo learner. A known learnerId reuses
- * the same identity (cid + trust) across a restart, and a learner's surfaces are discoverable.
+ * durable, and own surfaces over time — replacing the hardcoded demo learner. A returning learner's
+ * bearer reuses the same identity (cid + trust) across a restart, and a learner's surfaces are
+ * discoverable. A learnerId without its bearer is never resumed.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -49,10 +50,17 @@ interface Created {
   /** Returned on first mint (no bearer sent). Use as Authorization: Bearer for learner routes. */
   api_key?: string;
 }
-async function create(base: string, body: Record<string, unknown>): Promise<Created> {
+async function create(
+  base: string,
+  body: Record<string, unknown>,
+  apiKey?: string,
+): Promise<Created> {
   const res = await fetch(`${base}/api/surface`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(apiKey !== undefined ? { Authorization: `Bearer ${apiKey}` } : {}),
+    },
     body: JSON.stringify(body),
   });
   return (await res.json()) as Created;
@@ -89,7 +97,7 @@ describe("Durable learner identity & resume-by-learner (P2.2)", () => {
     expect(lb.surfaces.map((s) => s.surfaceId)).toEqual([b.surface_id]);
   });
 
-  test("a known learnerId reuses the same identity across a restart and accrues surfaces", async () => {
+  test("a returning learner's bearer reuses the same identity across a restart and accrues surfaces", async () => {
     const base1 = await boot();
     const first = await create(base1, { goal: "Teach me Neural Networks", seed: "li-b1" });
     const before = await getLearner(base1, first.learner_id, first.api_key!);
@@ -99,18 +107,18 @@ describe("Durable learner identity & resume-by-learner (P2.2)", () => {
     await new Promise<void>((resolve) => active!.close(() => resolve()));
     active = null;
 
-    // Restart: a fresh gateway over the same dir. Returning with the learnerId reuses the identity.
+    // Restart: a fresh gateway over the same dir. Returning with the bearer reuses the identity.
     const base2 = await boot();
-    const second = await create(base2, {
-      goal: "Teach me Photosynthesis",
-      seed: "li-b2",
-      learnerId: first.learner_id,
-    });
+    const second = await create(
+      base2,
+      { goal: "Teach me Photosynthesis", seed: "li-b2" },
+      first.api_key,
+    );
     expect(second.learner_id).toBe(first.learner_id); // same durable learner across processes
-    // POST without a bearer still echoes the api_key so the caller can authenticate after restart.
-    expect(second.api_key).toBe(first.api_key);
+    // An authenticated learner already holds their key: it is not echoed again.
+    expect(second.api_key).toBeUndefined();
 
-    const after = await getLearner(base2, first.learner_id, second.api_key!);
+    const after = await getLearner(base2, first.learner_id, first.api_key!);
     expect(after.learner.cid).toBe(cid); // same cognitive identity
     expect(after.learner.trust_level).toBe(trust); // trust is durable, not re-negotiated
     // The learner now owns BOTH surfaces (resume-by-learner lists them).
@@ -125,6 +133,64 @@ describe("Durable learner identity & resume-by-learner (P2.2)", () => {
       state: { blocks: unknown[] } | null;
     };
     expect(stateJson.state).not.toBeNull();
+  });
+
+  test("knowing a learner's id without their bearer yields neither their key nor their surfaces", async () => {
+    // The takeover this closes: POST /api/surface with only a victim's learnerId (ids appear in URLs
+    // and logs) used to resume the victim and echo their api_key to the anonymous caller.
+    const base = await boot();
+    const victim = await create(base, { goal: "Teach me Neural Networks", seed: "li-v1" });
+    const attacker = await create(base, {
+      goal: "Teach me Photosynthesis",
+      seed: "li-v2",
+      learnerId: victim.learner_id,
+    });
+    expect(attacker.learner_id).not.toBe(victim.learner_id); // a fresh learner, not the victim
+    expect(attacker.api_key).toBeTruthy();
+    expect(attacker.api_key).not.toBe(victim.api_key); // the victim's key is never revealed
+    // The attacker's key does not open the victim's learner, and the victim owns only their surface.
+    expect(
+      (
+        await fetch(`${base}/api/learner/${victim.learner_id}`, {
+          headers: { Authorization: `Bearer ${attacker.api_key}` },
+        })
+      ).status,
+    ).toBe(403);
+    const view = await getLearner(base, victim.learner_id, victim.api_key!);
+    expect(view.surfaces.map((s) => s.surfaceId)).toEqual([victim.surface_id]);
+  });
+
+  test("a client may lower the trust it is granted but never raise it", async () => {
+    const base = await boot();
+    const defaults = await create(base, { goal: "Teach me Neural Networks", seed: "li-t0" });
+    const granted = (await getLearner(base, defaults.learner_id, defaults.api_key!)).learner
+      .trust_level;
+    const raised = await create(base, {
+      goal: "Teach me Neural Networks",
+      seed: "li-t1",
+      trustLevel: granted + 100,
+    });
+    expect((await getLearner(base, raised.learner_id, raised.api_key!)).learner.trust_level).toBe(
+      granted,
+    );
+    const lowered = await create(base, {
+      goal: "Teach me Neural Networks",
+      seed: "li-t2",
+      trustLevel: 0,
+    });
+    expect((await getLearner(base, lowered.learner_id, lowered.api_key!)).learner.trust_level).toBe(
+      0,
+    );
+    // A returning learner's trust is durable: a request cannot change it either way.
+    const again = await create(
+      base,
+      { goal: "Teach me Photosynthesis", seed: "li-t3", trustLevel: 0 },
+      defaults.api_key,
+    );
+    expect(again.learner_id).toBe(defaults.learner_id);
+    expect(
+      (await getLearner(base, defaults.learner_id, defaults.api_key!)).learner.trust_level,
+    ).toBe(granted);
   });
 
   test("an unknown learnerId is never claimed — a fresh learner is minted instead", async () => {

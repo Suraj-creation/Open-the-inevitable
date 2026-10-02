@@ -51,7 +51,8 @@ export interface LearnerRecord {
   surfaces: LearnerSurfaceRef[];
 }
 
-const DEFAULT_TRUST = 5;
+/** The trust a freshly minted learner is granted. A client may request less, never more. */
+export const DEFAULT_TRUST = 5;
 
 const EMPTY_COGNITION: LearnerCognitionSeed = {
   worldNodes: [],

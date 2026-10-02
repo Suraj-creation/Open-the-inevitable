@@ -36,6 +36,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { CognitiveEvent } from "@inevitable/protocols";
 import { type CosError } from "@inevitable/shared";
 import { SurfaceHost, gatewayError, type ServedSurface } from "./host";
+import { DEFAULT_TRUST } from "./learners";
 
 /** The only mutation channel into a living surface. Additive by design (SRF-005 §4.3). The
  * CSE-014 grammar (M8 T2) extends the original ADR-0024 seven — the surface session's grammar
@@ -443,15 +444,21 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
     const caller = token !== undefined ? await host.getLearnerByApiKey(token) : undefined;
     const authenticated = caller !== undefined;
 
+    // Trust is granted by the server, never claimed by a client: a request may only attenuate it
+    // (delegation only attenuates), and it applies to a fresh mint alone — a returning learner's trust
+    // is durable. A requested level at or above the default is ignored.
+    const requested = body["trustLevel"];
+    const trustLevel =
+      typeof requested === "number" && Number.isFinite(requested) && requested < DEFAULT_TRUST
+        ? Math.max(0, Math.floor(requested))
+        : undefined;
+
     const created = await host.create(goal, {
-      trustLevel:
-        typeof body["trustLevel"] === "number" ? (body["trustLevel"] as number) : undefined,
+      trustLevel,
       seed: typeof body["seed"] === "string" ? (body["seed"] as string) : undefined,
-      // A recognised bearer wins over any learnerId in the body (prevents impersonation); an unknown
-      // bearer falls through to the body's learnerId, else a fresh mint (resolveOrCreate never spoofs).
-      learnerId:
-        caller?.learnerId ??
-        (typeof body["learnerId"] === "string" ? (body["learnerId"] as string) : undefined),
+      // Only a recognised bearer resumes a learner. A learnerId in the body is ignored: knowing an id
+      // must never yield that learner's surfaces or its api_key. No bearer, or an unknown one, mints.
+      learnerId: caller?.learnerId,
       mode:
         typeof body["mode"] === "string" && VALID_MODES.has(body["mode"] as string)
           ? (body["mode"] as string)
@@ -459,9 +466,8 @@ async function route(host: SurfaceHost, req: IncomingMessage, res: ServerRespons
     });
     if (!created.ok) return sendError(res, 400, created.error);
 
-    // Echo the api_key whenever the caller was NOT an already-authenticated returning learner — i.e.
-    // a fresh mint (no bearer) OR a stale/unknown bearer we just healed — so the client can (re)store
-    // it. An authenticated learner already holds their key; echoing it every request would be noisy.
+    // Echo the api_key only for a learner minted by this request — no bearer, or a stale/unknown one we
+    // just healed — so the client can (re)store it. An authenticated learner already holds their key.
     const freshLearner = authenticated ? undefined : await host.getLearner(created.value.learnerId);
     return sendJson(res, 201, {
       ok: true,
