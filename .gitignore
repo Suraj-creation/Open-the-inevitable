@@ -55,3 +55,7 @@ Thumbs.db
 
 # Stale editor worktree checkout
 /.kilo/
+
+# Local tool state: MCP config can hold credentials; brainstorm scratch is personal.
+.mcp.json
+.superpowers/

@@ -1,0 +1,2 @@
+# Line endings: LF everywhere (prettier endOfLine is lf); git converts nothing on Windows.
+* text=auto eol=lf
