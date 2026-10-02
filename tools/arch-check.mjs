@@ -10,8 +10,11 @@
 //   4. The frozen Gen 1/2 packages match their recorded content hashes (tools/arch-baseline.json).
 //      Changing a frozen package is allowed only as a bug fix: re-baseline with --rebaseline in a
 //      `fix:` commit, so every such change is visible in review.
+//   5. Domain vocabulary (tutoring words) in the universal layers (kernel, substrate, harness) may
+//      only shrink: counts are baselined and a rise fails. Domain concepts never leak into the
+//      kernel or the substrate (CLAUDE.md §3); S1's existing leakage is removed in S3.
 //
-// Usage: node tools/arch-check.mjs [--rebaseline]
+// Usage: node tools/arch-check.mjs [--rebaseline | --shrink-domain]
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -176,7 +179,7 @@ const current = Object.fromEntries(FROZEN.map((d) => [d, hashPackage(d)]));
 if (process.argv.includes("--rebaseline")) {
   writeFileSync(
     BASELINE,
-    `${JSON.stringify({ note: "Gen 1/2 freeze (journal decision-20261001-a80d). Change only in fix: commits; re-baseline with --rebaseline.", packages: current }, null, 2)}\n`,
+    `${JSON.stringify({ ...(existsSync(BASELINE) ? JSON.parse(readFileSync(BASELINE, "utf8")) : {}), note: "Gen 1/2 freeze (journal decision-20261001-a80d). Change only in fix: commits; re-baseline with --rebaseline. domainTokens may only shrink (--shrink-domain).", packages: current }, null, 2)}\n`,
   );
   console.log(`arch-check: baseline written for ${FROZEN.length} frozen packages`);
 } else if (!existsSync(BASELINE)) {
@@ -188,10 +191,44 @@ if (process.argv.includes("--rebaseline")) {
       failures.push(`${d} changed while frozen: bug fixes only, re-baselined in a fix: commit`);
 }
 
+// --- 5: domain vocabulary in the universal layers may only shrink.
+const UNIVERSAL = ["core/kernel", "core/substrate", "core/harness"];
+const DOMAIN =
+  /\b(learners?|tutor(ing)?|practice|probes?|mastery|item_id|misconceptions?|fractions?|denominators?)\b/gi;
+const domainNow = Object.fromEntries(
+  UNIVERSAL.map((d) => [
+    d,
+    walk(join(ROOT, d, "src"))
+      .filter((f) => /\.(ts|mts)$/.test(f))
+      .reduce((n, f) => n + (readFileSync(f, "utf8").match(DOMAIN)?.length ?? 0), 0),
+  ]),
+);
+if (existsSync(BASELINE)) {
+  const file = JSON.parse(readFileSync(BASELINE, "utf8"));
+  const domain = file.domainTokens ?? {};
+  if (process.argv.includes("--shrink-domain")) {
+    const lowered = Object.fromEntries(
+      UNIVERSAL.map((d) => [d, Math.min(domain[d] ?? domainNow[d], domainNow[d])]),
+    );
+    writeFileSync(BASELINE, `${JSON.stringify({ ...file, domainTokens: lowered }, null, 2)}\n`);
+    console.log(`arch-check: domain baseline lowered to ${JSON.stringify(lowered)}`);
+  } else
+    for (const d of UNIVERSAL) {
+      if (domain[d] === undefined)
+        failures.push(
+          `${d} has no domain-vocabulary baseline: run node tools/arch-check.mjs --shrink-domain`,
+        );
+      else if (domainNow[d] > domain[d])
+        failures.push(
+          `${d} domain vocabulary rose from ${domain[d]} to ${domainNow[d]}: domain concepts belong in an environment pack`,
+        );
+    }
+}
+
 if (failures.length) {
   for (const f of failures) console.error(`arch-check FAIL ${f}`);
   process.exit(1);
 }
 console.log(
-  `arch-check ok: ${corePkgs.size} core packages layered inward, zero @uci->@inevitable edges, no observatory imports, ${FROZEN.length} frozen packages intact`,
+  `arch-check ok: ${corePkgs.size} core packages layered inward, zero @uci->@inevitable edges, no observatory imports, ${FROZEN.length} frozen packages intact, domain vocabulary within baseline ${JSON.stringify(domainNow)}`,
 );

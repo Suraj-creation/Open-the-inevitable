@@ -13,5 +13,10 @@
     "packages/orchestration": "fe3827dbf8a340711647d225c03d12fd8c2c7d9470e80e9e832500b18bfbcc65",
     "packages/evaluation": "0f56e3fa52a23464ff0dbea0172fc73d63c8bdba01b8c06404b7ea9b13575504",
     "packages/cognitive-loop": "460224ef59a3b6ccbb097dcf46d321e50b2f52dadebf0cda7b21a582b112e430"
+  },
+  "domainTokens": {
+    "core/kernel": 3,
+    "core/substrate": 6,
+    "core/harness": 70
   }
 }
