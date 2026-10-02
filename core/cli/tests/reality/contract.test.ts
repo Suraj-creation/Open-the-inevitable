@@ -222,6 +222,22 @@ describe("what a proposal may cite", () => {
     expect((drafts[decisionAt]?.data as { reliesOn: string[] }).reliesOn).toEqual([
       `${claimId}@v${Number(version) + 1}`,
     ]);
+    // Naming the version this proposal creates is equally valid and binds the same way.
+    const next = `${claimId}@v${Number(version) + 1}`;
+    const named = validateProposal(
+      raw.replace(`"relies_on":["${ref}"]`, `"relies_on":["${next}"]`),
+      vc,
+    );
+    expect("proposal" in named).toBe(true);
+    // A version neither current nor created here is still refused.
+    const far = `${claimId}@v${Number(version) + 2}`;
+    const refused = validateProposal(
+      raw.replace(`"relies_on":["${ref}"]`, `"relies_on":["${far}"]`),
+      vc,
+    );
+    expect("errors" in refused && refused.errors.join()).toContain(
+      `relies on ${far}, which is not a current claim`,
+    );
     await rt.close();
   });
 

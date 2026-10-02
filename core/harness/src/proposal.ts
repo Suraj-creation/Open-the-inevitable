@@ -168,9 +168,14 @@ export function validateProposal(
     const revisedHere = new Set(
       p.claims.filter((c) => isRecord(c) && isStr(c.revises)).map((c) => c.revises),
     );
+    // The version this proposal creates for each revised claim is equally unambiguous.
+    for (const ref of [...revisedHere]) {
+      const [claimId, version] = String(ref).split("@v");
+      if (current.has(String(ref))) revisedHere.add(`${claimId}@v${Number(version) + 1}`);
+    }
     for (const ref of d.relies_on) {
       const by = superseded.get(ref);
-      // A version this proposal revises is bound to the revised version (one atomic act).
+      // A version this proposal revises (or creates) is bound to the revised version: one act.
       if (revisedHere.has(ref)) continue;
       if (by)
         errors.push(

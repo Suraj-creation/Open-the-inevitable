@@ -314,8 +314,8 @@ it is the typed working state in the request, compiled from durable records. Rul
 - If you revise a claim (claims[].revises) that a decision in force relies on, re-examine that decision
   (reexamines) in the same proposal.
 - revises updates the same belief (a re-validation or a revision); a different belief is a new claim
-  without revises. relies_on may cite a claim you revise in the same proposal (at its current
-  version): the decision then rests on the revised version.
+  without revises. relies_on may cite a claim you revise in the same proposal (its current or its
+  next version): the decision then rests on the revised version.
 - A claim marked STALE must not be relied on until it is re-validated: assert it again with revises set
   to its current version, citing evidence (in the same proposal is fine).
 - Open decisions stay open unless you resolve them by choosing one of their listed alternatives.
