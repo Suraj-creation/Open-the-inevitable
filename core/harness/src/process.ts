@@ -4,12 +4,15 @@ import {
   type Clock,
   type Draft,
   type Envelope,
+  type EvidenceDraft,
+  evidenceHash,
   foldLedger,
+  InvalidRecordError,
   orphanSettlements,
   unreconciled,
 } from "@uci/kernel";
 import type { EnvironmentPack } from "./ports.js";
-import { type ProcessHandle, processStream, write } from "./writer.js";
+import { draftViolations, type ProcessHandle, processStream, write } from "./writer.js";
 
 export interface StartOptions {
   readonly store: CausalStore;
@@ -27,35 +30,47 @@ export interface StartOptions {
   readonly env: EnvironmentPack;
 }
 
-/** Create a process: claim its stream, then record authority, objective and the environment's affordances. */
+/**
+ * Create a process in one commit: the claim, the authority, the objective, the environment's
+ * affordances (as evidence) and which environment it is bound to. A crash leaves either nothing or
+ * a whole process, never a stream without an authority envelope.
+ */
 export async function startProcess(o: StartOptions): Promise<ProcessHandle> {
   const stream = processStream(o.processId);
   const meta = { processId: o.processId, entityId: o.entityId };
   if ((await o.store.read(stream)).length)
     throw new Error(`process ${o.processId} already exists; resume it instead`);
-  const { fence } = await o.store.claim(stream, o.owner, o.clock.now(), meta);
-  const handle: ProcessHandle = { store: o.store, stream, meta, fence, clock: o.clock };
   const description = canonicalJson({
     actions: o.env.actions,
     practiceItems: o.env.practiceItems(),
   });
-  const evidenceHash = await o.store.putEvidence(o.entityId, "application/json", description);
-  await write(handle, [
+  const descriptionHash = evidenceHash("application/json", description);
+  const drafts: Draft[] = [
     { kind: "authority.granted", v: 1, data: { envelope: o.envelope, grantedBy: o.grantedBy } },
     { kind: "objective.set", v: 1, data: o.objective },
     {
       kind: "evidence.recorded",
       v: 1,
       data: {
-        evidenceHash,
+        evidenceHash: descriptionHash,
         mediaType: "application/json",
         source: "environment",
         trust: "instruction",
         ref: "environment-description",
       },
     },
+    {
+      kind: "environment.bound",
+      v: 1,
+      data: { packId: o.env.id, version: o.env.version, descriptionHash },
+    },
+  ];
+  const violations = draftViolations([], drafts);
+  if (violations.length) throw new InvalidRecordError(violations);
+  const { fence, records } = await o.store.claim(stream, o.owner, o.clock.now(), meta, drafts, [
+    { mediaType: "application/json", content: description },
   ]);
-  return handle;
+  return { store: o.store, stream, meta, fence, clock: o.clock, seen: [...records] };
 }
 
 export interface ResumeOptions {
@@ -90,7 +105,7 @@ export async function resumeProcess(o: ResumeOptions): Promise<Resumed> {
     entityId: before[0]?.entityId ?? "",
   };
   const { fence } = await o.store.claim(stream, o.owner, o.clock.now(), meta);
-  const handle: ProcessHandle = { store: o.store, stream, meta, fence, clock: o.clock };
+  const handle: ProcessHandle = { store: o.store, stream, meta, fence, clock: o.clock, seen: [] };
   const resumeAttempt = before.filter((r) => r.kind === "lease.claimed").length;
   const budget = o.resumeBudget ?? 10;
   if (before.some((r) => r.kind === "process.concluded" || r.kind === "process.escalated"))
@@ -113,6 +128,7 @@ export async function resumeProcess(o: ResumeOptions): Promise<Resumed> {
   await write(handle, orphans);
 
   const reconciledDrafts: Draft[] = [];
+  const reconciledEvidence: EvidenceDraft[] = [];
   const reconciled: { effectId: string; finding: string }[] = [];
   for (const entry of unreconciled(foldLedger(await o.store.read(stream)))) {
     const effectId = entry.intended.data.effectId;
@@ -125,12 +141,12 @@ export async function resumeProcess(o: ResumeOptions): Promise<Resumed> {
     });
     // Settling is not knowing: record what the world says the effect did, as evidence.
     if (finding === "delivered" && observation) {
-      const evidenceHash = await o.store.putEvidence(meta.entityId, "text/plain", observation);
+      reconciledEvidence.push({ mediaType: "text/plain", content: observation });
       reconciledDrafts.push({
         kind: "evidence.recorded",
         v: 1,
         data: {
-          evidenceHash,
+          evidenceHash: evidenceHash("text/plain", observation),
           mediaType: "text/plain",
           source: "environment",
           trust: "data",
@@ -139,7 +155,7 @@ export async function resumeProcess(o: ResumeOptions): Promise<Resumed> {
       });
     }
   }
-  await write(handle, reconciledDrafts);
+  await write(handle, reconciledDrafts, reconciledEvidence);
   if (reconciled.some((r) => r.finding === "unanswerable")) {
     await write(handle, [
       {

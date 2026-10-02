@@ -61,9 +61,25 @@ export async function runCausalStoreConformance(open: ConformanceOpen): Promise<
   assert(claimed.records.map((r) => r.seq).join() === "1,2", "claim drafts follow the lease");
   assert(fence.token >= 1, "claim returns a positive fence token");
   await rejects(
-    store.claim("process/P-bad", "o", at, meta, [{ kind: "conf.note", v: 1, data: {} }]),
+    store.claim(
+      "process/P-bad",
+      "o",
+      at,
+      meta,
+      [{ kind: "conf.note", v: 1, data: {} }],
+      [{ mediaType: "text/plain", content: "evidence of a failed claim" }],
+    ),
     "InvalidRecordError",
     "claim with an invalid draft",
+  );
+  const failedClaimHash = await store.putEvidence(
+    "E-elsewhere",
+    "text/plain",
+    "evidence of a failed claim",
+  );
+  assert(
+    (await store.getEvidence("E-conf", failedClaimHash)) === undefined,
+    "a failed claim writes no evidence",
   );
   assert((await store.read("process/P-bad")).length === 0, "a failed claim leaves no records");
   assert(

@@ -1,3 +1,4 @@
+import { sha256Hex } from "./canonical.js";
 import type { CausalRecord, Draft } from "./record.js";
 
 /** Proof of ownership of one stream. Every append must present the current token. */
@@ -69,6 +70,10 @@ export interface StoreChange {
   readonly seq: number;
 }
 
+/** The content address of a piece of evidence (the same in every engine and in the harness). */
+export const evidenceHash = (mediaType: string, content: string): string =>
+  sha256Hex(`${mediaType}\n${content}`);
+
 /** Admission streams: unfenced, idempotent by key, never claimed. */
 export const INBOX_PREFIX = "inbox/";
 
@@ -85,7 +90,7 @@ export const INBOX_PREFIX = "inbox/";
 export interface CausalStore {
   /**
    * Take ownership of a stream: bumps the fence token and appends `lease.claimed` plus `drafts`
-   * atomically (so a process is started in one commit, never half-created).
+   * and their `evidence` atomically (so a process is started in one commit, never half-created).
    */
   claim(
     stream: string,
@@ -93,6 +98,7 @@ export interface CausalStore {
     at: string,
     meta: StreamMeta,
     drafts?: readonly Draft[],
+    evidence?: readonly EvidenceDraft[],
   ): Promise<{ fence: FenceToken; record: CausalRecord; records: CausalRecord[] }>;
   append(request: AppendRequest): Promise<CausalRecord[]>;
   admit(request: AdmitRequest): Promise<Admitted>;

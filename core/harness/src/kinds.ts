@@ -167,4 +167,6 @@ export const HARNESS_KINDS = [
   ),
   defineKind("process.escalated", 1, shape({ reason: str, detail: optStr })),
   defineKind("acceptance.evaluated", 1, shape({ met: bool, probes: int, evaluator: str })),
+  /** Which environment pack a process runs in, so any host binds the same one on hydration. */
+  defineKind("environment.bound", 1, shape({ packId: str, version: str, descriptionHash: str })),
 ];

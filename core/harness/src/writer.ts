@@ -3,6 +3,7 @@ import {
   type CausalStore,
   type Clock,
   type Draft,
+  type EvidenceDraft,
   type FenceToken,
   foldLedger,
   InvalidRecordError,
@@ -28,22 +29,36 @@ export interface ProcessHandle {
   readonly meta: StreamMeta;
   readonly fence: FenceToken;
   readonly clock: Clock;
+  /**
+   * Residency cache: the records this handle has already read, in order. A cache, never the truth:
+   * every read catches up from the store's tail, and a write that raced anything fails at the fence
+   * or the expected seq. Absent, every read is a full read.
+   */
+  readonly seen?: CausalRecord[];
 }
 
 export const processStream = (processId: string): string => `process/${processId}`;
 
+/** The process's records: one tail read when the handle has a residency cache. */
 export async function readProcess(
-  h: Pick<ProcessHandle, "store" | "stream">,
+  h: Pick<ProcessHandle, "store" | "stream" | "seen">,
 ): Promise<CausalRecord[]> {
-  return h.store.read(h.stream);
+  if (!h.seen) return h.store.read(h.stream);
+  h.seen.push(...(await h.store.read(h.stream, (h.seen.at(-1)?.seq ?? 0) + 1)));
+  return [...h.seen];
 }
 
 /**
  * The single writer path. Checks ledger and substrate rules against the current stream, then
  * appends with the fence and the expected seq, so the check and the commit cannot be interleaved
  * with another writer (a superseded owner fails at the fence; a racing append fails at the seq).
+ * Evidence the drafts cite commits in the same transaction.
  */
-export async function write(h: ProcessHandle, drafts: readonly Draft[]): Promise<CausalRecord[]> {
+export async function write(
+  h: ProcessHandle,
+  drafts: readonly Draft[],
+  evidence: readonly EvidenceDraft[] = [],
+): Promise<CausalRecord[]> {
   if (!drafts.length) return [];
   const records = await readProcess(h);
   const violations: string[] = [];
@@ -64,14 +79,31 @@ export async function write(h: ProcessHandle, drafts: readonly Draft[]): Promise
   }
   violations.push(...substrateViolations(records, drafts));
   if (violations.length) throw new InvalidRecordError(violations);
-  return h.store.append({
+  const appended = await h.store.append({
     stream: h.stream,
     meta: h.meta,
     expectedSeq: records.at(-1)?.seq ?? 0,
     fence: h.fence,
     at: h.clock.now(),
     drafts,
+    evidence,
   });
+  if (h.seen && (h.seen.at(-1)?.seq ?? 0) === (records.at(-1)?.seq ?? 0)) h.seen.push(...appended);
+  return appended;
+}
+
+/** Validation the writer applies, for records written by a claim (which bypasses `write`). */
+export function draftViolations(
+  records: readonly CausalRecord[],
+  drafts: readonly Draft[],
+): string[] {
+  const violations: string[] = [];
+  let working: CausalRecord[] = [...records];
+  for (const draft of drafts) {
+    violations.push(...ledgerViolations(foldLedger(working), draft));
+    working = [...working, pseudo(draft, (working.at(-1)?.seq ?? 0) + 1)];
+  }
+  return [...violations, ...substrateViolations(records, drafts)];
 }
 
 function pseudo(draft: Draft, seq: number): CausalRecord {

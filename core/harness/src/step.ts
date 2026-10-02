@@ -5,6 +5,7 @@ import {
   envelopePolicy,
   type EffectIntended,
   type EffectSettled,
+  evidenceHash,
   foldLedger,
   govern,
   hashOf,
@@ -490,36 +491,38 @@ async function obtainProposal(
       ]);
       return { outcome: { status: "escalated", step, detail: reason } };
     }
-    const evidenceHash = await h.store.putEvidence(
-      h.meta.entityId,
-      "application/json",
-      response.text,
+    // The raw output commits with its settlement: evidence first-class, never written apart.
+    const outputHash = evidenceHash("application/json", response.text);
+    const outputEvidence = [{ mediaType: "application/json", content: response.text }];
+    const written = await write(
+      h,
+      [
+        {
+          kind: "effect.settled",
+          v: 1,
+          data: {
+            effectId,
+            outcome: "completed",
+            delivery: "accepted",
+            usage: response.usage,
+            // Provenance: which model actually answered (it can differ under provider routing).
+            detail: `served-by:${response.servedBy ?? faculty.model}`,
+          },
+        },
+        {
+          kind: "evidence.recorded",
+          v: 1,
+          data: {
+            evidenceHash: outputHash,
+            mediaType: "application/json",
+            source: "model-output",
+            trust: "data",
+            ref: effectId,
+          },
+        },
+      ],
+      outputEvidence,
     );
-    const written = await write(h, [
-      {
-        kind: "effect.settled",
-        v: 1,
-        data: {
-          effectId,
-          outcome: "completed",
-          delivery: "accepted",
-          usage: response.usage,
-          // Provenance: which model actually answered (it can differ under provider routing).
-          detail: `served-by:${response.servedBy ?? faculty.model}`,
-        },
-      },
-      {
-        kind: "evidence.recorded",
-        v: 1,
-        data: {
-          evidenceHash,
-          mediaType: "application/json",
-          source: "model-output",
-          trust: "data",
-          ref: effectId,
-        },
-      },
-    ]);
     output = written[1];
     text = response.text;
     crash("after-model-output");
@@ -694,30 +697,34 @@ async function performAction(
   crash("external-started");
   const result = await env.perform({ effectId, idempotencyKey: key, action, params });
   crash("external-performed");
-  const evidenceHash = await h.store.putEvidence(h.meta.entityId, "text/plain", result.observation);
-  await write(h, [
-    {
-      kind: "effect.settled",
-      v: 1,
-      data: {
-        effectId,
-        outcome: result.delivery === "accepted" ? "completed" : "failed",
-        delivery: result.delivery,
-        ...(result.probeItemId ? { detail: `probe:${result.probeItemId}` } : {}),
+  const observationHash = evidenceHash("text/plain", result.observation);
+  await write(
+    h,
+    [
+      {
+        kind: "effect.settled",
+        v: 1,
+        data: {
+          effectId,
+          outcome: result.delivery === "accepted" ? "completed" : "failed",
+          delivery: result.delivery,
+          ...(result.probeItemId ? { detail: `probe:${result.probeItemId}` } : {}),
+        },
       },
-    },
-    {
-      kind: "evidence.recorded",
-      v: 1,
-      data: {
-        evidenceHash,
-        mediaType: "text/plain",
-        source: "environment",
-        trust: "data",
-        ref: effectId,
+      {
+        kind: "evidence.recorded",
+        v: 1,
+        data: {
+          evidenceHash: observationHash,
+          mediaType: "text/plain",
+          source: "environment",
+          trust: "data",
+          ref: effectId,
+        },
       },
-    },
-  ]);
+    ],
+    [{ mediaType: "text/plain", content: result.observation }],
+  );
   crash("after-settle");
   return "done";
 }

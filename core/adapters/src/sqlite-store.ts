@@ -15,7 +15,7 @@ import {
   InvalidRecordError,
   type KindRegistry,
   SeqConflictError,
-  sha256Hex,
+  evidenceHash,
   type StoreChange,
   StoreContractError,
   type StreamMeta,
@@ -130,6 +130,7 @@ export class SqliteCausalStore implements CausalStore {
     at: string,
     meta: StreamMeta,
     drafts: readonly Draft[] = [],
+    evidence: readonly EvidenceDraft[] = [],
   ): Promise<{ fence: FenceToken; record: CausalRecord; records: CausalRecord[] }> {
     if (stream.startsWith(INBOX_PREFIX))
       throw new StoreContractError(`${stream} is an admission stream: it is never claimed`);
@@ -143,6 +144,7 @@ export class SqliteCausalStore implements CausalStore {
           "INSERT INTO leases (stream, token, owner) VALUES (?, ?, ?) ON CONFLICT(stream) DO UPDATE SET token = excluded.token, owner = excluded.owner",
         )
         .run(stream, token, owner);
+      this.writeEvidence(meta.entityId, evidence);
       const records = this.insert(stream, meta, at, this.lastSeq(stream), [
         { kind: "lease.claimed", v: 1, data: { owner, token } },
         ...drafts,
@@ -310,7 +312,7 @@ export class SqliteCausalStore implements CausalStore {
       "INSERT INTO evidence (entity_id, hash, media_type, content, labels) VALUES (?, ?, ?, ?, ?) ON CONFLICT(entity_id, hash) DO NOTHING",
     );
     return evidence.map((e) => {
-      const hash = sha256Hex(`${e.mediaType}\n${e.content}`);
+      const hash = evidenceHash(e.mediaType, e.content);
       stmt.run(
         entityId,
         hash,
